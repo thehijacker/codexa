@@ -4,6 +4,18 @@ A self-hosted EPUB web reader with multi-user support, OPDS browsing, KOReader s
 
 ---
 
+## Screenshots
+
+| Library | Reader | Table of Contents |
+|---|---|---|
+| ![Library](screenshots/library.png) | ![Reader](screenshots/reader.png) | ![TOC](screenshots/toc.png) |
+
+| Search | Dictionary | Settings | OPDS |
+|---|---|---|---|
+| ![Search](screenshots/search.png) | ![Dictionary](screenshots/dictionary.png) | ![Settings](screenshots/settings.png) | ![OPDS](screenshots/opds_browsers.png) |
+
+---
+
 ## Features
 
 - **EPUB reader** — powered by epub.js, paginated layout with custom fonts, themes, and status bar
@@ -115,6 +127,34 @@ Place StarDict dictionary files in `data/dictionaries/`.
 Supported extensions: `.ifo`, `.idx`, `.dict`, `.dict.dz`
 
 Enable and reorder dictionaries in **Reader → Settings → Dictionaries**.
+
+---
+
+## Keyboard Shortcuts
+
+Shortcuts work when focus is not inside a text input.
+
+### Navigation
+
+| Key | Action |
+|---|---|
+| `→` / `Space` / `Page Down` | Next page |
+| `←` / `Page Up` | Previous page |
+
+### Panels
+
+| Key | Action |
+|---|---|
+| `K` | Open / close Table of Contents |
+| `I` | Open / close in-book Search |
+| `S` | Open / close Reader Settings |
+| `Esc` | Close open panel — or return to Library |
+
+### View
+
+| Key | Action |
+|---|---|
+| `F` | Toggle fullscreen |
 
 ---
 
