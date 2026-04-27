@@ -140,6 +140,7 @@ let lastKnownXPointer = null; // precise xpointer last received from KOReader/se
 let lastChapterHref = null;  // chapter-boundary save tracking
 let availableDicts  = null;  // cached GET /api/dictionary response
 let isReady = false;          // true only after initial position is fully displayed
+let openCfi = '';             // CFI at the moment the book was first ready — used to skip no-op kosync pushes
 let tocFlatItems = [];
 let customFonts  = [];
 let fontFaceCSS  = '';
@@ -2124,15 +2125,19 @@ async function saveProgress() {
   if (!cfi && pct === 0) return;
   console.log('[pos] SAVE cfi:', cfi.slice(0,60), 'pct:', (pct*100).toFixed(2)+'%');
   const docKey = externalDocKey();
-  console.log('[kosync] saveProgress docKey:', docKey, 'cfi:', cfi.slice(0, 40), 'pct:', Math.round(pct * 100) + '%');
-  await Promise.allSettled([
+  const posChanged = cfi !== openCfi;
+  console.log('[kosync] saveProgress docKey:', docKey, 'cfi:', cfi.slice(0, 40), 'pct:', Math.round(pct * 100) + '%', posChanged ? '' : '(no change — skipping remote push)');
+  const saves = [
     apiFetch(`/progress/${currentBook.file_hash}`, {
       method: 'PUT',
       body: JSON.stringify({ cfi_position: cfi, percentage: pct, device: 'web' }),
     }),
-    pushRemoteProgress(docKey, koReaderXPointer(), pct),
-    pushInternalProgress(docKey, koReaderXPointer(), pct),
-  ]);
+  ];
+  if (posChanged) {
+    saves.push(pushRemoteProgress(docKey, koReaderXPointer(), pct));
+    saves.push(pushInternalProgress(docKey, koReaderXPointer(), pct));
+  }
+  await Promise.allSettled(saves);
 }
 
 // Fire-and-forget version used when navigating away — uses keepalive:true so
@@ -2150,9 +2155,12 @@ function saveProgressBackground() {
   const opts = (body) => ({ method: 'PUT', headers, body: JSON.stringify(body), keepalive: true });
   const docKey = externalDocKey();
   const xp     = koReaderXPointer();
+  const posChanged = cfi !== openCfi;
   fetch(`/api/progress/${currentBook.file_hash}`, opts({ cfi_position: cfi, percentage: pct, device: 'web' })).catch(() => {});
-  fetch(`/api/kosync/remote/${encodeURIComponent(docKey)}`,   opts({ document: docKey, progress: xp, percentage: pct, device: 'web', device_id: 'codexa-web' })).catch(() => {});
-  fetch(`/api/kosync/internal/${encodeURIComponent(docKey)}`, opts({ progress: xp, percentage: pct, device: 'web', device_id: 'codexa-web' })).catch(() => {});
+  if (posChanged) {
+    fetch(`/api/kosync/remote/${encodeURIComponent(docKey)}`,   opts({ document: docKey, progress: xp, percentage: pct, device: 'web', device_id: 'codexa-web' })).catch(() => {});
+    fetch(`/api/kosync/internal/${encodeURIComponent(docKey)}`, opts({ progress: xp, percentage: pct, device: 'web', device_id: 'codexa-web' })).catch(() => {});
+  }
 }
 
 // ── KOReader sync-on-open dialog ──────────────────────────────────────────────
@@ -2682,6 +2690,7 @@ async function init() {
     // Only allow saves after the initial position (local or synced) is fully displayed
     console.log('[pos] isReady=true, currentCfi:', currentCfi.slice(0,60));
     isReady = true;
+    openCfi = currentCfi; // snapshot position-on-open for change detection
     // Final chapter-name refresh — by now TOC and relocated have both fired
     if (lastChapterHref) {
       chapterTitleEl.textContent = chapterLabelFromHref(lastChapterHref);
