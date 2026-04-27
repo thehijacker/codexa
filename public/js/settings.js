@@ -65,14 +65,32 @@ function updateStatusBadge(reason) {
 
 // ── Test connection ───────────────────────────────────────────────────────────
 btnTestKosync.addEventListener('click', async () => {
+  const url      = kosyncUrl.value.trim();
+  const username = kosyncUsername.value.trim();
+  const password = kosyncPassword.value;
+
+  if (!url) {
+    toast.error(t('settings.kosync_url_required'));
+    return;
+  }
+
   setButtonLoading(btnTestKosync, true, t('settings.btn_testing'));
   try {
+    // Save current form values first so the server-side test uses them
+    const body = { kosync_url: url, kosync_username: username };
+    if (password) body.kosync_password = password;
+    await apiFetch('/settings', { method: 'PUT', body: JSON.stringify(body) });
+    if (password) {
+      kosyncPassword.value       = '';
+      kosyncPassword.placeholder = t('settings.kosync_pass_saved');
+    }
+
     const res = await apiFetch('/kosync/test');
     if (res.connected) {
       updateStatusBadge('ok');
       toast.success(t('settings.test_ok'));
     } else {
-      updateStatusBadge(res.reason || 'neznana napaka');
+      updateStatusBadge(res.reason || 'error');
       toast.error(t('settings.test_fail', { reason: res.reason || '?' }));
     }
   } catch (err) {

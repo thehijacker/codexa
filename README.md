@@ -121,7 +121,7 @@ Enable and reorder dictionaries in **Reader → Settings → Dictionaries**.
 ## Building from Source
 
 ```bash
-git clone https://gitea.kralj.top/Andrej/codexa.git
+git clone https://github.com/thehijacker/codexa.git
 cd codexa
 cp .env.example .env
 # Edit .env and set JWT_SECRET

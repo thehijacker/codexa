@@ -39,25 +39,32 @@ function initDb() {
     );
 
     CREATE TABLE IF NOT EXISTS user_settings (
-      user_id              INTEGER PRIMARY KEY,
-      opds_servers         TEXT    DEFAULT '[]',
-      kosync_url           TEXT    DEFAULT '',
-      kosync_username      TEXT    DEFAULT '',
-      kosync_password_enc  TEXT    DEFAULT '',
-      reader_prefs         TEXT    DEFAULT '{}',
+      user_id                  INTEGER PRIMARY KEY,
+      opds_servers             TEXT    DEFAULT '[]',
+      kosync_url               TEXT    DEFAULT '',
+      kosync_username          TEXT    DEFAULT '',
+      kosync_password_enc      TEXT    DEFAULT '',
+      kosync_internal_enabled  INTEGER DEFAULT 0,
+      reader_prefs             TEXT    DEFAULT '{}',
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS books (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id     INTEGER NOT NULL,
-      title       TEXT    NOT NULL,
-      author      TEXT    DEFAULT '',
-      file_hash   TEXT    NOT NULL,
-      filename    TEXT    NOT NULL,
-      cover_path  TEXT    DEFAULT '',
-      file_size   INTEGER DEFAULT 0,
-      added_at    INTEGER DEFAULT (strftime('%s', 'now')),
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id        INTEGER NOT NULL,
+      title          TEXT    NOT NULL,
+      author         TEXT    DEFAULT '',
+      series_name    TEXT    DEFAULT '',
+      series_number  TEXT    DEFAULT '',
+      description    TEXT    DEFAULT '',
+      file_hash      TEXT    NOT NULL,
+      file_hash_md5  TEXT    DEFAULT '',
+      kosync_hash    TEXT    DEFAULT '',
+      md5_algo_v2    INTEGER DEFAULT 0,
+      filename       TEXT    NOT NULL,
+      cover_path     TEXT    DEFAULT '',
+      file_size      INTEGER DEFAULT 0,
+      added_at       INTEGER DEFAULT (strftime('%s', 'now')),
       UNIQUE (user_id, file_hash),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -104,12 +111,21 @@ function initDb() {
   console.log(`[db] SQLite initialized at ${DB_PATH}`);
 
   // ── Migrations (safe to run on every startup) ─────────────────────────────
-  // Add file_hash_md5 column if it doesn't exist (for KOReader kosync matching)
-  try {
-    database.exec(`ALTER TABLE books ADD COLUMN file_hash_md5 TEXT DEFAULT ''`);
-    console.log('[db] Migration: added file_hash_md5 column');
-  } catch { /* column already exists — ignore */ }
-  
+  const migrations = [
+    [`ALTER TABLE books          ADD COLUMN file_hash_md5            TEXT    DEFAULT ''`,  'books.file_hash_md5'],
+    [`ALTER TABLE books          ADD COLUMN series_name              TEXT    DEFAULT ''`,  'books.series_name'],
+    [`ALTER TABLE books          ADD COLUMN series_number            TEXT    DEFAULT ''`,  'books.series_number'],
+    [`ALTER TABLE books          ADD COLUMN description              TEXT    DEFAULT ''`,  'books.description'],
+    [`ALTER TABLE books          ADD COLUMN kosync_hash              TEXT    DEFAULT ''`,  'books.kosync_hash'],
+    [`ALTER TABLE books          ADD COLUMN md5_algo_v2              INTEGER DEFAULT 0`,   'books.md5_algo_v2'],
+    [`ALTER TABLE user_settings  ADD COLUMN kosync_internal_enabled  INTEGER DEFAULT 0`,   'user_settings.kosync_internal_enabled'],
+  ];
+  for (const [sql, label] of migrations) {
+    try {
+      database.exec(sql);
+      console.log(`[db] Migration: added ${label}`);
+    } catch { /* column already exists — ignore */ }
+  }
 }
 
 module.exports = { getDb, initDb, DATA_DIR };

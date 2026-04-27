@@ -10,9 +10,17 @@ router.use(authenticateToken);
 // ── GET /api/settings ─────────────────────────────────────────────────────────
 router.get('/', (req, res) => {
   const db  = getDb();
-  const row = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(req.user.id);
+  let row = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(req.user.id);
 
-  if (!row) return res.status(404).json({ error: 'Settings not found' });
+  if (!row) {
+    // User exists (JWT valid) but settings row is missing — create it now
+    try {
+      db.prepare('INSERT INTO user_settings (user_id) VALUES (?)').run(req.user.id);
+      row = db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(req.user.id);
+    } catch {
+      return res.status(404).json({ error: 'Settings not found' });
+    }
+  }
 
   res.json({
     opds_servers:            JSON.parse(row.opds_servers  || '[]'),
