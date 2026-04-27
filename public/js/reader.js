@@ -2242,8 +2242,9 @@ async function syncOnOpen(localProgress) {
   const pctDiffers = Math.abs((best.percentage || 0) - localPct) > 0.01;
   if (pctDiffers) {
     const doSync = await showSyncDialog(best, localPct, localTime);
-    // Return the percentage — KOReader progress strings are xpointers, not epub.js CFIs
-    if (doSync) return { percentage: best.percentage };
+    // Return both percentage and the xpointer string so the caller can navigate
+    // directly to a spine item when the xpointer is a DocFragment-only reference.
+    if (doSync) return { percentage: best.percentage, progress: best.progress };
   }
   return null;
 }
@@ -2642,15 +2643,40 @@ async function init() {
     const syncTarget = prefs.skipOpenProgressCheck ? null : await syncOnOpen(localProgress);
     if (syncTarget?.percentage != null) {
       try {
-        const key    = `br_locs_${currentBook.file_hash}`;
-        const cached = localStorage.getItem(key);
-        if (cached) { try { book.locations.load(cached); } catch { localStorage.removeItem(key); } }
-        if (!book.locations.length()) {
-          await book.locations.generate(1000);
-          try { localStorage.setItem(key, book.locations.save()); } catch { /* quota */ }
+        // If the xpointer is a plain chapter-start (DocFragment[N]/body with no paragraph
+        // detail), navigate directly to that spine item. This avoids the byte-vs-char
+        // percentage mismatch that causes the reader to land one page past the chapter start
+        // (noticeable in two-page spread mode).
+        const dfMatch = syncTarget.progress?.match(/^\/body\/DocFragment\[(\d+)\]\/body$/);
+        if (dfMatch) {
+          const spineIdx  = parseInt(dfMatch[1]) - 1; // DocFragment is 1-based
+          const spineItem = book.spine.get(spineIdx);
+          if (spineItem?.href) {
+            console.log('[kosync] navigating to spine item', spineIdx, spineItem.href);
+            await rendition.display(spineItem.href);
+          } else {
+            console.warn('[kosync] spine item not found for index', spineIdx, '— falling back to pct');
+            const key    = `br_locs_${currentBook.file_hash}`;
+            const cached = localStorage.getItem(key);
+            if (cached) { try { book.locations.load(cached); } catch { localStorage.removeItem(key); } }
+            if (!book.locations.length()) {
+              await book.locations.generate(1000);
+              try { localStorage.setItem(key, book.locations.save()); } catch { /* quota */ }
+            }
+            if (book.locations.length() > 0) await seekToPercentage(syncTarget.percentage);
+          }
+        } else {
+          // Paragraph-level xpointer or no progress string — use percentage
+          const key    = `br_locs_${currentBook.file_hash}`;
+          const cached = localStorage.getItem(key);
+          if (cached) { try { book.locations.load(cached); } catch { localStorage.removeItem(key); } }
+          if (!book.locations.length()) {
+            await book.locations.generate(1000);
+            try { localStorage.setItem(key, book.locations.save()); } catch { /* quota */ }
+          }
+          if (book.locations.length() > 0) await seekToPercentage(syncTarget.percentage);
         }
-        if (book.locations.length() > 0) await seekToPercentage(syncTarget.percentage);
-      } catch (e) { console.warn('[kosync] navigate by pct failed:', e.message); }
+      } catch (e) { console.warn('[kosync] navigate failed:', e.message); }
     }
 
     // Only allow saves after the initial position (local or synced) is fully displayed
