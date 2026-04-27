@@ -1,52 +1,50 @@
-name: Build & Push Docker Image
+name: Build & Push Docker image
 
 on:
   push:
-    tags:
-      - 'v*.*.*'
-
-# ── Registry configuration ────────────────────────────────────────────────────
-# Gitea:  REGISTRY=gitea.kralj.top   IMAGE_NAME=andrej/codexa
-# GitHub: REGISTRY=ghcr.io           IMAGE_NAME=${{ github.repository }}
-env:
-  REGISTRY: gitea.kralj.top
-  IMAGE_NAME: andrej/codexa
+    branches: [main]
+    tags: ['v*']
 
 jobs:
-  build-and-push:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Determine registry and image name
+        id: reg
+        run: |
+          SERVER="${{ github.server_url }}"
+          if [[ "$SERVER" == "https://github.com" ]]; then
+            REGISTRY="ghcr.io"
+          else
+            REGISTRY="${SERVER#https://}"
+          fi
+          IMAGE="$REGISTRY/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          echo "host=$REGISTRY" >> $GITHUB_OUTPUT
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
 
-      - name: Log in to registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.REGISTRY_USER }}
-          password: ${{ secrets.REGISTRY_TOKEN }}
+      - name: Log in to container registry
+        run: |
+          echo "${{ secrets.REGISTRY_TOKEN }}" | \
+            docker login ${{ steps.reg.outputs.host }} -u ${{ secrets.REGISTRY_USER }} --password-stdin
 
-      - name: Extract image metadata (tags & labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest
+      - name: Build Docker image
+        run: docker build -t ${{ steps.reg.outputs.image }}:latest .
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Tag with version (on git tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          docker tag ${{ steps.reg.outputs.image }}:latest ${{ steps.reg.outputs.image }}:${VERSION}
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+      - name: Push latest
+        run: docker push ${{ steps.reg.outputs.image }}:latest
+
+      - name: Push version tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: docker push ${{ steps.reg.outputs.image }}:${{ env.VERSION }}
