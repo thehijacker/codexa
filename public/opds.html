@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="sl">
+<head>
+  <meta charset="UTF-8" />
+  <script>document.documentElement.style.visibility='hidden'</script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>OPDS brskalnik — Codexa</title>
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#1a1a2e" />
+  <script>
+    (function () {
+      try {
+        var mode = localStorage.getItem('br_library_theme') || 'system';
+        if (mode !== 'system') document.documentElement.setAttribute('data-lib-theme', mode);
+      } catch (_) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/css/main.css" />
+  <style>
+    /* ── Two-pane layout ───────────────────────────────────────────────────── */
+    .opds-layout {
+      display: flex;
+      gap: 0;
+      flex: 1;
+      overflow: hidden;
+    }
+    .opds-sidebar {
+      width: 260px;
+      flex-shrink: 0;
+      border-right: 1px solid var(--color-border);
+      display: flex;
+      flex-direction: column;
+      background: var(--color-surface);
+      overflow: hidden;
+    }
+    .opds-sidebar-header {
+      padding: .75rem 1rem;
+      border-bottom: 1px solid var(--color-border);
+      font-weight: 600;
+      font-size: .85rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #server-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: .4rem;
+    }
+    #server-empty {
+      padding: 1rem;
+      font-size: .8rem;
+      color: var(--color-text-muted);
+      text-align: center;
+    }
+    .server-btn {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: .6rem .75rem;
+      border: none;
+      border-radius: 6px;
+      background: none;
+      cursor: pointer;
+      color: var(--color-text);
+      margin-bottom: 2px;
+      transition: background .15s;
+    }
+    .server-btn:hover    { background: var(--color-surface2); }
+    .server-btn.active            { background: var(--color-accent); color: #fff; }
+    .server-btn.active .server-url{ color: rgba(255,255,255,.7); }
+    .server-btn.active.connected  { background: #2a7a3b; }
+    .server-btn.active.error      { background: #8b1a1a; }
+    .sidebar-layout[data-lib-theme="eink"] .server-btn.active.connected,
+    .sidebar-layout[data-lib-theme="eink"] .server-btn.active.error {
+      background: var(--color-accent);
+    }
+    .server-name { display: block; font-size: .875rem; font-weight: 500; }
+    .server-url  { display: block; font-size: .72rem; color: var(--color-text-muted);
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ── Catalog pane ──────────────────────────────────────────────────────── */
+    .opds-catalog {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .opds-toolbar {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      padding: .6rem 1rem;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface);
+      flex-shrink: 0;
+    }
+    #catalog-title {
+      font-weight: 600;
+      font-size: .9rem;
+      margin-right: .25rem;
+    }
+    #breadcrumb {
+      flex: 1;
+      font-size: .78rem;
+      color: var(--color-text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .crumb-btn {
+      background: none; border: none; cursor: pointer;
+      color: var(--color-accent); font-size: .78rem; padding: 0;
+    }
+    .crumb-btn:hover { text-decoration: underline; }
+    .crumb-sep { color: var(--color-text-muted); }
+    .crumb-current { color: var(--color-text); }
+    .opds-search-row {
+      display: flex;
+      gap: .4rem;
+      padding: .5rem 1rem;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface);
+      flex-shrink: 0;
+    }
+    #catalog-search { flex: 1; }
+
+    /* ── Catalog list container ────────────────────────────────────────────── */
+    #catalog-grid {
+      flex: 1;
+      overflow-y: auto;
+      padding: .75rem 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: .5rem;
+    }
+
+    /* ── Navigation folder tiles ───────────────────────────────────────────── */
+    .nav-tile-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: .6rem;
+      margin-bottom: .5rem;
+      flex-shrink: 0;
+    }
+    .nav-tile {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: .35rem;
+      padding: .75rem .5rem;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+      color: var(--color-text);
+    }
+    .nav-tile:hover  { border-color: var(--color-accent); background: var(--color-surface2); }
+    .nav-tile-icon   { font-size: 1.8rem; line-height: 1; }
+    .nav-tile-label  { font-size: .78rem; font-weight: 600; text-align: center; line-height: 1.3; }
+
+    /* ── Book list rows ────────────────────────────────────────────────────── */
+    .book-row {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 7px;
+      overflow: hidden;
+      transition: border-color .15s;
+      flex-shrink: 0;
+    }
+    .book-row:hover  { border-color: var(--color-accent); }
+    .book-row-main {
+      display: flex;
+      align-items: center;
+      gap: .6rem;
+      padding: .5rem .75rem;
+      min-height: 62px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .book-row-thumb {
+      width: 36px;
+      height: 52px;
+      object-fit: cover;
+      border-radius: 3px;
+      flex-shrink: 0;
+      background: var(--color-surface2);
+    }
+    .book-row-no-cover {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+      color: var(--color-text-muted);
+    }
+    .book-row-info   { flex: 1; min-width: 0; }
+    .book-row-title  { font-size: .875rem; font-weight: 600; line-height: 1.3;
+                       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .book-row-author { font-size: .75rem; color: var(--color-text-muted); margin-top: .1rem;
+                       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .book-row-actions { flex-shrink: 0; }
+    .book-row-detail {
+      padding: .5rem .75rem .75rem calc(36px + .6rem + .75rem);
+      border-top: 1px solid var(--color-border);
+      font-size: .8rem;
+      color: var(--color-text-muted);
+      line-height: 1.5;
+    }
+    .book-row-summary { margin: 0; }
+    .book-row.expanded { border-color: var(--color-accent); }
+
+    /* ── States ────────────────────────────────────────────────────────────── */
+    #catalog-loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%,-50%);
+      text-align: center;
+      color: var(--color-text-muted);
+    }
+    #catalog-empty {
+      padding: 2rem;
+      color: var(--color-text-muted);
+      text-align: center;
+    }
+    .opds-welcome {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--color-text-muted);
+      gap: .5rem;
+    }
+    .opds-welcome .icon { font-size: 3rem; }
+
+    /* ── Responsive ────────────────────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      body.opds-page { overflow: auto !important; }
+      .opds-page .app-body { overflow: visible !important; }
+      .opds-layout { flex-direction: column; height: auto; overflow: visible; }
+      .opds-sidebar { width: 100%; height: auto; border-right: none;
+                      border-bottom: 1px solid var(--color-border); }
+      #server-list { max-height: 140px; }
+      .opds-catalog { overflow: visible; }
+      #catalog-grid { overflow: visible; }
+      .nav-tile-grid { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
+      .book-row-detail { padding-left: .75rem; }
+      .opds-toolbar { flex-wrap: wrap; gap: .35rem; }
+    }
+  </style>
+</head>
+<body class="sidebar-layout opds-page">
+
+  <!-- Left sidebar (filled by sidebar.js) -->
+  <aside class="app-sidebar" id="app-sidebar"></aside>
+
+  <!-- Sidebar overlay (mobile) -->
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+  <!-- Main body -->
+  <div class="app-body">
+    <!-- Mobile header -->
+    <header class="app-body-header">
+      <button id="sidebar-open-btn" class="sidebar-hamburger" aria-label="Odpri meni">
+        <span></span><span></span><span></span>
+      </button>
+      <a href="/" class="logo">📚 Codexa</a>
+    </header>
+
+  <div class="opds-layout">
+
+    <!-- Left sidebar — server list -->
+    <aside class="opds-sidebar">
+      <div class="opds-sidebar-header">
+        <span data-i18n="opds.servers_title">OPDS strežniki</span>
+        <a href="/settings.html" class="btn btn-secondary btn-sm" style="font-size:.72rem;padding:.2rem .5rem" data-i18n="opds.btn_add_server">+ Dodaj</a>
+      </div>
+      <div id="server-list"></div>
+      <p id="server-empty" hidden>
+        <span data-i18n="opds.no_servers">Ni dodanih strežnikov.</span><br>
+        <a href="/settings.html" data-i18n="opds.add_in_settings">Dodaj v nastavitvah →</a>
+      </p>
+    </aside>
+
+    <!-- Right pane — catalog browser -->
+    <div class="opds-catalog" style="position:relative">
+
+      <!-- Toolbar: breadcrumb + up button -->
+      <div class="opds-toolbar">
+        <button id="btn-catalog-up" class="btn btn-secondary btn-sm" disabled data-i18n="opds.btn_up">↑ Gor</button>
+        <span id="catalog-title"></span>
+        <span id="breadcrumb"></span>
+      </div>
+
+      <!-- Search bar -->
+      <div class="opds-search-row">
+        <input type="search" id="catalog-search" data-i18n-placeholder="opds.search_ph" placeholder="Iščite po katalogu…" />
+        <button id="btn-catalog-search" class="btn btn-primary btn-sm" data-i18n="opds.btn_search">Išči</button>
+      </div>
+
+      <!-- Loading indicator -->
+      <div id="catalog-loading" hidden>
+        <span class="spinner"></span>
+        <span style="display:block;margin-top:.5rem;font-size:.85rem" data-i18n="opds.loading">Nalagam…</span>
+      </div>
+
+      <!-- Entry grid -->
+      <div id="catalog-grid">
+        <!-- welcome state -->
+        <div class="opds-welcome" style="grid-column:1/-1">
+          <span class="icon">🔍</span>
+          <span data-i18n="opds.welcome">Izberite OPDS streženik na levi strani</span>
+        </div>
+      </div>
+
+      <p id="catalog-empty" hidden data-i18n="opds.no_results">Ni zadetkov.</p>
+    </div>
+
+  </div><!-- /.opds-layout -->
+  </div><!-- /.app-body -->
+
+  <div id="toast-container"></div>
+  <script type="module">
+    import { initI18n } from '/js/i18n.js';
+    import { initSidebar } from '/js/sidebar.js';
+    await initI18n();
+    initSidebar({ activePage: 'opds' });
+  </script>
+  <script type="module" src="/js/opds.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/js/sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>

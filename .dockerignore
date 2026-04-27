@@ -1,0 +1,14 @@
+node_modules/
+.env
+data/
+temp/
+*.db
+*.db-shm
+*.db-wal
+npm-debug.log*
+.claude/
+backfill-series.js
+.git/
+.gitignore
+.dockerignore
+README*

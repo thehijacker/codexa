@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="sl" data-i18n-doc-title="settings.page_title">
+<head>
+  <meta charset="UTF-8" />
+  <script>document.documentElement.style.visibility='hidden'</script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Nastavitve — Codexa</title>
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#1a1a2e" />
+  <script>
+    (function () {
+      try {
+        var mode = localStorage.getItem('br_library_theme') || 'system';
+        if (mode !== 'system') document.documentElement.setAttribute('data-lib-theme', mode);
+      } catch (_) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/css/main.css" />
+  <style>
+    .settings-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      max-width: 640px;
+    }
+    .settings-card h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 0 0 1.25rem;
+      color: var(--color-text);
+    }
+    .settings-card h2 .badge {
+      display: inline-block;
+      font-size: .7rem;
+      font-weight: 600;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      padding: .15rem .45rem;
+      border-radius: 4px;
+      margin-left: .5rem;
+      vertical-align: middle;
+      background: var(--color-surface2);
+      color: var(--color-text-muted);
+    }
+    .form-group { margin-bottom: 1rem; }
+    .form-group label {
+      display: block;
+      font-size: .8rem;
+      font-weight: 500;
+      margin-bottom: .35rem;
+      color: var(--color-text-muted);
+    }
+    .form-group input {
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .kosync-status {
+      display: inline-block;
+      font-size: .75rem;
+      font-weight: 600;
+      padding: .2rem .6rem;
+      border-radius: 20px;
+      margin-bottom: 1rem;
+    }
+    .kosync-status:empty { display: none; }
+    .status-ok    { background: #1a472a; color: #4ade80; }
+    .status-error { background: #4a1a1a; color: #f87171; }
+    .status-off   { background: var(--color-surface2); color: var(--color-text-muted); }
+    .card-actions {
+      display: flex;
+      gap: .6rem;
+      flex-wrap: wrap;
+      margin-top: 1.25rem;
+    }
+    .kosync-actions {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: .6rem;
+    }
+    .kosync-actions .btn {
+      width: 100%;
+      justify-content: center;
+      min-width: 0;
+    }
+    .settings-hint {
+      font-size: .78rem;
+      color: var(--color-text-muted);
+      margin-top: -.5rem;
+      margin-bottom: 1rem;
+      line-height: 1.5;
+    }
+    .section-divider {
+      border: none;
+      border-top: 1px solid var(--color-border);
+      margin: 1.5rem 0;
+    }
+    .kosync-info-box {
+      background: var(--color-surface2);
+      border-radius: 6px;
+      padding: .75rem 1rem;
+      font-size: .8rem;
+      color: var(--color-text-muted);
+      margin-bottom: 1.25rem;
+      line-height: 1.6;
+    }
+    .kosync-info-box code {
+      background: var(--color-bg);
+      padding: .1rem .3rem;
+      border-radius: 3px;
+      font-size: .78rem;
+    }
+    @media (max-width: 640px) {
+      .kosync-actions {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body class="sidebar-layout">
+
+  <!-- Left sidebar (filled by sidebar.js) -->
+  <aside class="app-sidebar" id="app-sidebar"></aside>
+
+  <!-- Sidebar overlay (mobile) -->
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+  <!-- Main body -->
+  <div class="app-body">
+    <!-- Mobile header -->
+    <header class="app-body-header">
+      <button id="sidebar-open-btn" class="sidebar-hamburger" aria-label="Odpri meni">
+        <span></span><span></span><span></span>
+      </button>
+      <a href="/" class="logo">📚 Codexa</a>
+    </header>
+
+  <main class="app-main">
+    <div class="page-header"><h1 data-i18n="settings.page_title">Nastavitve</h1></div>
+
+    <!-- KOReader sync section -->
+    <div class="settings-card">
+      <h2 data-i18n="settings.kosync_title">Sinhronizacija KOReader</h2>
+
+      <div class="kosync-info-box" data-i18n-html="settings.kosync_info_html">
+        <strong>Dve možnosti sinhronizacije:</strong><br>
+        1. <strong>Ta strežnik kot kosync strežnik</strong> — v KOReaderju nastavite URL tega strežnika
+           (npr. <code>https://moj.codexa.si</code>) in se prijavite z istimi podatki kot tukaj.<br><br>
+        2. <strong>Zunanji KOReader Sync strežnik</strong> — spodaj vnesite URL svojega obstoječega
+           kosync strežnika. Bralnik bo ob odpiranju knjige primerjal položaj z njim in ob shranjevanju
+           pošiljal napredek na oba strežnika.
+      </div>
+
+      <div id="kosync-status" class="kosync-status"></div>
+
+      <div class="form-group">
+        <label for="kosync-url" data-i18n="settings.kosync_url_label">URL kosync strežnika</label>
+        <input type="url" id="kosync-url" data-i18n-placeholder="settings.kosync_url_ph" placeholder="https://booklore.primer.si" autocomplete="off" />
+      </div>
+      <div class="settings-hint" data-i18n="settings.kosync_hint">
+        Pustite prazno, če ne potrebujete sinhronizacije z zunanjim strežnikom.
+      </div>
+
+      <div class="form-group">
+        <label for="kosync-username" data-i18n="settings.kosync_user_label">Uporabniško ime</label>
+        <input type="text" id="kosync-username" data-i18n-placeholder="settings.kosync_user_ph" placeholder="vaše_ime" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
+      </div>
+
+      <div class="form-group">
+        <label for="kosync-password" data-i18n="settings.kosync_pass_label">Geslo</label>
+        <input type="password" id="kosync-password" data-i18n-placeholder="settings.kosync_pass_ph" placeholder="Vnesite geslo…" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
+      </div>
+
+      <div class="card-actions kosync-actions">
+        <button id="btn-save-kosync"  class="btn btn-primary" data-i18n="settings.btn_save_kosync">Shrani nastavitve</button>
+        <button id="btn-test-kosync"  class="btn btn-secondary" data-i18n="settings.btn_test_kosync">Testiraj povezavo</button>
+        <button id="btn-clear-kosync" class="btn btn-danger" data-i18n="settings.btn_clear_kosync">Odstrani</button>
+      </div>
+
+      <hr class="section-divider">
+
+      <!-- Internal KOReader server toggle -->
+      <div style="display:flex;align-items:flex-start;gap:.85rem;margin-bottom:.75rem">
+        <label class="toggle" style="flex-shrink:0;margin-top:.15rem">
+          <input type="checkbox" id="kosync-internal-enabled">
+          <span class="toggle-slider"></span>
+        </label>
+        <div>
+          <div style="font-size:.875rem;font-weight:600;margin-bottom:.2rem" data-i18n="settings.internal_title">Vgrajen KOReader streženik</div>
+          <div class="settings-hint" style="margin:0" data-i18n="settings.internal_hint">
+            Ko je omogočen, se vaše KOReader naprave lahko sinhronizirajo neposredno s tem strežnikom.
+            Bralnik bo ob shranjevanju napredka posodobil tudi interno bazo kosync.
+          </div>
+        </div>
+      </div>
+      <div id="kosync-internal-url-box" class="kosync-info-box" hidden>
+        <span data-i18n="settings.internal_url_label">URL za KOReader:</span> <code id="kosync-internal-url-val"></code><br>
+        <span data-i18n="settings.internal_login_hint">Uporabite iste prijavne podatke kot za ta strežnik.</span>
+      </div>
+      <div class="card-actions" style="margin-top:.5rem">
+        <button id="btn-save-internal" class="btn btn-primary btn-sm" data-i18n="common.save">Shrani</button>
+      </div>
+    </div>
+
+    <!-- OPDS servers -->
+    <div class="settings-card">
+      <h2 data-i18n="settings.opds_title">OPDS strežniki</h2>
+
+      <!-- Server list -->
+      <div id="opds-server-list" style="margin-bottom:1rem"></div>
+      <p id="opds-empty" style="color:var(--color-text-muted);font-size:.85rem;margin:0 0 1rem" data-i18n="settings.opds_empty">
+        Ni dodanih strežnikov.
+      </p>
+
+      <!-- Add / edit form -->
+      <details id="opds-add-details">
+        <summary style="cursor:pointer;font-size:.875rem;font-weight:600;margin-bottom:.75rem;user-select:none">
+          <span id="opds-form-title" data-i18n="settings.opds_add_title">Dodaj nov OPDS strežnik</span>
+        </summary>
+        <div class="form-group">
+          <label for="opds-name" data-i18n="settings.opds_name_label">Ime strežnika</label>
+          <input type="text" id="opds-name" data-i18n-placeholder="settings.opds_name_ph" placeholder="npr. Booklore domov" autocomplete="off" />
+        </div>
+        <div class="form-group">
+          <label for="opds-url" data-i18n="settings.opds_url_label">URL kataloga</label>
+          <input type="url" id="opds-url" data-i18n-placeholder="settings.opds_url_ph" placeholder="https://booklore.primer.si/opds" autocomplete="off" />
+        </div>
+        <div class="form-group">
+          <label for="opds-username" data-i18n="settings.opds_user_label">Uporabniško ime (neobvezno)</label>
+          <input type="text" id="opds-username" data-i18n-placeholder="settings.opds_user_ph" placeholder="vaše_ime" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
+        </div>
+        <div class="form-group">
+          <label for="opds-password" data-i18n="settings.opds_pass_label">Geslo (neobvezno)</label>
+          <input type="password" id="opds-password" data-i18n-placeholder="settings.opds_pass_ph" placeholder="Vnesite geslo…" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
+        </div>
+        <div class="card-actions">
+          <button id="btn-add-opds-server" class="btn btn-primary" data-i18n="settings.btn_add_opds">Dodaj streženik</button>          <button id="btn-cancel-opds-edit" class="btn btn-secondary" data-i18n="common.cancel" hidden>Prekliči</button>        </div>
+      </details>
+    </div>
+
+    <!-- Admin section (shown only to admin) -->
+    <div class="settings-card" id="admin-card" hidden>
+      <h2><span data-i18n="settings.admin_title">Administracija</span> <span class="badge" data-i18n="settings.admin_badge">Admin</span></h2>
+      <div style="display:flex;align-items:flex-start;gap:.85rem;margin-bottom:.75rem">
+        <label class="toggle" style="flex-shrink:0;margin-top:.15rem">
+          <input type="checkbox" id="admin-reg-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+        <div>
+          <div style="font-size:.875rem;font-weight:600;margin-bottom:.2rem" data-i18n="settings.admin_reg_title">Registracija novih uporabnikov</div>
+          <div class="settings-hint" style="margin:0" data-i18n="settings.admin_reg_hint">
+            Ko je izklopljeno, se novi uporabniki ne morejo registrirati.
+          </div>
+        </div>
+      </div>
+      <div class="card-actions" style="margin-top:.5rem">
+        <button id="btn-save-reg" class="btn btn-primary btn-sm" data-i18n="common.save">Shrani</button>
+      </div>
+    </div>
+
+  </main>
+  </div><!-- /.app-body -->
+
+  <div id="toast-container"></div>
+  <script type="module">
+    import { initI18n } from '/js/i18n.js';
+    import { initSidebar } from '/js/sidebar.js';
+    await initI18n();
+    initSidebar({ activePage: 'settings' });
+  </script>
+  <script type="module" src="/js/settings.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/js/sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>
