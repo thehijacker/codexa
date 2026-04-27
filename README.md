@@ -26,7 +26,7 @@ A self-hosted EPUB web reader with multi-user support, OPDS browsing, KOReader s
 - **OPDS browser** — browse and download books from any OPDS catalogue
 - **OPDS shelf sync** — bulk-download an entire OPDS folder into a shelf
 - **Dictionary lookup** — local StarDict dictionaries (`.ifo/.idx/.dict`)
-- **PWA** — installable on desktop and mobile, works offline
+- **PWA** — installable on desktop and mobile (requires network connection to use)
 - **Multilingual UI** — English, Slovenian, German, Spanish, French, Italian, Portuguese
 - **Light / Dark / E-ink themes**
 
