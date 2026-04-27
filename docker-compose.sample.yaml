@@ -1,0 +1,22 @@
+services:
+  codexa:
+    image: ghcr.io/thehijacker/codexa:latest
+    container_name: codexa
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - codexa_data:/data
+    environment:
+      # REQUIRED — generate with:
+      #   openssl rand -hex 64
+      JWT_SECRET: "replace_with_a_long_random_secret_string_at_least_64_chars"
+
+      # Optional — restrict to your domain when behind a reverse proxy
+      # CORS_ORIGIN: "https://books.example.com"
+
+      # Optional — override default port inside the container
+      # PORT: "3000"
+
+volumes:
+  codexa_data:
