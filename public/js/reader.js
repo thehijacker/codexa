@@ -1108,7 +1108,7 @@ function hasOpenPanel() {
 
 async function returnToLibrary() {
   if (!prefs.skipSaveOnClose) {
-    saveProgressBackground(); // fire-and-forget with keepalive — does not block navigation
+    await saveProgress(); // await so updated_at is committed before library reloads
   }
   isReady = false;          // block beforeunload from double-saving
   window.location.href = '/';

@@ -30,7 +30,8 @@ router.get('/', (req, res) => {
   const books = db.prepare(`
     SELECT b.id, b.title, b.author, b.series_name, b.series_number, b.file_hash, b.file_hash_md5, b.cover_path, b.file_size, b.added_at,
            COALESCE(p.percentage, 0)    AS percentage,
-           COALESCE(p.cfi_position, '') AS cfi_position
+           COALESCE(p.cfi_position, '') AS cfi_position,
+           p.updated_at                AS progress_updated_at
       FROM books b
       LEFT JOIN reading_progress p
              ON p.user_id = b.user_id AND p.document_hash = b.file_hash
