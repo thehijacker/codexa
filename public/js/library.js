@@ -5,6 +5,7 @@ import { t, initI18n } from './i18n.js';
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let books               = [];
+let booksLoaded         = false; // true only after first successful loadBooks()
 let currentShelfId      = 'all';
 let currentShelfBookIds = null; // null = use category logic
 let editMode            = false;
@@ -144,7 +145,9 @@ function renderGrid(list) {
   grid.classList.toggle('edit-mode', editMode);
 
   if (!list.length) {
-    emptyState.classList.remove('hidden');
+    // Don't show the empty-state message until we know books have been fetched —
+    // avoids a brief "library is empty" flash while the API request is in flight.
+    if (booksLoaded) emptyState.classList.remove('hidden');
     return;
   }
   emptyState.classList.add('hidden');
@@ -193,6 +196,12 @@ function renderGrid(list) {
         const newChecked = !checkbox.checked;
         checkbox.checked = newChecked;
         toggleBookSelect(book.id, newChecked);
+        return;
+      }
+      // Touch devices: first tap reveals action icons, second tap opens the book
+      if (window.matchMedia('(pointer: coarse)').matches && !card.classList.contains('tapped')) {
+        document.querySelectorAll('.book-card.tapped').forEach(c => c.classList.remove('tapped'));
+        card.classList.add('tapped');
         return;
       }
       window.location.href = `/reader.html?id=${book.id}`;
@@ -637,6 +646,7 @@ function openShelfEditModal(shelf) {
 async function loadBooks() {
   try {
     books = await apiFetch('/books');
+    booksLoaded = true;
     applyFilter();
   } catch (err) {
     toast.error(err.message);
@@ -663,6 +673,11 @@ const uploadStatus = document.getElementById('upload-status');
 
 uploadBtn.addEventListener('click', e => { e.stopPropagation(); uploadMenu.classList.toggle('hidden'); });
 document.addEventListener('click', () => uploadMenu.classList.add('hidden'));
+// Dismiss tapped card state when touching outside any book card (mobile UX)
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.book-card'))
+    document.querySelectorAll('.book-card.tapped').forEach(c => c.classList.remove('tapped'));
+});
 document.getElementById('upload-file-btn').addEventListener('click', () => {
   uploadMenu.classList.add('hidden');
   showDropZone();

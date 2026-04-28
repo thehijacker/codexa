@@ -9,7 +9,21 @@ const params = new URLSearchParams(window.location.search);
 const bookId = params.get('id');
 if (!bookId) { window.location.href = '/'; throw new Error(); }
 
+// Prevent the Android hardware Back key from closing the reader.
+// Push a history entry on load; re-push whenever popstate fires so the back
+// stack never empties. The explicit "back to library" header button navigates
+// directly via window.location.href and is unaffected.
+history.pushState(null, '', window.location.href);
+window.addEventListener('popstate', () => {
+  history.pushState(null, '', window.location.href);
+});
+
 // ── Themes ────────────────────────────────────────────────────────────────────
+// Pixels reserved at the bottom of the epub viewport so content never flows
+// behind the status-bar/separator overlay. Must be subtracted from height in
+// every rendition.resize() call, not only at initial renderTo().
+const BOTTOM_RESERVE = 28;
+
 const THEMES = {
   dark:  { bg: '#1a1a2e', text: '#d8d8e8', link: '#e94560' },
   light: { bg: '#f9f9f6', text: '#1a1a1a', link: '#c73652' },
@@ -156,7 +170,8 @@ let searchNav = null; // null | { cfi, navCfi, query, href, phase }
 let currentHref      = '';    // current spine href (updated in updateProgress)
 let currentChapPage  = 0;     // current page within chapter (left page in two-page mode)
 let currentEndPage   = 0;     // right-page number in two-page mode (0 in single-page)
-let currentChapTotal = 0;     // total pages in current chapter
+let currentChapTotal = 0;     // total pages in current chapter (stabilised max for display)
+let currentChapRawTotal = 0;  // raw totalPages from epub.js (used for skip detection in goNext)
 let currentIsTwoPage = false; // true when two pages are visible simultaneously
 let chapPageCache    = {};    // { [spineIndex]: totalPages } accumulated as chapters are visited
 let lastLocation     = null;  // last location object from updateProgress
@@ -401,6 +416,7 @@ body {
   max-width:      100% !important;
   word-wrap:      break-word !important;
   box-sizing:     border-box !important;
+  touch-action:   pan-y !important;
 }
 /* Always enforce theme color on all text — overrides any per-element book CSS */
 body * { color: ${theme.text} !important; }
@@ -434,6 +450,125 @@ mark.br-hl {
 `.trim();
 }
 
+// Build a self-contained touch-handler script that runs INSIDE the epub iframe.
+// This is required on iOS (WKWebView): event listeners attached to an iframe's
+// contentWindow/contentDocument from the parent are never invoked on iOS Chrome/Safari.
+// The script is injected as a <script> element so it runs in the iframe's own context.
+function buildIframeTouchScript() {
+  return `(function() {
+  var isIOS = /iP(hone|od|ad)/.test(navigator.userAgent) ||
+              (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (!isIOS) return;  // Android/Desktop use cross-frame listeners (attachIframeTouchNav)
+  if (document.__brBound) return;
+  document.__brBound = true;
+  var SWIPE_MIN = 24, SWIPE_MAX_VERT = 130, TAP_ZONE = 0.25, LP_MS = 450;
+  var startX = 0, startY = 0;
+  var pressTimer = null, selTimer = null;
+  var longPressOK = false, lastSelWord = '', lastSelTs = 0;
+  var coarse = window.matchMedia('(pointer: coarse)').matches;
+
+  function post(msg) { try { window.parent.postMessage(msg, '*'); } catch(e) {} }
+
+  // Word extraction via caret APIs (same logic as host-page getWordAtPoint)
+  function wordAt(x, y) {
+    var node, off;
+    if (document.caretRangeFromPoint) {
+      var r = document.caretRangeFromPoint(x, y);
+      if (r) { node = r.startContainer; off = r.startOffset; }
+    } else if (document.caretPositionFromPoint) {
+      var p = document.caretPositionFromPoint(x, y);
+      if (p) { node = p.offsetNode; off = p.offset; }
+    }
+    if (!node) return '';
+    if (node.nodeType === 1) {
+      var w = document.createTreeWalker(node, 4);
+      var tn = w.nextNode(); if (tn) { node = tn; off = 0; }
+    }
+    if (!node || node.nodeType !== 3) return '';
+    var text = node.textContent, s = off, e = off;
+    try {
+      while (s > 0 && /[\\p{L}\\p{N}'\\u2019\\-]/u.test(text[s-1])) s--;
+      while (e < text.length && /[\\p{L}\\p{N}'\\u2019\\-]/u.test(text[e])) e++;
+    } catch(_) {
+      while (s > 0 && /[\\w\\u00C0-\\u024F'\\u2019\\-]/.test(text[s-1])) s--;
+      while (e < text.length && /[\\w\\u00C0-\\u024F'\\u2019\\-]/.test(text[e])) e++;
+    }
+    return text.slice(s, e).replace(/^['\\u2019\\-]+|['\\u2019\\-]+$/g, '').trim();
+  }
+
+  // iOS: suppress native callout / selection takeover so our long-press fires reliably
+  if (isIOS) {
+    var st = document.createElement('style');
+    st.textContent = '* { -webkit-touch-callout: none !important; -webkit-user-select: none !important; user-select: none !important; }';
+    (document.head || document.documentElement).appendChild(st);
+  }
+
+  document.addEventListener('touchstart', function(e) {
+    if (e.touches.length !== 1) { clearTimeout(pressTimer); return; }
+    startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+    longPressOK = false;
+    clearTimeout(pressTimer);
+    pressTimer = setTimeout(function() {
+      longPressOK = true;
+      var w = wordAt(startX, startY);
+      if (w) post({ type: 'dict-lookup', word: w });
+    }, LP_MS);
+  }, { passive: true });
+
+  document.addEventListener('touchmove', function(e) {
+    var dx = Math.abs(e.touches[0].clientX - startX);
+    var dy = Math.abs(e.touches[0].clientY - startY);
+    if (dx > 10 || dy > 10) clearTimeout(pressTimer);
+    // Claim horizontal swipes on iOS before the browser decides it's a scroll
+    if (dx > 8 && dx > dy) { try { if (e.cancelable) e.preventDefault(); } catch(_) {} }
+  }, { passive: false });
+
+  document.addEventListener('touchend', function(e) {
+    clearTimeout(pressTimer);
+    if (longPressOK) { longPressOK = false; return; }
+    // Android: clear quick-select popup on any plain tap
+    if (coarse && !isIOS) setTimeout(function() {
+      var s = window.getSelection(); if (s) s.removeAllRanges();
+    }, 0);
+    var cx = e.changedTouches[0].clientX, cy = e.changedTouches[0].clientY;
+    var dx = cx - startX, dy = cy - startY;
+    var ax = Math.abs(dx), ay = Math.abs(dy), W = window.innerWidth;
+    if (ay < SWIPE_MAX_VERT && ax > SWIPE_MIN && ax > ay) {
+      post({ type: 'br-nav', action: dx < 0 ? 'next' : 'prev' });
+    } else if (ax < 10 && ay < 10) {
+      if      (cx < W * TAP_ZONE)        post({ type: 'br-nav', action: 'prev' });
+      else if (cx > W * (1 - TAP_ZONE))  post({ type: 'br-nav', action: 'next' });
+      else                                post({ type: 'br-tap',  cy: cy });
+    } else if (dy > 42 && ax < 70) {
+      post({ type: 'br-swipe-down' });
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchcancel', function() {
+    clearTimeout(pressTimer);
+  }, { passive: true });
+
+  // Android: update dictionary word when the user adjusts selection after long-press
+  if (coarse && !isIOS) {
+    document.addEventListener('selectionchange', function() {
+      if (!longPressOK) return;
+      clearTimeout(selTimer);
+      selTimer = setTimeout(function() {
+        var sel = window.getSelection();
+        var raw = (sel ? sel.toString() : '').trim();
+        if (!raw) return;
+        var w = raw.split(/\\s+/)[0].replace(/^['\\u2019\\-]+|['\\u2019\\-]+$/g, '').trim();
+        if (!w) return;
+        var now = Date.now();
+        if (w === lastSelWord && now - lastSelTs < 900) return;
+        lastSelWord = w; lastSelTs = now;
+        post({ type: 'dict-lookup', word: w });
+      }, 120);
+    });
+  }
+})();`;
+}
+
 function injectIntoContents(contents) {
   if (!contents?.document) return;
   const doc = contents.document;
@@ -461,6 +596,15 @@ function injectIntoContents(contents) {
     (doc.body || doc.documentElement).appendChild(el);
   }
   el.textContent = buildEpubCss();
+
+  // Inject the touch relay script once per iframe — runs in the iframe's own JS context
+  // so touch events fire reliably on iOS (WKWebView ignores cross-frame addEventListener).
+  if (!doc.getElementById('br-touch-relay')) {
+    const script = doc.createElement('script');
+    script.id = 'br-touch-relay';
+    script.textContent = buildIframeTouchScript();
+    (doc.head || doc.documentElement).appendChild(script);
+  }
 }
 
 function reapplyStyles() {
@@ -561,13 +705,16 @@ function attachIframeKeyboard(contents) {
   }, { passive: true });
 }
 
-// Inject long-press (mobile) and right-click (desktop) dictionary lookup
-// into each epub.js iframe page. Uses postMessage to ask the host to show the popup.
+// Desktop-only dictionary wiring: right-click and double-click inside the epub iframe.
+// Touch handling (long-press, swipe, edge-tap) is done by the iframe-injected script
+// (buildIframeTouchScript) which runs in the iframe's own JS context and therefore
+// works on iOS WKWebView where cross-frame addEventListener is silently ignored.
 function attachIframeDictionary(contents) {
   if (!contents?.document || !contents?.window) return;
   const doc = contents.document;
   const win = contents.window;
   const coarsePointer = !!win.matchMedia?.('(pointer: coarse)')?.matches;
+  if (coarsePointer) return; // touch devices: handled by the injected iframe script
 
   function getWordAtPoint(x, y) {
     let node, offset;
@@ -580,111 +727,127 @@ function attachIframeDictionary(contents) {
       if (!p) return '';
       node = p.offsetNode; offset = p.offset;
     } else return '';
-    // If we landed on an element node, descend to its first text child
     if (node?.nodeType === 1) {
-      const walker = doc.createTreeWalker(node, 0x4 /* SHOW_TEXT */);
+      const walker = doc.createTreeWalker(node, 0x4);
       const t = walker.nextNode();
       if (t) { node = t; offset = 0; }
     }
     if (!node || node.nodeType !== 3) return '';
     const text = node.textContent;
     let s = offset, e = offset;
-    // Expand to word boundary: letters, digits, apostrophes and hyphens
     while (s > 0 && /[\p{L}\p{N}'\u2019\-]/u.test(text[s - 1])) s--;
     while (e < text.length && /[\p{L}\p{N}'\u2019\-]/u.test(text[e])) e++;
     return text.slice(s, e).replace(/^['\u2019\-]+|['\u2019\-]+$/g, '').trim();
   }
 
-  // Mobile long press (iOS-friendly timing)
-  let pressTimer = null;
-  let pressX = 0, pressY = 0;
-  let selectionTimer = null;
-  let lastSelectionWord = '';
-  let lastSelectionTs = 0;
-
-  // iOS: suppress native callout and text-selection takeover inside epub iframes.
-  // -webkit-touch-callout stops the "Copy / Look Up" popup.
-  // user-select:none stops iOS from entering text-selection mode on long-press
-  // (our getWordAtPoint works without DOM selection via caretRangeFromPoint).
-  if (isIOS) {
-    const iosStyle = doc.createElement('style');
-    iosStyle.textContent = '* { -webkit-touch-callout: none !important; -webkit-user-select: none !important; user-select: none !important; }';
-    (doc.head || doc.documentElement).appendChild(iosStyle);
-  }
-
-  function triggerSelectionLookup() {
-    const sel = win.getSelection?.();
-    const raw = (sel?.toString() || '').trim();
-    if (!raw) return;
-    const word = raw.split(/\s+/)[0].replace(/^['\u2019\-]+|['\u2019\-]+$/g, '').trim();
-    if (!word) return;
-    const now = Date.now();
-    if (word === lastSelectionWord && now - lastSelectionTs < 900) return;
-    lastSelectionWord = word;
-    lastSelectionTs = now;
-    window.parent.postMessage({ type: 'dict-lookup', word }, '*');
-  }
-
-  doc.addEventListener('touchstart', (e) => {
-    // On iOS, -webkit-user-select:none (injected above) stops the browser from
-    // entering its native long-press selection mode, which would fire touchcancel
-    // before our 450 ms timer completes.  We do NOT call e.preventDefault() here;
-    // doing so on touchstart inside an iframe corrupts the whole touch sequence.
-    const t = e.touches[0];
-    pressX = t.clientX;
-    pressY = t.clientY;
-    pressTimer = setTimeout(() => {
-      pressTimer = null;
-      // Mark that this touch was a long-press so touchend won't navigate
-      suppressNextTap = true;
-      const word = getWordAtPoint(pressX, pressY);
-      if (word) {
-        win.getSelection?.()?.removeAllRanges?.();
-        window.parent.postMessage({ type: 'dict-lookup', word }, '*');
-      }
-    }, 450);
-  }, { passive: true });
-
-  doc.addEventListener('touchmove', (e) => {
-    if (Math.abs(e.touches[0].clientX - pressX) > 18 ||
-        Math.abs(e.touches[0].clientY - pressY) > 18) {
-      clearTimeout(pressTimer); pressTimer = null;
-    }
-  }, { passive: true });
-
-  doc.addEventListener('touchend', () => {
-    if (pressTimer !== null) { clearTimeout(pressTimer); pressTimer = null; }
-  }, { passive: true });
-
-  doc.addEventListener('touchcancel', () => { clearTimeout(pressTimer); pressTimer = null; }, { passive: true });
-
-  // Android / non-iOS touch: hook into selection changes so that manually
-  // highlighted text also triggers a lookup (iOS uses our custom long-press path).
-  if (coarsePointer && !isIOS) {
-    doc.addEventListener('selectionchange', () => {
-      clearTimeout(selectionTimer);
-      selectionTimer = setTimeout(triggerSelectionLookup, 120);
-    });
-  }
-
-  // Desktop right-click: use selected text if any, else word under cursor
   doc.addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    const sel     = win.getSelection?.();
-    const selText = sel?.toString().trim();
-    const word    = selText ? selText.split(/\s+/)[0] : getWordAtPoint(e.clientX, e.clientY);
+    const sel  = win.getSelection?.();
+    const sel0 = sel?.toString().trim();
+    const word = sel0 ? sel0.split(/\s+/)[0] : getWordAtPoint(e.clientX, e.clientY);
     if (word) window.parent.postMessage({ type: 'dict-lookup', word }, '*');
   });
 
-  // Desktop quick lookup on double-clicked word/selection.
-  if (!coarsePointer) {
-    doc.addEventListener('dblclick', (e) => {
-      const sel = win.getSelection?.();
-      const selText = sel?.toString().trim();
-      const word = selText ? selText.split(/\s+/)[0] : getWordAtPoint(e.clientX, e.clientY);
-      if (word) window.parent.postMessage({ type: 'dict-lookup', word }, '*');
-    });
+  doc.addEventListener('dblclick', (e) => {
+    const sel  = win.getSelection?.();
+    const sel0 = sel?.toString().trim();
+    const word = sel0 ? sel0.split(/\s+/)[0] : getWordAtPoint(e.clientX, e.clientY);
+    if (word) window.parent.postMessage({ type: 'dict-lookup', word }, '*');
+  });
+}
+
+// ── Cross-frame touch navigation (Android / Desktop) ─────────────────────────
+// iOS uses the injected-script relay (buildIframeTouchScript) because WKWebView
+// silently drops cross-frame addEventListener calls.  On every other platform
+// cross-frame listeners work reliably and avoid epub.js event-ordering conflicts.
+const _navAttached = new WeakSet();
+
+function getWordAtPointInFrame(doc, x, y) {
+  if (!doc) return '';
+  let node, offset;
+  if (doc.caretRangeFromPoint) {
+    const r = doc.caretRangeFromPoint(x, y);
+    if (!r) return '';
+    node = r.startContainer; offset = r.startOffset;
+  } else if (doc.caretPositionFromPoint) {
+    const p = doc.caretPositionFromPoint(x, y);
+    if (!p) return '';
+    node = p.offsetNode; offset = p.offset;
+  } else return '';
+  if (node?.nodeType === 1) {
+    const walker = doc.createTreeWalker(node, 0x4);
+    const tn = walker.nextNode();
+    if (tn) { node = tn; offset = 0; }
   }
+  if (!node || node.nodeType !== 3) return '';
+  const text = node.textContent;
+  let s = offset, e = offset;
+  while (s > 0 && /[\p{L}\p{N}'’\-]/u.test(text[s - 1])) s--;
+  while (e < text.length && /[\p{L}\p{N}'’\-]/u.test(text[e])) e++;
+  return text.slice(s, e).replace(/^[''\-]+|[''\-]+$/g, '').trim();
+}
+
+function attachIframeTouchNav(view) {
+  if (isIOS) return;
+  const win = view?.contents?.window;
+  const doc = view?.contents?.document;
+  if (!win || _navAttached.has(win)) return;
+  _navAttached.add(win);
+
+  let sx = 0, sy = 0, pressTimer = null, longPressActive = false;
+
+  win.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { clearTimeout(pressTimer); return; }
+    sx = e.touches[0].clientX;
+    sy = e.touches[0].clientY;
+    longPressActive = false;
+    pressTimer = setTimeout(() => {
+      longPressActive = true;
+      const word = getWordAtPointInFrame(doc, sx, sy);
+      if (word) showDictPopup(word);
+    }, 550);
+  }, { passive: true });
+
+  win.addEventListener('touchmove', (e) => {
+    const dx = Math.abs(e.touches[0].clientX - sx);
+    const dy = Math.abs(e.touches[0].clientY - sy);
+    if (dx > 10 || dy > 10) clearTimeout(pressTimer);
+  }, { passive: true });
+
+  win.addEventListener('touchend', (e) => {
+    clearTimeout(pressTimer);
+    if (longPressActive) { longPressActive = false; return; }
+    const t  = e.changedTouches[0];
+    const dx = t.clientX - sx;
+    const dy = t.clientY - sy;
+    const ax = Math.abs(dx);
+    const ay = Math.abs(dy);
+    const W  = win.innerWidth;
+
+    if (prefs.autoHideHeader && dy > SWIPE_DOWN_OPEN && ax < 70) {
+      readerLayout.classList.toggle('header-peek');
+      return;
+    }
+    if (ax < 10 && ay < 10) {
+      if (prefs.autoHideHeader && t.clientY + currentIframeTop < TOP_REVEAL_ZONE + 20) {
+        readerLayout.classList.add('header-peek');
+        return;
+      }
+      const zone = TAP_ZONE * W;
+      if (t.clientX < zone)      { goPrev(); return; }
+      if (t.clientX > W - zone)  { goNext(); return; }
+      if (prefs.autoHideHeader) readerLayout.classList.toggle('header-peek');
+      return;
+    }
+    if (ax > SWIPE_THRESHOLD && ay < SWIPE_MAX_VERT) {
+      if (dx < 0) goNext(); else goPrev();
+    }
+  }, { passive: false });
+
+  win.addEventListener('touchcancel', () => {
+    clearTimeout(pressTimer);
+    longPressActive = false;
+  }, { passive: true });
 }
 
 // ── Status bar engine ─────────────────────────────────────────────────────────
@@ -808,10 +971,11 @@ function updateStatusBar(location) {
   // on a chapter it may report a lower total than after you have navigated deeper.
   // Keeping the max prevents the percentage from going *down* when navigating back.
   const stableTotal = Math.max(totalPages, chapPageCache[currentSpineIndex] || 0);
-  currentChapPage  = startPage;
-  currentEndPage   = endPage;
-  currentChapTotal = stableTotal || totalPages;
-  currentIsTwoPage = isTwoPage;
+  currentChapPage     = startPage;
+  currentEndPage      = endPage;
+  currentChapTotal    = stableTotal || totalPages;
+  currentChapRawTotal = totalPages; // unmodified — used for chapter-skip detection
+  currentIsTwoPage    = isTwoPage;
   if (stableTotal > 0) chapPageCache[currentSpineIndex] = stableTotal;
 
   const pos = prefs.statusBar.positions;
@@ -882,7 +1046,7 @@ function applyEdgePadding() {
   // Resize epub.js rendition so it fills the updated viewer area
   if (rendition) {
     setTimeout(() => {
-      rendition.resize(epubViewer.clientWidth, epubViewer.clientHeight);
+      rendition.resize(epubViewer.clientWidth, Math.max(200, epubViewer.clientHeight - BOTTOM_RESERVE));
     }, 30);
   }
 }
@@ -891,7 +1055,9 @@ function applyEdgePadding() {
 function applyStatusBarStyles() {
   const sb   = prefs.statusBar;
   const root = document.documentElement;
-  root.style.setProperty('--sb-font',        sb.font ? `"${sb.font}"` : 'inherit');
+  // '' means "inherit from book font" — use prefs.fontFamily so the status bar
+  // actually renders in the same typeface as the epub text, not the host-page default.
+  root.style.setProperty('--sb-font', sb.font ? `"${sb.font}"` : prefs.fontFamily);
   root.style.setProperty('--sb-font-size',   sb.fontSize + 'px');
   root.style.setProperty('--sb-font-weight', sb.fontStyle.includes('bold')   ? 'bold'   : 'normal');
   root.style.setProperty('--sb-font-style',  sb.fontStyle.includes('italic') ? 'italic' : 'normal');
@@ -959,7 +1125,7 @@ function applyAutoHide() {
   // Resize rendition since available height changes
   if (rendition) {
     setTimeout(() => {
-      rendition.resize(epubViewer.clientWidth, epubViewer.clientHeight);
+      rendition.resize(epubViewer.clientWidth, Math.max(200, epubViewer.clientHeight - BOTTOM_RESERVE));
     }, 50);
   }
 }
@@ -1125,7 +1291,7 @@ function isFullscreenSupported() {
 
 function syncFullscreenButton() {
   if (!fullscreenBtn) return;
-  if (!isFullscreenSupported()) {
+  if (!isFullscreenSupported() || window.matchMedia('(pointer: coarse)').matches) {
     fullscreenBtn.classList.add('hidden');
     return;
   }
@@ -1482,12 +1648,40 @@ function closeDictPopup() {
   document.getElementById('dict-popup')?.setAttribute('aria-hidden', 'true');
 }
 
-// Receive dict lookup from iframe contexts (origin may vary on iOS/blob views).
+// Receive messages from the injected iframe touch-relay script and dict lookups.
 window.addEventListener('message', (e) => {
-  if (e.data?.type !== 'dict-lookup') return;
-  const word = String(e.data.word || '').trim();
-  if (!word || word.length > 120) return;
-  showDictPopup(word);
+  const d = e.data;
+  if (!d?.type) return;
+
+  if (d.type === 'dict-lookup') {
+    const word = String(d.word || '').trim();
+    if (!word || word.length > 120) return;
+    showDictPopup(word);
+    return;
+  }
+
+  // Navigation posted by the iframe touch-relay script (swipe or edge tap)
+  if (d.type === 'br-nav') {
+    if (d.action === 'next') goNext();
+    else if (d.action === 'prev') goPrev();
+    return;
+  }
+
+  // Center tap inside the iframe — decide whether to toggle/reveal the header
+  if (d.type === 'br-tap') {
+    if (prefs.autoHideHeader) {
+      const absY = (d.cy || 0) + currentIframeTop;
+      if (absY < TOP_REVEAL_ZONE + 20) readerLayout.classList.add('header-peek');
+      else readerLayout.classList.toggle('header-peek');
+    }
+    return;
+  }
+
+  // Downward swipe inside the iframe — toggle header
+  if (d.type === 'br-swipe-down') {
+    if (prefs.autoHideHeader) readerLayout.classList.toggle('header-peek');
+    return;
+  }
 });
 
 // ── Settings UI ───────────────────────────────────────────────────────────────
@@ -1967,6 +2161,14 @@ function initSettingsUi() {
   applyStatusBarStyles();
   applyEdgePadding();
   applyPageShadow();
+
+  // Kick off loading the status-bar font early so it's ready when the loading
+  // overlay is removed. document.fonts.load() is a no-op if already loaded.
+  {
+    const sbFont = prefs.statusBar.font ? `"${prefs.statusBar.font}"` : prefs.fontFamily;
+    const primary = sbFont.split(',')[0].trim().replace(/['"]/g, '');
+    if (primary) document.fonts.load(`${prefs.statusBar.fontSize || 11}px "${primary}"`).catch(() => {});
+  }
 }
 
 // ── Progress ──────────────────────────────────────────────────────────────────
@@ -2245,6 +2447,19 @@ async function syncOnOpen(localProgress) {
   const bestTime  = best.timestamp             || 0;
   console.log('[kosync] best:', best.device, Math.round((best.percentage||0)*100)+'%', 'ts:', bestTime, 'localTime:', localTime);
 
+  // If the remote xpointer is a plain chapter-start reference (DocFragment[N]/body with
+  // no paragraph detail), check whether it points to the chapter we're already on.
+  // Percentage algorithms differ between clients, so 26% vs 24% can mean the same
+  // chapter start — no point offering a sync to the position we're already at.
+  const dfOnlyMatch = best.progress?.match(/^\/body\/DocFragment\[(\d+)\]\/body$/);
+  if (dfOnlyMatch) {
+    const remoteSpineIdx = parseInt(dfOnlyMatch[1]) - 1; // DocFragment is 1-based
+    if (remoteSpineIdx === currentSpineIndex) {
+      console.log('[kosync] remote is chapter-start of current chapter — skipping dialog');
+      return null;
+    }
+  }
+
   // Always show dialog when positions differ by more than 1% — user decides.
   // ★ in the dialog marks whichever timestamp is newer.
   const pctDiffers = Math.abs((best.percentage || 0) - localPct) > 0.01;
@@ -2267,23 +2482,36 @@ async function startRendition(displayCfi = null) {
   // status-bar / separator overlays. In CSS multi-column mode padding-bottom
   // on the body only applies to the last column, so the only reliable way to
   // leave space on every page is to shorten the column height here.
-  const bottomReserve = 28; // separator sits ~23px from bottom; 28px reserve ≈ 5px gap matching the top
   rendition = book.renderTo('epub-viewer', {
     width:          epubViewer.clientWidth  || window.innerWidth,
-    height:         Math.max(200, (epubViewer.clientHeight || (window.innerHeight - 55)) - bottomReserve),
+    height:         Math.max(200, (epubViewer.clientHeight || (window.innerHeight - 55)) - BOTTOM_RESERVE),
     spread:         spreadMode,
     minSpreadWidth: 800,
     manager:        'default',
     gap:            prefs.margin * 2,
   });
 
-  // Attach keyboard forwarding via content hook (runs on every page load)
-  // Also inject our styles early here — before first paint — to avoid the
-  // flash of unstyled/wrong-size text when crossing chapter boundaries.
-  rendition.hooks.content.register((contents) => {
+  // Attach keyboard forwarding via content hook (runs on every page load).
+  // Hide the body before injecting CSS, then wait for fonts to finish loading
+  // before revealing — eliminates the flash of wrong font family (FOUT).
+  // epub.js awaits promises returned by hooks.content callbacks.
+  rendition.hooks.content.register(async (contents) => {
+    const doc = contents?.document;
+    if (doc?.body) doc.body.style.visibility = 'hidden';
+
     attachIframeKeyboard(contents);
     attachIframeDictionary(contents);
     injectIntoContents(contents);
+
+    // iOS WebKit (Safari/Chrome) can stall on fonts.ready inside blob-URL iframes.
+    // Race against a 1 s timeout so the body is always revealed and rendered fires.
+    try {
+      await Promise.race([
+        doc?.fonts?.ready ?? Promise.resolve(),
+        new Promise(r => setTimeout(r, 1000)),
+      ]);
+    } catch { /* unsupported */ }
+    if (doc?.body) doc.body.style.visibility = '';
   });
 
   // 'rendered' fires AFTER epub.js finishes its own content setup.
@@ -2295,8 +2523,14 @@ async function startRendition(displayCfi = null) {
       if (view?.contents) injectIntoContents(view.contents);
     }, 0);
     attachIframeTouchNav(view);
+    // Track the iframe's Y offset in the page so the parent can convert
+    // the cy value from br-tap postMessages into absolute page coordinates.
+    const iframe = view.element?.querySelector?.('iframe') || view.element;
+    if (iframe?.getBoundingClientRect) {
+      currentIframeTop = iframe.getBoundingClientRect().top;
+    }
   });
-
+    
   rendition.on('relocated', updateProgress);
   rendition.on('relocated', () => {
     if (!searchNav) return;
@@ -2337,7 +2571,8 @@ const isIOS = /iP(hone|od|ad)/.test(navigator.userAgent) ||
               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 let touchStartX = 0;
 let touchStartY = 0;
-let suppressNextTap = false; // set by long-press dict lookup to prevent navigation on touchend
+let suppressNextTap = false;
+let currentIframeTop = 0; // iframe's top offset from page top, updated on each rendered event
 
 function handleTouchStart(e) {
   touchStartX = e.changedTouches[0].clientX;
@@ -2376,73 +2611,9 @@ function handleTouchEnd(e) {
 epubViewer.addEventListener('touchstart', handleTouchStart, { passive: true });
 epubViewer.addEventListener('touchend',   handleTouchEnd,   { passive: false });
 
-// Per-page: forward touch events from inside the epub iframe into our handlers
-function attachIframeTouchNav(view) {
-  const win = view?.contents?.window;
-  if (!win) return;
-  const coarsePointer = !!win.matchMedia?.('(pointer: coarse)')?.matches;
-  // Iframe offset captured once per touchstart (used by touchmove + touchend)
-  let iframeOffX = 0, iframeOffY = 0;
-
-  function edgeNavigate(clientX) {
-    const cx   = clientX + iframeOffX;
-    const w    = window.innerWidth;
-    const zone = TAP_ZONE * w;
-    if (cx < zone) { goPrev(); return true; }
-    if (cx > w - zone) { goNext(); return true; }
-    return false;
-  }
-
-  win.addEventListener('touchstart', (e) => {
-    const iframe = view.element?.querySelector('iframe') || view.element;
-    iframeOffX   = iframe ? iframe.getBoundingClientRect().left : 0;
-    iframeOffY   = iframe ? iframe.getBoundingClientRect().top  : 0;
-    touchStartX  = e.changedTouches[0].clientX + iframeOffX;
-    touchStartY  = e.changedTouches[0].clientY + iframeOffY;
-  }, { passive: false }); // non-passive so touchmove can preventDefault
-
-  // iOS fix: claim horizontal swipes immediately so iOS doesn't fire touchcancel.
-  // Without this, iOS WebKit cancels the touch sequence before touchend fires.
-  win.addEventListener('touchmove', (e) => {
-    const dx = Math.abs(e.touches[0].clientX + iframeOffX - touchStartX);
-    const dy = Math.abs(e.touches[0].clientY + iframeOffY - touchStartY);
-    if (dx > 8 && dx > dy) e.preventDefault(); // own the horizontal gesture
-  }, { passive: false });
-
-  win.addEventListener('touchend', (e) => {
-    if (suppressNextTap) {
-      suppressNextTap = false;
-      e.preventDefault(); // prevent browser from synthesising a click after long-press
-      return;
-    }
-    const cx     = e.changedTouches[0].clientX + iframeOffX;
-    const cy     = e.changedTouches[0].clientY + iframeOffY;
-    const dx     = cx - touchStartX;
-    const dy     = cy - touchStartY;
-    const absDx  = Math.abs(dx);
-    const absDy  = Math.abs(dy);
-    if (prefs.autoHideHeader && dy > SWIPE_DOWN_OPEN && absDx < 70) {
-      e.preventDefault();
-      readerLayout.classList.toggle('header-peek');
-      return;
-    }
-    if (absDx < 10 && absDy < 10) {
-      // Short tap in the reading area — no navigation here.
-      // On mobile the reader is swipe-only; on desktop the nav-arrow buttons handle taps.
-      // Tap near top to reveal header (if auto-hide is on).
-      if (prefs.autoHideHeader && cy < TOP_REVEAL_ZONE + 20) {
-        e.preventDefault();
-        readerLayout.classList.add('header-peek');
-      }
-      return;
-    }
-    if (absDx > SWIPE_THRESHOLD && absDy < SWIPE_MAX_VERT) {
-      e.preventDefault();
-      if (dx < 0) goNext();
-      else        goPrev();
-    }
-  }, { passive: false });
-}
+// Touch navigation from inside the iframe is now handled by buildIframeTouchScript()
+// injected via injectIntoContents(). Navigation arrives via postMessage (br-nav,
+// br-tap, br-swipe-down) and is processed in the window 'message' listener above.
 
 document.addEventListener('keydown', (e) => {
   const key = String(e.key || '').toLowerCase();
@@ -2505,7 +2676,7 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 window.addEventListener('resize', debounce(async () => {
   if (!rendition) return;
   const pctBeforeResize = currentPct;
-  rendition.resize(epubViewer.clientWidth, epubViewer.clientHeight);
+  rendition.resize(epubViewer.clientWidth, Math.max(200, epubViewer.clientHeight - BOTTOM_RESERVE));
   if (isReady && pctBeforeResize > 0 && book.locations?.length() > 0) {
     await seekToPercentage(pctBeforeResize);
   }
@@ -2638,6 +2809,11 @@ async function init() {
       console.log('[pos] after startRendition currentCfi:', currentCfi.slice(0,60));
     }
     book.ready.then(() => initLocations()).catch(() => {});
+    // Wait for host-page fonts (status bar) before revealing, with a 1 s cap so
+    // iOS (which can stall on fonts.ready) doesn't freeze the loading overlay.
+    try {
+      await Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 1000))]);
+    } catch { /* unsupported */ }
     loadingOverlay.classList.add('hidden');
 
     // epub.js display(cfi) with char-offset CFIs snaps to wrong page — seek forward by pct.

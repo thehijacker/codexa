@@ -358,12 +358,20 @@ input:focus, select:focus, textarea:focus {
   color: #fff;
   border-color: rgba(255, 255, 255, 0.4);
   font-size: 1rem;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .book-card-actions .btn-icon:hover {
   background: rgba(180, 30, 30, 0.85);
   border-color: rgba(255, 255, 255, 0.7);
   color: #fff;
 }
+/* Mobile: show actions when card is tapped (JS toggles this class) */
+.book-card.tapped .book-card-actions { display: flex; }
 
 /* ── Empty state ────────────────────────────────────────────────────────────── */
 .empty-state {

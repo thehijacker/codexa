@@ -114,6 +114,7 @@ html, body {
   flex: 1;
   position: relative;
   overflow: hidden;
+  touch-action: pan-y; /* tell iOS we own horizontal swipes; vertical stays native */
   /* Edge inset: shrinks viewer away from curved screen edges */
   margin-top:    var(--edge-pad-top,    0px);
   margin-bottom: var(--edge-pad-bottom, 0px);
@@ -127,12 +128,12 @@ html, body {
 /* Book-edge shadow overlay: sits above the epub.js iframes as a reader-main sibling */
 #page-edge-shadow {
   display: none;
-  position: absolute;
+  position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 6;
-  box-shadow: inset 18px 0 28px -8px rgba(0,0,0,.45),
-              inset -18px 0 28px -8px rgba(0,0,0,.45);
+  box-shadow: inset 18px 0 28px 0 rgba(0,0,0,.45),
+              inset -18px 0 28px 0 rgba(0,0,0,.45);
 }
 #page-edge-shadow.active {
   display: block;
