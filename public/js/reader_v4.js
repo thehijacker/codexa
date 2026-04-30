@@ -118,6 +118,7 @@ const DEFAULT_PREFS = {
   keepScreenOn:   true,
   eink:           false,        // strip all colors for e-ink displays
   paraIndent:     true,         // paragraph text-indent (first line)
+  paraIndentSize: 15,           // indent size when paraIndent=true (em × 10, so 15 = 1.5em)
   paraSpacing:    0,            // extra bottom margin between paragraphs (em × 10, so 0–30)
   mouseWheelNav:  false,        // navigate pages with mouse wheel
   skipOpenProgressCheck: false, // if true, do not restore/sync progress on open
@@ -207,7 +208,7 @@ const fullscreenBtn   = document.getElementById('btn-fullscreen');
 
 // ── Prefs ─────────────────────────────────────────────────────────────────────
 // Keys that are stored per-book (content appearance).  All others are global.
-const PER_BOOK_KEYS = ['fontSize','fontFamily','lineHeight','margin','theme','overrideStyles','paraIndent','paraSpacing','dictionaries'];
+const PER_BOOK_KEYS = ['fontSize','fontFamily','lineHeight','margin','theme','overrideStyles','paraIndent','paraIndentSize','paraSpacing','dictionaries'];
 
 function loadPrefs() {
   try {
@@ -426,7 +427,7 @@ img {
 }
 /* Keep native selection/callout enabled so iOS long-press and selection behave naturally. */
 ${prefs.eink ? buildEinkCss(theme) : ''}
-${prefs.paraIndent ? '' : 'p { text-indent: 0 !important; }'}
+${prefs.paraIndent ? `p { text-indent: ${(prefs.paraIndentSize / 10).toFixed(1)}em !important; }` : 'p { text-indent: 0 !important; }'}
 ${prefs.paraSpacing > 0 ? `p { margin-bottom: ${(prefs.paraSpacing / 10).toFixed(1)}em !important; }` : ''}
 ${prefs.hyphenation ? 'html, body, p, li { hyphens: auto !important; }' : 'html, body, p, li { hyphens: none !important; }'}
 /* search highlights — background only, zero layout impact */
@@ -1545,6 +1546,12 @@ function syncSettingsUi() {
   // Paragraph options
   const piEl = document.getElementById('para-indent-toggle');
   if (piEl) piEl.checked = prefs.paraIndent;
+  const piSizeRow = document.getElementById('para-indent-size-row');
+  const piSizeEl  = document.getElementById('para-indent-size-slider');
+  const piSizeVl  = document.getElementById('para-indent-size-value');
+  if (piSizeRow) piSizeRow.style.display = prefs.paraIndent ? '' : 'none';
+  if (piSizeEl)  piSizeEl.value = prefs.paraIndentSize;
+  if (piSizeVl)  piSizeVl.textContent = (prefs.paraIndentSize / 10).toFixed(1) + 'em';
   const psEl = document.getElementById('para-spacing-slider');
   const psVl = document.getElementById('para-spacing-value');
   if (psEl) psEl.value = prefs.paraSpacing;
@@ -1897,6 +1904,14 @@ function initSettingsUi() {
   // Paragraph options
   document.getElementById('para-indent-toggle')?.addEventListener('change', (e) => {
     prefs.paraIndent = e.target.checked;
+    const sizeRow = document.getElementById('para-indent-size-row');
+    if (sizeRow) sizeRow.style.display = prefs.paraIndent ? '' : 'none';
+    reapplyStyles(); persistPrefs();
+  });
+  document.getElementById('para-indent-size-slider')?.addEventListener('input', (e) => {
+    prefs.paraIndentSize = parseInt(e.target.value);
+    const vl = document.getElementById('para-indent-size-value');
+    if (vl) vl.textContent = (prefs.paraIndentSize / 10).toFixed(1) + 'em';
     reapplyStyles(); persistPrefs();
   });
   document.getElementById('para-spacing-slider')?.addEventListener('input', (e) => {
