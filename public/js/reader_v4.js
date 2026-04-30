@@ -69,19 +69,19 @@ const SYSTEM_FONTS = [
 // ── Defaults ──────────────────────────────────────────────────────────────────
 const DEFAULT_STATUS_BAR = {
   font:             '',       // '' = inherit UI font
-  fontSize:         11,
-  fontStyle:        'normal', // 'normal' | 'bold' | 'italic' | 'bold italic'
+  fontSize:         13,
+  fontStyle:        'bold',   // 'normal' | 'bold' | 'italic' | 'bold italic'
   defaultPpm:       1.5,      // pages/min before speed samples exist
   positions: {
     tl: ['currentTime', 'pctBook'],
     tc: ['chapterTitle'],
-    tr: [],
+    tr: ['timeLeftChap', 'timeLeftBook'],
     bl: ['chapterPage'],
-    bc: [],
+    bc: ['pagesLeftChap', 'pagesLeftBook'],
     br: [],
   },
-  separatorTop:          false,
-  separatorBottom:       false,
+  separatorTop:          true,
+  separatorBottom:       true,
   separatorThickness:    1,
   showIcons:        {},           // { [statId]: false } to hide icon; default = show all
   bookProgressBar:  { show: false, position: 'bottom', thickness: 3 },
@@ -124,7 +124,7 @@ const DEFAULT_PREFS = {
   skipSaveOnClose: false,       // if true, do not auto-save when leaving/closing
   hyphenation:    false,         // CSS hyphens: auto inside epub iframe
   hyphenLang:     '',           // empty = keep book's own lang attr; else override e.g. 'en'
-  pageGapShadow:  true,         // show epub.js center-spine box-shadow in two-page mode
+  pageGapShadow:  false,        // show epub.js center-spine box-shadow in two-page mode
   dictionaries:   [],           // ordered list of dict basenames; empty = use all
   edgePadding:    { top: 0, bottom: 0, left: 0, right: 0 },   // px inset for curved screens
   statusBar:      null,         // deep-merged in loadPrefs()
@@ -2359,7 +2359,7 @@ function goPrev() { pendingNavDirection = 'prev'; rendition?.prev(); }
 // ── Touch / swipe navigation ──────────────────────────────────────────────────
 const SWIPE_THRESHOLD = 24;   // min px horizontal distance
 const SWIPE_MAX_VERT  = 130;  // max vertical drift allowed
-const TAP_ZONE        = 0.25; // 25% edge on each side for tap-to-page
+const TAP_MAX_DRIFT   = 20;   // max px movement still counted as a tap
 const TOP_REVEAL_ZONE = 92;   // px from top where tap reveals header
 const SWIPE_DOWN_OPEN = 42;   // px downward swipe to reveal header
 // iOS detection (Chrome/Safari on iPhone/iPad use WebKit with different iframe touch behaviour)
@@ -2384,16 +2384,16 @@ function handleTouchEnd(e) {
     readerLayout.classList.toggle('header-peek');
     return;
   }
-  if (absDx < 10 && absDy < 10) {
+  if (absDx < TAP_MAX_DRIFT && absDy < TAP_MAX_DRIFT) {
     if (prefs.autoHideHeader && y < TOP_REVEAL_ZONE + 20) {
       readerLayout.classList.add('header-peek');
       return;
     }
-    const x    = e.changedTouches[0].clientX;
-    const w    = window.innerWidth;
-    const zone = TAP_ZONE * w;
-    if (x < zone)     { goPrev(); return; }
-    if (x > w - zone) { goNext(); return; }
+    const x         = e.changedTouches[0].clientX;
+    const leftZone  = prefs.edgePadding.left  + prefs.margin;
+    const rightZone = prefs.edgePadding.right + prefs.margin;
+    if (leftZone  > 0 && x < leftZone)                        { goPrev(); return; }
+    if (rightZone > 0 && x > window.innerWidth - rightZone)   { goNext(); return; }
     if (prefs.autoHideHeader) readerLayout.classList.toggle('header-peek');
     return;
   }
@@ -2444,7 +2444,21 @@ function attachIframeTouchNav(view) {
       readerLayout.classList.toggle('header-peek');
       return;
     }
-    if (absDx < 10 && absDy < 10) {
+    if (absDx < TAP_MAX_DRIFT && absDy < TAP_MAX_DRIFT) {
+      // Tap in the margin (between text and screen edge) → navigate
+      const leftZone  = prefs.edgePadding.left  + prefs.margin;
+      const rightZone = prefs.edgePadding.right + prefs.margin;
+      if (leftZone > 0 && cx < leftZone) {
+        if (e.cancelable) e.preventDefault();
+        goPrev();
+        return;
+      }
+      if (rightZone > 0 && cx > window.innerWidth - rightZone) {
+        if (e.cancelable) e.preventDefault();
+        goNext();
+        return;
+      }
+      // Tap outside margin — reveal/toggle header
       if (prefs.autoHideHeader && cy < TOP_REVEAL_ZONE + 20) {
         if (e.cancelable) e.preventDefault();
         readerLayout.classList.add('header-peek');
