@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="sl" data-i18n-doc-title="reader.loading_book">
+<head>
+  <meta charset="UTF-8" />
+  <script>document.documentElement.style.visibility='hidden'</script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#1a1a2e" />
+  <link rel="stylesheet" href="/css/main.css" />
+  <link rel="stylesheet" href="/css/reader.css" />
+</head>
+<body>
+
+  <!-- Loading overlay -->
+  <div id="loading-overlay">
+    <span class="spinner"></span>
+    <span id="loading-msg" data-i18n="reader.loading_book">Nalagam knjigo…</span>
+  </div>
+
+  <!-- Reader layout -->
+  <div class="reader-layout">
+
+    <!-- Sensor zone: shows the header when mouse enters top edge (auto-hide mode) -->
+    <div id="header-sensor"></div>
+
+    <!-- Header -->
+    <header class="reader-header">
+      <button id="btn-toc"         class="btn-icon" data-i18n-title="reader.btn_toc"     title="Kazalo vsebine">☰</button>
+
+      <div class="reader-book-info">
+        <div id="book-title"    class="reader-book-title"></div>
+        <div id="chapter-title" class="reader-chapter-title"></div>
+      </div>
+
+      <button id="btn-search"      class="btn-icon" data-i18n-title="reader.btn_search"     title="Iskanje v knjigi">🔍</button>
+      <button id="btn-search-back" class="btn-icon" style="display:none" data-i18n-title="reader.btn_search_back" title="Nazaj na prejšnji položaj">↩</button>
+      <button id="btn-settings"    class="btn-icon" data-i18n-title="reader.btn_settings"   title="Nastavitve branja">⚙</button>
+      <button id="btn-fullscreen"  class="btn-icon" data-i18n-title="reader.btn_fullscreen" title="Celozaslonski način">⛶</button>
+      <button id="btn-back"        class="btn-icon" data-i18n-title="reader.btn_back"       title="Nazaj v knjižnico">←</button>
+    </header>
+
+    <!-- Reading area -->
+    <div class="reader-main">
+      <div class="nav-zone nav-zone-prev" aria-hidden="true">
+        <div class="nav-arrow" id="btn-prev" role="button" data-i18n-aria-label="reader.prev_page" aria-label="Prejšnja stran" tabindex="0">‹</div>
+      </div>
+
+      <div id="epub-viewer"></div>
+
+      <div class="nav-zone nav-zone-next" aria-hidden="true">
+        <div class="nav-arrow" id="btn-next" role="button" data-i18n-aria-label="reader.next_page" aria-label="Naslednja stran" tabindex="0">›</div>
+      </div>
+
+      <!-- Page edge shadow overlay (book-spine border effect) -->
+      <div id="page-edge-shadow"></div>
+
+      <!-- Status bar overlays -->
+      <div id="sb-top"    class="sb-bar sb-bar-top">
+        <span id="sb-tl" class="sb-slot"></span>
+        <span id="sb-tc" class="sb-slot"></span>
+        <span id="sb-tr" class="sb-slot"></span>
+      </div>
+      <div id="sb-sep-top"    class="sb-separator sb-sep-top"    style="display:none"></div>
+      <div id="sb-sep-bottom" class="sb-separator sb-sep-bottom" style="display:none"></div>
+      <div id="sb-bottom" class="sb-bar sb-bar-bottom">
+        <span id="sb-bl" class="sb-slot"></span>
+        <span id="sb-bc" class="sb-slot"></span>
+        <span id="sb-br" class="sb-slot"></span>
+      </div>
+      <!-- Chapter progress bar (overlaid on reading area) -->
+      <div id="sb-chap-prog" class="sb-prog-bar" style="display:none">
+        <div id="sb-chap-prog-fill" class="sb-prog-fill"></div>
+      </div>
+      <!-- Book progress bar (overlaid on reading area) -->
+      <div id="sb-book-prog" class="sb-prog-bar" style="display:none">
+        <div id="sb-book-prog-fill" class="sb-prog-fill"></div>
+      </div>
+    </div>
+
+    <!-- Bottom progress bar -->
+    <div class="reader-progressbar">
+      <div id="progress-fill" class="reader-progressbar-fill" style="width:0%"></div>
+    </div>
+
+  </div><!-- /.reader-layout -->
+
+  <!-- TOC sidebar -->
+  <aside id="toc-sidebar" aria-label="Kazalo vsebine">
+    <div class="toc-sidebar-header">
+      <h2 data-i18n="reader.toc_title">Kazalo vsebine</h2>
+      <button id="toc-close" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri kazalo">×</button>
+    </div>
+    <div id="toc-list"></div>
+  </aside>
+
+  <!-- Search sidebar -->
+  <aside id="search-sidebar" aria-label="Iskanje v knjigi">
+    <div class="search-sidebar-header">
+      <h2 data-i18n="reader.search_title">Iskanje</h2>
+      <button id="search-close" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri iskanje">×</button>
+    </div>
+    <div class="search-input-row">
+      <input type="search" id="search-input" data-i18n-placeholder="reader.search_placeholder" placeholder="Iščite v knjigi…" autocomplete="off" />
+      <button id="search-submit" class="btn-primary" data-i18n="reader.search_btn">Išči</button>
+    </div>
+    <div id="search-status" class="search-status"></div>
+    <div id="search-results" class="search-results"></div>
+  </aside>
+
+  <!-- Settings panel -->
+  <div id="settings-panel" role="complementary" aria-label="Nastavitve branja">
+    <div class="settings-panel-header">
+      <h2 data-i18n="reader.settings_title">Nastavitve branja</h2>
+      <button id="btn-reset-book-prefs" class="btn btn-secondary btn-sm hidden" style="margin-left:auto;font-size:.75rem" data-i18n-title="reader.btn_reset_book" title="Odstrani nastavitve specifične za to knjigo in uporabi globalne privzete" data-i18n="reader.btn_reset_book">
+        Ponastavi za to knjigo
+      </button>
+      <button id="settings-close" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri nastavitve">×</button>
+    </div>
+    <div class="settings-body">
+
+      <!-- Theme -->
+      <div class="setting-row">
+        <div class="setting-label" data-i18n="reader.sb_theme">Tema</div>
+        <div class="theme-buttons">
+          <button class="theme-btn theme-light" data-theme="light" data-i18n="reader.theme_light">Svetla</button>
+          <button class="theme-btn theme-sepia" data-theme="sepia" data-i18n="reader.theme_sepia">Sepija</button>
+          <button class="theme-btn theme-dark"  data-theme="dark"  data-i18n="reader.theme_dark">Temna</button>
+        </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- Font family -->
+      <div class="setting-row">
+        <div class="setting-label" data-i18n="reader.sb_font">Pisava</div>
+        <select id="font-family-select">
+          <!-- populated by JS -->
+        </select>
+      </div>
+
+      <!-- Font size -->
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div class="setting-label" data-i18n="reader.sb_font_size">Velikost pisave</div>
+          <span id="font-size-value" class="setting-value">18px</span>
+        </div>
+        <input type="range" id="font-size-slider" min="12" max="36" step="1" value="18" />
+      </div>
+
+      <!-- Line height -->
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div class="setting-label" data-i18n="reader.sb_line_height">Razmik med vrsticami</div>
+          <span id="line-height-value" class="setting-value">1.6</span>
+        </div>
+        <input type="range" id="line-height-slider" min="1.0" max="3.0" step="0.1" value="1.6" />
+      </div>
+
+      <!-- Margins -->
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div class="setting-label" data-i18n="reader.sb_margins">Robovi</div>
+          <span id="margin-value" class="setting-value">40px</span>
+        </div>
+        <input type="range" id="margin-slider" min="0" max="120" step="4" value="40" />
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- Page layout -->
+      <div class="setting-row">
+        <div class="setting-label" data-i18n="reader.sb_layout">Postavitev strani</div>
+        <div class="spread-buttons">
+          <button class="spread-btn" data-spread="none" data-i18n="reader.spread_one">Ena stran</button>
+          <button class="spread-btn" data-spread="auto" data-i18n="reader.spread_two">Dve strani</button>
+        </div>
+      </div>
+
+      <!-- Override book styles -->
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div>
+            <div class="setting-label" data-i18n="reader.sb_override_styles">Prepiši slog knjige</div>
+            <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_override_styles_hint">
+              Vsili pisavo in barve ne glede na slog knjige
+            </div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="override-styles-toggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Auto-hide header -->
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div>
+            <div class="setting-label" data-i18n="reader.sb_autohide">Samodejno skrij naslovno vrstico</div>
+            <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_autohide_hint">
+              Premaknite miško na vrh, da jo prikažete
+            </div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="autohide-header-toggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Keep screen on -->
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div>
+            <div class="setting-label" data-i18n="reader.sb_screen_on">Zaslon vedno vklopljen</div>
+            <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_screen_on_hint">
+              Prepreči ugasnitev zaslona med branjem
+            </div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="keep-screen-on-toggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- E-ink mode -->
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div>
+            <div class="setting-label" data-i18n="reader.sb_eink">E-ink način</div>
+            <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_eink_hint">
+              Samo črno-belo za e-ink naprave (obarva temo in vsebino)
+            </div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="eink-toggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Paragraph indentation -->
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div>
+            <div class="setting-label" data-i18n="reader.sb_para_indent">Zamik prvega odstavka</div>
+            <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_para_indent_hint">
+              Zamakne prvo vrstico vsakega odstavka
+            </div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="para-indent-toggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Paragraph spacing -->
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div class="setting-label" data-i18n="reader.sb_para_spacing">Razmik med odstavki</div>
+          <span id="para-spacing-value" class="setting-value">0.0em</span>
+        </div>
+        <input type="range" id="para-spacing-slider" min="0" max="30" step="1" value="0" />
+      </div>
+
+      <!-- Mouse wheel navigation -->
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div>
+            <div class="setting-label" data-i18n="reader.sb_mouse_wheel">Pomikanje z miško</div>
+            <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_mouse_wheel_hint">
+              Kolo miške pomika med stranmi
+            </div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="mouse-wheel-nav-toggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div>
+            <div class="setting-label" data-i18n="reader.sb_skip_open">Ne preveri napredek ob odprtju knjige</div>
+            <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_skip_open_hint">
+              Če je vključeno, knjiga se vedno odpre na začetku brez preverjanja shranjenega/sinhroniziranega položaja
+            </div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="skip-open-progress-toggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div>
+            <div class="setting-label" data-i18n="reader.sb_skip_close">Ne shrani ob zaprtju knjige</div>
+            <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_skip_close_hint">
+              Če je vključeno, ob vrnitvi v knjižnico ali zaprtju zavihka se položaj ne shrani samodejno
+            </div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="skip-save-on-close-toggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Hyphenation -->
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div>
+            <div class="setting-label" data-i18n="reader.sb_hyphenation">Deljenje besed</div>
+            <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_hyphenation_hint">
+              Samodejno deljenje besed na koncu vrstice
+            </div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="hyphenation-toggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+      <div class="setting-row" id="hyphen-lang-row">
+        <div class="setting-label" style="font-size:.8rem" data-i18n="reader.sb_hyphenation_lang">Jezik deljenja</div>
+        <select id="hyphen-lang-select" style="margin-top:.25rem">
+          <option value="" data-i18n="reader.sb_hyphenation_lang_auto">Samodejno (iz knjige)</option>
+          <option value="sl">Slovenščina (sl)</option>
+          <option value="en">English (en)</option>
+          <option value="de">Deutsch (de)</option>
+          <option value="fr">Français (fr)</option>
+          <option value="it">Italiano (it)</option>
+          <option value="es">Español (es)</option>
+          <option value="pt">Português (pt)</option>
+          <option value="nl">Nederlands (nl)</option>
+          <option value="pl">Polski (pl)</option>
+          <option value="cs">Čeština (cs)</option>
+          <option value="hr">Hrvatski (hr)</option>
+          <option value="sk">Slovenčina (sk)</option>
+          <option value="ru">Русский (ru)</option>
+          <option value="uk">Українська (uk)</option>
+        </select>
+      </div>
+
+      <!-- Page gap shadow -->
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div>
+            <div class="setting-label" data-i18n="reader.sb_page_shadow">Rob strani (senca knjige)</div>
+            <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_page_shadow_hint">
+              Temni rob med stranema v načinu dveh strani
+            </div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="page-gap-shadow-toggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- Edge padding (curved phone screen insets) -->
+      <div class="setting-section-title" data-i18n="reader.sb_section_edge_pad">Odmik robov strani</div>
+      <div class="setting-row">
+        <div style="font-size:.76rem;color:var(--color-text-muted);margin-bottom:.4rem" data-i18n="reader.sb_edge_pad_hint">Za zaobljene robove zaslona (telefon) — premakne vsebino in statusno vrstico od roba.</div>
+        <div class="setting-row-inline" style="gap:.35rem;margin-bottom:.3rem">
+          <div class="setting-label" style="font-size:.8rem;width:3.5rem;flex-shrink:0" data-i18n="common.top">Zgoraj</div>
+          <span id="edge-pad-top-value" class="setting-value">0px</span>
+          <input type="range" id="edge-pad-top" min="0" max="60" step="1" value="0" style="flex:1" />
+        </div>
+        <div class="setting-row-inline" style="gap:.35rem;margin-bottom:.3rem">
+          <div class="setting-label" style="font-size:.8rem;width:3.5rem;flex-shrink:0" data-i18n="common.bottom">Spodaj</div>
+          <span id="edge-pad-bottom-value" class="setting-value">0px</span>
+          <input type="range" id="edge-pad-bottom" min="0" max="60" step="1" value="0" style="flex:1" />
+        </div>
+        <div class="setting-row-inline" style="gap:.35rem;margin-bottom:.3rem">
+          <div class="setting-label" style="font-size:.8rem;width:3.5rem;flex-shrink:0" data-i18n="common.left">Levo</div>
+          <span id="edge-pad-left-value" class="setting-value">0px</span>
+          <input type="range" id="edge-pad-left" min="0" max="60" step="1" value="0" style="flex:1" />
+        </div>
+        <div class="setting-row-inline" style="gap:.35rem">
+          <div class="setting-label" style="font-size:.8rem;width:3.5rem;flex-shrink:0" data-i18n="common.right">Desno</div>
+          <span id="edge-pad-right-value" class="setting-value">0px</span>
+          <input type="range" id="edge-pad-right" min="0" max="60" step="1" value="0" style="flex:1" />
+        </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- Status bar -->
+      <div class="setting-section-title" data-i18n="reader.sb_section_statusbar">Statusna vrstica</div>
+
+      <!-- Status bar font & style -->
+      <div class="setting-row">
+        <div class="setting-label" data-i18n="reader.sb_bar_font">Pisava vrstice</div>
+        <div class="setting-row-inline" style="gap:.4rem">
+          <select id="sb-font-select" style="flex:1;min-width:0"></select>
+          <button class="sb-style-btn" id="sb-style-normal" title="Navadno">A</button>
+          <button class="sb-style-btn" id="sb-style-bold"   title="Krepko"><strong>A</strong></button>
+          <button class="sb-style-btn" id="sb-style-italic" title="Poševno"><em>A</em></button>
+        </div>
+        <div class="setting-row-inline" style="margin-top:.35rem">
+          <div class="setting-label" style="font-size:.8rem" data-i18n="common.size">Velikost</div>
+          <span id="sb-font-size-value" class="setting-value">11px</span>
+          <input type="range" id="sb-font-size-slider" min="8" max="18" step="1" value="11" style="flex:1" />
+        </div>
+      </div>
+
+      <!-- Stat items -->
+      <div id="sb-items-list" class="sb-items-list">
+        <div style="font-size:.82rem;color:var(--color-text-muted)">Nalaganje&hellip;</div>
+      </div>
+
+      <!-- Separator lines -->
+      <div class="setting-row">
+        <div class="setting-label" style="margin-bottom:.35rem" data-i18n="reader.sb_separator">Ločilna črta</div>
+        <div class="setting-row-inline" style="gap:.5rem">
+          <div style="flex:1">
+            <div style="font-size:.8rem;margin-bottom:.2rem" data-i18n="reader.sb_sep_top">Zgoraj (pod zgornjo vrstico)</div>
+            <label class="toggle">
+              <input type="checkbox" id="sb-sep-top-toggle" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div style="flex:1">
+            <div style="font-size:.8rem;margin-bottom:.2rem" data-i18n="reader.sb_sep_bottom">Spodaj (nad spodnjo vrstico)</div>
+            <label class="toggle">
+              <input type="checkbox" id="sb-sep-bottom-toggle" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="setting-row-inline" id="sb-sep-thick-row" style="display:none;margin-top:.4rem">
+          <div class="setting-label" style="font-size:.8rem" data-i18n="reader.sb_sep_thickness">Debelina</div>
+          <span id="sb-sep-thick-value" class="setting-value">1px</span>
+          <input type="range" id="sb-sep-thick-slider" min="1" max="5" step="1" value="1" style="flex:1" />
+        </div>
+      </div>
+
+      <!-- Book progress bar -->
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div class="setting-label" data-i18n="reader.sb_book_prog">Napredek knjige (trak)</div>
+          <label class="toggle">
+            <input type="checkbox" id="sb-book-prog-toggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div id="sb-book-prog-opts" style="display:none;margin-top:.3rem">
+          <div class="setting-row-inline" style="flex-wrap:wrap;gap:.4rem">
+            <div class="setting-label" style="font-size:.8rem">Položaj</div>
+            <select id="sb-book-prog-pos">
+              <option value="top" data-i18n="common.top">Zgoraj</option>
+              <option value="bottom" data-i18n="common.bottom">Spodaj</option>
+            </select>
+            <div class="setting-label" style="font-size:.8rem;margin-left:.25rem" data-i18n="reader.sb_sep_thickness">Debelina</div>
+            <span id="sb-book-prog-thick-value" class="setting-value">3px</span>
+            <input type="range" id="sb-book-prog-thick-slider" min="1" max="10" step="1" value="3" style="flex:1;min-width:80px" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Chapter progress bar -->
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div class="setting-label" data-i18n="reader.sb_chap_prog">Napredek poglavja (trak)</div>
+          <label class="toggle">
+            <input type="checkbox" id="sb-chap-prog-toggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div id="sb-chap-prog-opts" style="display:none;margin-top:.3rem">
+          <div class="setting-row-inline" style="flex-wrap:wrap;gap:.4rem">
+            <div class="setting-label" style="font-size:.8rem" data-i18n="common.position">Položaj</div>
+            <select id="sb-chap-prog-pos">
+              <option value="top" data-i18n="common.top">Zgoraj</option>
+              <option value="bottom" data-i18n="common.bottom">Spodaj</option>
+            </select>
+            <div class="setting-label" style="font-size:.8rem;margin-left:.25rem" data-i18n="reader.sb_sep_thickness">Debelina</div>
+            <span id="sb-chap-prog-thick-value" class="setting-value">2px</span>
+            <input type="range" id="sb-chap-prog-thick-slider" min="1" max="10" step="1" value="2" style="flex:1;min-width:80px" />
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-divider"></div>
+
+      <!-- Dictionaries -->
+      <div class="setting-row">
+        <div class="setting-label" data-i18n="reader.sb_dicts">Slovarji</div>
+        <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.1rem;margin-bottom:.35rem" data-i18n="reader.sb_dicts_hint">
+          Izberite slovarje in nastavite vrstni red iskanja (&#8593;&#8595;)
+        </div>
+        <div id="dict-settings-list">
+          <div style="font-size:.82rem;color:var(--color-text-muted)">Nalaganje…</div>
+        </div>
+      </div>
+
+    </div><!-- /.settings-body -->
+  </div><!-- /#settings-panel -->
+
+  <!-- Backdrop -->
+  <div id="panel-backdrop"></div>
+
+  <!-- Dictionary popup (bottom sheet) -->
+  <div id="dict-popup" class="dict-popup" role="dialog" aria-modal="true" aria-label="Slovar" aria-hidden="true">
+    <div class="dict-popup-handle"></div>
+    <div class="dict-popup-header">
+      <span id="dict-popup-word" class="dict-popup-word-title"></span>
+      <button id="dict-popup-close" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri slovar">&#x2715;</button>
+    </div>
+    <div id="dict-popup-results" class="dict-popup-results"></div>
+  </div>
+  <div id="dict-backdrop" class="dict-backdrop"></div>
+
+  <div id="toast-container"></div>
+
+  <!-- JSZip must be loaded before epub.js -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/localforage@1.10.0/dist/localforage.min.js"></script>
+  <script type="module" src="/js/reader_v4.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/js/sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>

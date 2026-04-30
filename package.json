@@ -8,29 +8,20 @@
   },
   "scripts": {
     "start": "node server/index.js",
-    "dev": "nodemon server/index.js",
-    "build:v3": "vite build --config vite.config.mjs",
-    "watch:v3": "vite build --config vite.config.mjs --watch"
+    "dev": "nodemon server/index.js"
   },
   "dependencies": {
-    "@edrlab/thorium-web": "^1.4.1",
-    "@readium/css": "^2.0.2",
-    "@readium/navigator": "^2.5.1",
     "adm-zip": "^0.5.16",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^9.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "fast-xml-parser": "^4.4.1",
+    "fast-xml-parser": "^5.7.2",
     "jsonwebtoken": "^9.0.2",
-    "multer": "^2.0.0",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "multer": "^2.0.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^6.0.1",
-    "nodemon": "^3.1.0",
-    "vite": "^8.0.10"
+    "nodemon": "^3.1.0"
   }
 }

@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const { initDb, DATA_DIR } = require('./db');
@@ -33,16 +34,52 @@ if (process.env.CORS_ORIGIN) {
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false }));
 
+// ── Browser-friendly module fallback for vendored Flow imports
+app.use((req, res, next) => {
+  if (req.method !== 'GET') return next();
+  if (path.extname(req.path)) return next();
+
+  const publicDir = path.join(__dirname, '../public');
+
+  if (req.path.startsWith('/js/flow/')) {
+    const filePath = path.join(publicDir, `${req.path}.js`);
+    if (fs.existsSync(filePath)) {
+      return res.sendFile(filePath);
+    }
+
+    const indexPath = path.join(publicDir, req.path, 'index.js');
+    if (fs.existsSync(indexPath)) {
+      return res.sendFile(indexPath);
+    }
+  }
+
+  if (req.path.startsWith('/js/utils/')) {
+    const rewritten = `/js/flow${req.path.slice('/js'.length)}`;
+    const filePath = path.join(publicDir, `${rewritten}.js`);
+    if (fs.existsSync(filePath)) {
+      return res.sendFile(filePath);
+    }
+    const indexPath = path.join(publicDir, rewritten, 'index.js');
+    if (fs.existsSync(indexPath)) {
+      return res.sendFile(indexPath);
+    }
+  }
+
+  if (req.path === '/js/mapping') {
+    const filePath = path.join(publicDir, 'js/flow/mapping.js');
+    if (fs.existsSync(filePath)) {
+      return res.sendFile(filePath);
+    }
+  }
+
+  next();
+});
+
 // ── Static files ──────────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, '../public')));
 // Expose extracted covers and user-uploaded fonts to the browser
 app.use('/covers',     express.static(path.join(DATA_DIR, 'covers')));
 app.use('/user-fonts', express.static(path.join(DATA_DIR, 'fonts')));
-// Thorium Web locale files (loaded by i18next-http-backend at /locales/:lng/:ns.json)
-app.use('/locales', express.static(
-  path.join(__dirname, '../node_modules/@edrlab/thorium-web/dist/locales'),
-  { maxAge: '1d' }
-));
 
 // ── API routes ────────────────────────────────────────────────────────────────
 app.use('/api/auth',     authRoutes);

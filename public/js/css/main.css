@@ -80,7 +80,7 @@ html, body {
   background: var(--color-bg);
   color: var(--color-text);
   line-height: 1.5;
-  scrollbar-gutter: stable;
+  /* scrollbar-gutter: stable; */
 }
 
 a { color: var(--color-accent); text-decoration: none; }

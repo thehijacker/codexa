@@ -16,7 +16,6 @@ html, body {
   background: var(--reader-page-bg, var(--color-bg));
   transition: background .3s;
   position: relative;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* ── Header sensor (auto-hide trigger) ───────────────────────────────────────── */
@@ -34,7 +33,7 @@ html, body {
 /* ── Auto-hide header ────────────────────────────────────────────────────────── */
 .reader-layout.autohide-header .reader-header {
   position: absolute;
-  top: 0;
+  top: env(safe-area-inset-top, 0px);
   left: 0;
   right: 0;
   transform: translateY(-100%);
@@ -117,7 +116,7 @@ html, body {
   touch-action: pan-y; /* tell iOS we own horizontal swipes; vertical stays native */
   /* Edge inset: shrinks viewer away from curved screen edges */
   margin-top:    var(--edge-pad-top,    0px);
-  margin-bottom: var(--edge-pad-bottom, 0px);
+  margin-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--edge-pad-bottom, 0px));
   margin-left:   var(--edge-pad-left,   0px);
   margin-right:  var(--edge-pad-right,  0px);
 }
@@ -128,12 +127,18 @@ html, body {
 /* Book-edge shadow overlay: sits above the epub.js iframes as a reader-main sibling */
 #page-edge-shadow {
   display: none;
-  position: fixed;
+  position: absolute;
   inset: 0;
   pointer-events: none;
   z-index: 6;
-  box-shadow: inset 18px 0 28px 0 rgba(0,0,0,.45),
-              inset -18px 0 28px 0 rgba(0,0,0,.45);
+  background-image:
+    linear-gradient(to right, rgba(0,0,0,.45), rgba(0,0,0,0)),
+    linear-gradient(to left, rgba(0,0,0,.45), rgba(0,0,0,0));
+  background-position: left top, right top;
+  background-repeat: no-repeat;
+  background-size: 32px 100%, 32px 100%;
+  background-origin: border-box;
+  background-clip: border-box;
 }
 #page-edge-shadow.active {
   display: block;
@@ -553,8 +558,8 @@ input[type="range"]::-moz-range-thumb {
   color: var(--color-text-muted);
   user-select: none;
 }
-.sb-bar-top    { top:    calc(5px + var(--edge-pad-top,    0px)); }
-.sb-bar-bottom { bottom: calc(7px + var(--edge-pad-bottom, 0px)); }
+.sb-bar-top    { top:    calc(var(--edge-pad-top, 0px) + 3px); }
+.sb-bar-bottom { bottom: calc(env(safe-area-inset-bottom, 0px) + 7px + var(--edge-pad-bottom, 0px)); }
 .sb-slot       { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-slot:first-child  { text-align: left; }
 .sb-slot:nth-child(2) { text-align: center; }
@@ -576,8 +581,8 @@ input[type="range"]::-moz-range-thumb {
 }
 /* top separator: sits just below the top status bar text */
 .sb-sep-top    { top:    calc(var(--sb-font-size, 11px) + 12px + var(--edge-pad-top,    0px)); }
-/* bottom separator: mirror of top — same distance above status bar as top sep is below it */
-.sb-sep-bottom { bottom: calc(var(--sb-font-size, 11px) + 12px + var(--edge-pad-bottom, 0px)); }
+/* bottom separator: mirror of top — same distance above the bottom bar as top sep is below it */
+.sb-sep-bottom { bottom: calc(env(safe-area-inset-bottom, 0px) + var(--sb-font-size, 11px) + 12px + var(--edge-pad-bottom, 0px)); }
 /* Progress bars */
 .sb-prog-bar {
   position: absolute;
