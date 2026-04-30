@@ -1156,7 +1156,7 @@ function openSearch() {
   tocSidebar.classList.remove('open');
   settingsPanel.classList.remove('open');
   panelBackdrop.classList.add('visible');
-  if (prefs.autoHideHeader) readerLayout.classList.add('header-peek');
+  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
   setTimeout(() => searchInput.focus(), 280);
 }
 
@@ -2552,6 +2552,7 @@ document.getElementById('btn-search-back').addEventListener('click', async () =>
   const cfi = preSearchCfi;
   preSearchCfi = null;
   searchBackBtn.style.display = 'none';
+  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
   await rendition.display(cfi);
 });document.getElementById('search-close').addEventListener('click', closePanels);
 document.getElementById('search-submit').addEventListener('click', () => {
