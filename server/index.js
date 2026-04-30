@@ -13,6 +13,7 @@ const { kosyncRouter, proxyRouter } = require('./routes/kosync');
 const opdsRoutes       = require('./routes/opds');
 const dictionaryRoutes = require('./routes/dictionary');
 const shelvesRoutes    = require('./routes/shelves');
+const readiumRoutes    = require('./routes/readium');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -37,6 +38,11 @@ app.use(express.static(path.join(__dirname, '../public')));
 // Expose extracted covers and user-uploaded fonts to the browser
 app.use('/covers',     express.static(path.join(DATA_DIR, 'covers')));
 app.use('/user-fonts', express.static(path.join(DATA_DIR, 'fonts')));
+// Thorium Web locale files (loaded by i18next-http-backend at /locales/:lng/:ns.json)
+app.use('/locales', express.static(
+  path.join(__dirname, '../node_modules/@edrlab/thorium-web/dist/locales'),
+  { maxAge: '1d' }
+));
 
 // ── API routes ────────────────────────────────────────────────────────────────
 app.use('/api/auth',     authRoutes);
@@ -48,6 +54,7 @@ app.use('/api/fonts',    fontsRoutes);
 app.use('/api/kosync',   proxyRouter);   // JWT-protected proxy to external server
 app.use('/api/opds',       opdsRoutes);
 app.use('/api/dictionary', dictionaryRoutes);
+app.use('/api/readium',   readiumRoutes);
 
 // KOReader kosync protocol — must be AFTER /api routes to avoid shadowing
 // KOReader devices point their sync settings to this server's base URL.

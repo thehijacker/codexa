@@ -204,7 +204,7 @@ function renderGrid(list) {
         card.classList.add('tapped');
         return;
       }
-      window.location.href = `/reader.html?id=${book.id}`;
+      window.location.href = `/readerv2.html?id=${book.id}`;
       sessionStorage.setItem('br_last_shelf', String(currentShelfId));
       sessionStorage.setItem('br_last_search', document.getElementById('search-input')?.value || '');
     });
