@@ -121,6 +121,15 @@
         grid-template-columns: 1fr;
       }
     }
+    .toggle { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0; }
+    .toggle input { opacity:0; width:0; height:0; }
+    .toggle-slider { position:absolute; inset:0; background:var(--color-border); border-radius:24px; cursor:pointer; transition:background .2s; }
+    .toggle-slider::before { content:''; position:absolute; left:3px; top:3px; width:18px; height:18px; border-radius:50%; background:#fff; transition:transform .2s; }
+    .toggle input:checked + .toggle-slider { background:var(--color-accent); }
+    .toggle input:checked + .toggle-slider::before { transform:translateX(20px); }
+    .setting-toggle-row { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+    .setting-toggle-label { font-size:.9rem; font-weight:500; color:var(--color-text); }
+    .setting-toggle-hint { font-size:.78rem; color:var(--color-text-muted); margin-top:.2rem; line-height:1.5; }
   </style>
 </head>
 <body class="sidebar-layout">
@@ -143,6 +152,21 @@
 
   <main class="app-main">
     <div class="page-header"><h1 data-i18n="settings.page_title">Nastavitve</h1></div>
+
+    <!-- General settings -->
+    <div class="settings-card">
+      <h2 data-i18n="settings.general_title">Splošno</h2>
+      <div class="setting-toggle-row">
+        <div>
+          <div class="setting-toggle-label" data-i18n="settings.auto_open_last">Odpri zadnjo knjigo ob zagonu</div>
+          <div class="setting-toggle-hint" data-i18n="settings.auto_open_last_hint">Ob odprtju knjižnice se takoj odpre zadnja brana knjiga</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="auto-open-last-toggle" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
 
     <!-- KOReader sync section -->
     <div class="settings-card">

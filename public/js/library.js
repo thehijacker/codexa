@@ -15,6 +15,7 @@ let seriesFilter        = null; // active series name filter
 // ── URL-based shelf navigation (from settings / opds pages) ───────────────────
 const urlParams    = new URLSearchParams(location.search);
 // Priority: explicit ?shelf= URL param > sessionStorage (return from reader) > localStorage (last used) > 'all'
+const returningFromReader = !!sessionStorage.getItem('br_last_shelf');
 const initialShelf  = urlParams.get('shelf') || sessionStorage.getItem('br_last_shelf') || localStorage.getItem('br_active_shelf') || 'all';
 const initialSearch = sessionStorage.getItem('br_last_search') || '';
 sessionStorage.removeItem('br_last_shelf');
@@ -647,6 +648,12 @@ async function loadBooks() {
   try {
     books = await apiFetch('/books');
     booksLoaded = true;
+    if (!returningFromReader && !urlParams.has('shelf') && localStorage.getItem('br_auto_open_last') === 'true') {
+      const lastRead = books
+        .filter(b => (b.percentage || 0) > 0 && b.progress_updated_at)
+        .sort((a, b) => b.progress_updated_at - a.progress_updated_at)[0];
+      if (lastRead) { sessionStorage.setItem('br_last_shelf', String(currentShelfId)); window.location.href = `/readerv4.html?id=${lastRead.id}`; return; }
+    }
     applyFilter();
   } catch (err) {
     toast.error(err.message);

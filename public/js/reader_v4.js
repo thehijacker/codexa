@@ -123,6 +123,8 @@ const DEFAULT_PREFS = {
   mouseWheelNav:  false,        // navigate pages with mouse wheel
   skipOpenProgressCheck: false, // if true, do not restore/sync progress on open
   skipSaveOnClose: false,       // if true, do not auto-save when leaving/closing
+  chapHeadSpacing: true,        // override book heading margins to compact spacing
+  disableJustify:  false,        // left-align text instead of justified
   hyphenation:    false,         // CSS hyphens: auto inside epub iframe
   hyphenLang:     '',           // empty = keep book's own lang attr; else override e.g. 'en'
   pageGapShadow:  false,        // show epub.js center-spine box-shadow in two-page mode
@@ -429,6 +431,10 @@ img {
 ${prefs.eink ? buildEinkCss(theme) : ''}
 ${prefs.paraIndent ? `p { text-indent: ${(prefs.paraIndentSize / 10).toFixed(1)}em !important; }` : 'p { text-indent: 0 !important; }'}
 ${prefs.paraSpacing > 0 ? `p { margin-bottom: ${(prefs.paraSpacing / 10).toFixed(1)}em !important; }` : ''}
+${prefs.disableJustify ? 'body, p, li, td, th, blockquote { text-align: left !important; }' : ''}
+${prefs.chapHeadSpacing ? `h1,h2,h3,h4,h5,h6 { margin: 0.2em 0 !important; padding: 0 !important; }
+[class*="heading"],[class*="chapter-head"],[class*="chapterHead"],[class*="chapHead"],[class*="title-block"],[class*="titleBlock"] { height:auto !important; min-height:0 !important; padding-top:0 !important; padding-bottom:0 !important; margin-top:0 !important; margin-bottom:0 !important; }
+div:has(>h1),div:has(>h2),div:has(>h3),div:has(>h4) { height:auto !important; min-height:0 !important; padding-top:0 !important; padding-bottom:0 !important; margin-top:0 !important; margin-bottom:0 !important; }` : ''}
 ${prefs.hyphenation ? 'html, body, p, li { hyphens: auto !important; }' : 'html, body, p, li { hyphens: none !important; }'}
 /* search highlights — background only, zero layout impact */
 mark.br-hl {
@@ -1556,6 +1562,10 @@ function syncSettingsUi() {
   const psVl = document.getElementById('para-spacing-value');
   if (psEl) psEl.value = prefs.paraSpacing;
   if (psVl) psVl.textContent = (prefs.paraSpacing / 10).toFixed(1) + 'em';
+  const chEl = document.getElementById('chap-head-spacing-toggle');
+  if (chEl) chEl.checked = prefs.chapHeadSpacing;
+  const djEl = document.getElementById('disable-justify-toggle');
+  if (djEl) djEl.checked = prefs.disableJustify;
   const mwEl = document.getElementById('mouse-wheel-nav-toggle');
   if (mwEl) mwEl.checked = prefs.mouseWheelNav;
   const hypEl  = document.getElementById('hyphenation-toggle');
@@ -1918,6 +1928,14 @@ function initSettingsUi() {
     prefs.paraSpacing = parseInt(e.target.value);
     const vl = document.getElementById('para-spacing-value');
     if (vl) vl.textContent = (prefs.paraSpacing / 10).toFixed(1) + 'em';
+    reapplyStyles(); persistPrefs();
+  });
+  document.getElementById('chap-head-spacing-toggle')?.addEventListener('change', (e) => {
+    prefs.chapHeadSpacing = e.target.checked;
+    reapplyStyles(); persistPrefs();
+  });
+  document.getElementById('disable-justify-toggle')?.addEventListener('change', (e) => {
+    prefs.disableJustify = e.target.checked;
     reapplyStyles(); persistPrefs();
   });
   document.getElementById('mouse-wheel-nav-toggle')?.addEventListener('change', (e) => {

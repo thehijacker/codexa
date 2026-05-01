@@ -205,6 +205,15 @@ btnSaveReg?.addEventListener('click', async () => {
     setButtonLoading(btnSaveReg, false, t('settings.btn_save'));
   }
 });
+// ── General settings (localStorage only) ─────────────────────────────────────
+const autoOpenToggle = document.getElementById('auto-open-last-toggle');
+if (autoOpenToggle) {
+  autoOpenToggle.checked = localStorage.getItem('br_auto_open_last') === 'true';
+  autoOpenToggle.addEventListener('change', () => {
+    localStorage.setItem('br_auto_open_last', String(autoOpenToggle.checked));
+  });
+}
+
 // ── Logout ────────────────────────────────────────────────────────────────────
 document.getElementById('btn-logout')?.addEventListener('click', () => {
   localStorage.removeItem('br_token');
