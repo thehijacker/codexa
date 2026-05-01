@@ -206,6 +206,10 @@ const searchSubmitBtn = document.getElementById('search-submit');
 const searchStatusEl  = document.getElementById('search-status');
 const searchResultsEl = document.getElementById('search-results');
 const searchBackBtn   = document.getElementById('btn-search-back');
+const searchAcceptBtn = document.getElementById('btn-search-accept');
+const jumpPctPanel    = document.getElementById('jump-pct-panel');
+const jumpPctSlider   = document.getElementById('jump-pct-slider');
+const jumpPctValue    = document.getElementById('jump-pct-value');
 const fullscreenBtn   = document.getElementById('btn-fullscreen');
 
 // ── Prefs ─────────────────────────────────────────────────────────────────────
@@ -987,10 +991,14 @@ document.getElementById('header-sensor').addEventListener('click', () => {
   if (!prefs.autoHideHeader) return;
   readerLayout.classList.add('header-peek');
 });
+// Track whether the mouse is currently inside the header bar
+let isMouseOverHeader = false;
+document.querySelector('.reader-header').addEventListener('mouseenter', () => { isMouseOverHeader = true; });
 // Hide header as soon as mouse leaves the header bar itself
 document.querySelector('.reader-header').addEventListener('mouseleave', () => {
+  isMouseOverHeader = false;
   if (!prefs.autoHideHeader) return;
-  if (!tocSidebar.classList.contains('open')) {
+  if (!tocSidebar.classList.contains('open') && jumpPctPanel.style.display === 'none') {
     readerLayout.classList.remove('header-peek');
   }
 });
@@ -1099,6 +1107,13 @@ function openSettings() {
   if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek'); // hide bar when settings opens
   renderDictSettings(); // lazy-load dictionary list
 }
+function closeJumpPanel() {
+  jumpPctPanel.style.display = 'none';
+  // Re-evaluate auto-hide: hide header unless the mouse is still over it
+  if (prefs.autoHideHeader && !tocSidebar.classList.contains('open') && !isMouseOverHeader) {
+    readerLayout.classList.remove('header-peek');
+  }
+}
 function closePanels() {
   const activeEl = document.activeElement;
   const searchHadFocus = !!activeEl && searchSidebar.contains(activeEl);
@@ -1106,6 +1121,7 @@ function closePanels() {
   settingsPanel.classList.remove('open');
   searchSidebar.classList.remove('open');
   panelBackdrop.classList.remove('visible');
+  closeJumpPanel();
   if (searchHadFocus && typeof activeEl.blur === 'function') activeEl.blur();
   if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
 }
@@ -1250,7 +1266,8 @@ async function jumpToSearchResult(cfi, href, query) {
   // Save position before first jump so user can return
   if (!preSearchCfi && currentCfi) {
     preSearchCfi = currentCfi;
-    searchBackBtn.style.display = '';
+    searchBackBtn.style.display   = '';
+    searchAcceptBtn.style.display = '';
   }
   closePanels();
   clearSearchHighlights();
@@ -2308,10 +2325,15 @@ async function syncOnOpen(localProgress) {
   const bestTime  = best.timestamp             || 0;
   console.log('[kosync] best:', best.device, Math.round((best.percentage||0)*100)+'%', 'ts:', bestTime, 'localTime:', localTime);
 
-  // Always show dialog when positions differ by more than 1% — user decides.
-  // ★ in the dialog marks whichever timestamp is newer.
+  // If the remote xpointer exactly matches our last-pushed xpointer, both readers
+  // are at the same paragraph — skip the dialog even if percentages differ (they
+  // are on different scales and the mismatch is expected, not a real position gap).
+  const localXPointer = int?.progress || null;
+  const xpointerMatch = !!(localXPointer && best.progress && localXPointer === best.progress);
+  console.log('[kosync] xpointerMatch:', xpointerMatch, 'local:', localXPointer, 'remote:', best.progress);
+
   const pctDiffers = Math.abs((best.percentage || 0) - localPct) > 0.01;
-  if (pctDiffers) {
+  if (!xpointerMatch && pctDiffers) {
     const doSync = await showSyncDialog(best, localPct, localTime);
     // Return both percentage and the xpointer string so the caller can navigate
     // directly to a spine item when the xpointer is a DocFragment-only reference.
@@ -2414,7 +2436,7 @@ function handleTouchEnd(e) {
   const absDy = Math.abs(dy);
   const y     = e.changedTouches[0].clientY;
   if (prefs.autoHideHeader && dy > SWIPE_DOWN_OPEN && absDx < 70) {
-    readerLayout.classList.toggle('header-peek');
+    if (!readerLayout.classList.toggle('header-peek')) closeJumpPanel();
     return;
   }
   if (absDx < TAP_MAX_DRIFT && absDy < TAP_MAX_DRIFT) {
@@ -2474,7 +2496,7 @@ function attachIframeTouchNav(view) {
     const absDy  = Math.abs(dy);
     if (prefs.autoHideHeader && dy > SWIPE_DOWN_OPEN && absDx < 70) {
       if (e.cancelable) e.preventDefault();
-      readerLayout.classList.toggle('header-peek');
+      if (!readerLayout.classList.toggle('header-peek')) closeJumpPanel();
       return;
     }
     if (absDx < TAP_MAX_DRIFT && absDy < TAP_MAX_DRIFT) {
@@ -2584,10 +2606,40 @@ document.getElementById('btn-search-back').addEventListener('click', async () =>
   clearSearchHighlights();
   const cfi = preSearchCfi;
   preSearchCfi = null;
-  searchBackBtn.style.display = 'none';
+  searchBackBtn.style.display   = 'none';
+  searchAcceptBtn.style.display = 'none';
   if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
   await rendition.display(cfi);
-});document.getElementById('search-close').addEventListener('click', closePanels);
+});
+document.getElementById('btn-search-accept').addEventListener('click', () => {
+  clearSearchHighlights();
+  preSearchCfi = null;
+  searchBackBtn.style.display   = 'none';
+  searchAcceptBtn.style.display = 'none';
+  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+});
+document.getElementById('btn-jump-pct').addEventListener('click', () => {
+  if (jumpPctPanel.style.display !== 'none') {
+    closeJumpPanel();
+    return;
+  }
+  jumpPctSlider.value = String(Math.round(currentPct * 100));
+  jumpPctValue.textContent = `${jumpPctSlider.value}%`;
+  jumpPctPanel.style.display = '';
+});
+jumpPctSlider.addEventListener('input', () => {
+  jumpPctValue.textContent = `${jumpPctSlider.value}%`;
+});
+jumpPctSlider.addEventListener('change', async () => {
+  await seekToPercentage(parseInt(jumpPctSlider.value, 10) / 100);
+});
+document.addEventListener('mousedown', e => {
+  if (jumpPctPanel.style.display === 'none') return;
+  if (!jumpPctPanel.contains(e.target) && e.target.id !== 'btn-jump-pct') {
+    closeJumpPanel();
+  }
+});
+document.getElementById('search-close').addEventListener('click', closePanels);
 document.getElementById('search-submit').addEventListener('click', () => {
   const q = searchInput.value.trim();
   if (q.length >= 2) runSearch(q);
@@ -2714,17 +2766,27 @@ async function init() {
     const syncTarget = prefs.skipOpenProgressCheck ? null : await syncOnOpen(localProgress);
     if (syncTarget?.percentage != null) {
       try {
-        // If the xpointer is a plain chapter-start (DocFragment[N]/body with no paragraph
-        // detail), navigate directly to that spine item. This avoids the byte-vs-char
-        // percentage mismatch that causes the reader to land one page past the chapter start
-        // (noticeable in two-page spread mode).
-        const dfMatch = syncTarget.progress?.match(/^\/body\/DocFragment\[(\d+)\]\/body$/);
+        // Any DocFragment-based xpointer — navigate to the correct spine item directly.
+        // External reader percentages use a different scale than epub.js locations, so
+        // using seekToPercentage(externalPct) reliably lands in the wrong position.
+        // For paragraph-level xpointers we also try a best-effort inline CFI first.
+        const dfMatch = syncTarget.progress?.match(/^\/body\/DocFragment\[(\d+)\]/);
         if (dfMatch) {
           const spineIdx  = parseInt(dfMatch[1]) - 1; // DocFragment is 1-based
           const spineItem = book.spine.get(spineIdx);
           if (spineItem?.href) {
-            console.log('[kosync] navigating to spine item', spineIdx, spineItem.href);
-            await rendition.display(spineItem.href);
+            // Try best-effort CFI from paragraph index: /body/p[M] → epubcfi(/6/N*2!/4/M*2)
+            const paraMatch = syncTarget.progress.match(/\/p\[(\d+)\]/);
+            let navigated = false;
+            if (paraMatch) {
+              const guessCfi = `epubcfi(/6/${(spineIdx + 1) * 2}!/4/${parseInt(paraMatch[1]) * 2})`;
+              console.log('[kosync] trying best-effort CFI', guessCfi);
+              try { await rendition.display(guessCfi); navigated = true; } catch { navigated = false; }
+            }
+            if (!navigated) {
+              console.log('[kosync] navigating to spine item', spineIdx, spineItem.href);
+              await rendition.display(spineItem.href);
+            }
           } else {
             console.warn('[kosync] spine item not found for index', spineIdx, '— falling back to pct');
             const key    = `br_locs_${currentBook.file_hash}`;
@@ -2737,7 +2799,7 @@ async function init() {
             if (book.locations.length() > 0) await seekToPercentage(syncTarget.percentage);
           }
         } else {
-          // Paragraph-level xpointer or no progress string — use percentage
+          // No DocFragment info (no xpointer or unknown format) — fall back to percentage
           const key    = `br_locs_${currentBook.file_hash}`;
           const cached = localStorage.getItem(key);
           if (cached) { try { book.locations.load(cached); } catch { localStorage.removeItem(key); } }

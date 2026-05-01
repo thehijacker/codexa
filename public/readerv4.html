@@ -37,12 +37,23 @@
         <div id="chapter-title" class="reader-chapter-title"></div>
       </div>
 
-      <button id="btn-search"      class="btn-icon" data-i18n-title="reader.btn_search"     title="Iskanje v knjigi">🔍</button>
-      <button id="btn-search-back" class="btn-icon" style="display:none" data-i18n-title="reader.btn_search_back" title="Nazaj na prejšnji položaj">↩</button>
-      <button id="btn-settings"    class="btn-icon" data-i18n-title="reader.btn_settings"   title="Nastavitve branja">⚙</button>
+      <button id="btn-search"        class="btn-icon" data-i18n-title="reader.btn_search"        title="Iskanje v knjigi">🔍</button>
+      <button id="btn-search-back"   class="btn-icon" style="display:none" data-i18n-title="reader.btn_search_back"   title="Nazaj na prejšnji položaj">↩</button>
+      <button id="btn-search-accept" class="btn-icon" style="display:none" data-i18n-title="reader.btn_search_accept" title="Sprejmi položaj">✓</button>
+      <button id="btn-jump-pct"      class="btn-icon" data-i18n-title="reader.btn_jump_pct"      title="Skoči na odstotek">%</button>
+      <button id="btn-settings"      class="btn-icon" data-i18n-title="reader.btn_settings"      title="Nastavitve branja">⚙</button>
       <button id="btn-fullscreen"  class="btn-icon" data-i18n-title="reader.btn_fullscreen" title="Celozaslonski način">⛶</button>
       <button id="btn-back"        class="btn-icon" data-i18n-title="reader.btn_back"       title="Nazaj v knjižnico">←</button>
     </header>
+
+    <!-- Jump-to-percentage panel -->
+    <div id="jump-pct-panel" style="display:none">
+      <span class="setting-label" data-i18n="reader.jump_pct_label">Položaj v knjigi</span>
+      <div class="jump-pct-row">
+        <input type="range" id="jump-pct-slider" min="0" max="100" step="1" value="0" />
+        <span id="jump-pct-value" class="setting-value">0%</span>
+      </div>
+    </div>
 
     <!-- Reading area -->
     <div class="reader-main">
