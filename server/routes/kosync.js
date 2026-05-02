@@ -16,7 +16,7 @@
 // Requires Node.js 18+ for the built-in fetch() API.
 
 const express = require('express');
-const bcrypt  = require('bcryptjs');
+const bcrypt  = require('bcrypt');
 const crypto  = require('crypto');
 const { getDb }             = require('../db');
 const { authenticateToken } = require('../middleware/auth');

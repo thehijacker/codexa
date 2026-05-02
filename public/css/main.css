@@ -299,6 +299,14 @@ input:focus, select:focus, textarea:focus {
 .app-body-header .logo:hover { text-decoration: none; }
 .app-header nav { display: flex; align-items: center; gap: .75rem; }
 
+.app-version {
+  font-size: .65em;
+  font-weight: 400;
+  opacity: .55;
+  vertical-align: middle;
+  margin-left: .2em;
+}
+
 .app-main {
   flex: 1;
   padding: 2rem 1.5rem;

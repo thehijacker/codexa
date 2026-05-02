@@ -1,8 +1,9 @@
-﻿const express  = require('express');
-const bcrypt   = require('bcryptjs');
-const jwt      = require('jsonwebtoken');
-const path     = require('path');
-const fs       = require('fs');
+﻿const express    = require('express');
+const bcrypt     = require('bcrypt');
+const jwt        = require('jsonwebtoken');
+const path       = require('path');
+const fs         = require('fs');
+const rateLimit  = require('express-rate-limit');
 const { getDb, DATA_DIR } = require('../db');
 const { authenticateToken } = require('../middleware/auth');
 
@@ -11,6 +12,15 @@ const COVERS_DIR = path.join(DATA_DIR, 'covers');
 
 const router      = express.Router();
 const SALT_ROUNDS = 12;
+
+// Rate-limit sensitive auth endpoints: 10 attempts per 15 minutes per IP.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Preveč poskusov. Počakajte 15 minut.' },
+});
 
 function isValidUsername(u) {
   return typeof u === 'string' && /^[a-zA-Z0-9_]{3,32}$/.test(u);
@@ -46,7 +56,7 @@ router.get('/registration-status', (req, res) => {
   res.json({ enabled });
 });
 
-router.post('/register', async (req, res) => {
+router.post('/register', authLimiter, async (req, res) => {
   try {
     const { name, username, password } = req.body;
     if (!username || !password) {
@@ -80,7 +90,7 @@ router.post('/register', async (req, res) => {
   }
 });
 
-router.post('/login', async (req, res) => {
+router.post('/login', authLimiter, async (req, res) => {
   const DUMMY_HASH = '$2b$12$invalidsaltinvalidsaltinvalid..invalidhashpadding0000000';
   try {
     const { username, password } = req.body;

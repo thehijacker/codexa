@@ -1,6 +1,6 @@
 {
   "name": "codexa",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "description": "EPUB web reader with OPDS browsing and KOReader sync support",
   "main": "server/index.js",
   "engines": {
@@ -12,11 +12,12 @@
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
-    "bcryptjs": "^2.4.3",
+    "bcrypt": "^6.0.0",
     "better-sqlite3": "^9.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "express-rate-limit": "^7.5.0",
     "fast-xml-parser": "^5.7.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.0"

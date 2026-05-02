@@ -18,16 +18,21 @@ const readiumRoutes    = require('./routes/readium');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
+const { version } = require('../package.json');
 
 // ── Startup ──────────────────────────────────────────────────────────────────
-if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
-  console.error('[fatal] JWT_SECRET is missing or too short. Set it in .env');
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 64) {
+  console.error('[fatal] JWT_SECRET is missing or too short (must be ≥64 chars). Set it in .env');
   process.exit(1);
 }
 
 initDb();
 
 // ── Middleware ────────────────────────────────────────────────────────────────
+// Trust the first proxy hop (nginx/traefik/etc.) so express-rate-limit can
+// read the real client IP from X-Forwarded-For correctly.
+app.set('trust proxy', 1);
+
 if (process.env.CORS_ORIGIN) {
   app.use(cors({ origin: process.env.CORS_ORIGIN, credentials: true }));
 }
@@ -96,6 +101,9 @@ app.use('/api/readium',   readiumRoutes);
 // KOReader kosync protocol — must be AFTER /api routes to avoid shadowing
 // KOReader devices point their sync settings to this server's base URL.
 app.use(kosyncRouter);
+
+// ── Public metadata ─────────────────────────────────────────────────────────
+app.get('/api/version', (_req, res) => res.json({ version }));
 
 // ── 404 for unknown /api/* paths ──────────────────────────────────────────────
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
