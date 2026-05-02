@@ -418,14 +418,14 @@ export async function selectShelf(shelfId) {
 
   const titleEl = document.getElementById('page-title');
   if (shelfId === 'all') {
-    titleEl.textContent     = t('sidebar.all_library');
+    titleEl.textContent     = '📚 ' + t('sidebar.all_library');
     currentShelfBookIds = null;
   } else if (shelfId === 'reading') {
-    titleEl.textContent     = t('sidebar.currently_reading');
+    titleEl.textContent     = '📖 ' + t('sidebar.currently_reading');
     currentShelfBookIds = null;
   } else {
     const shelf = getShelves().find(s => s.id === shelfId);
-    titleEl.textContent = shelf ? shelf.name : 'Polica';
+    titleEl.textContent = shelf ? '📂 ' + shelf.name : '📂 Polica';
     await refreshShelfFilter(false);
   }
 
@@ -567,7 +567,7 @@ function openShelfEditModal(shelf) {
     try {
       await apiFetch(`/shelves/${shelf.id}`, { method: 'PUT', body: JSON.stringify({ name }) });
       toast.success(t('library.toast_shelf_renamed'));
-      if (currentShelfId === shelf.id) document.getElementById('page-title').textContent = name;
+      if (currentShelfId === shelf.id) document.getElementById('page-title').textContent = '📂 ' + name;
       close();
       await reloadShelves();
     } catch (err) { toast.error(t('common.err_prefix') + err.message); }
@@ -764,6 +764,9 @@ export async function initLibrary() {
     await selectShelf(
       initialShelf === 'reading' ? 'reading' : Number(initialShelf)
     );
+  } else {
+    const titleEl = document.getElementById('page-title');
+    if (titleEl) titleEl.textContent = '📚 ' + t('sidebar.all_library');
   }
   if (initialSearch) {
     const searchEl = document.getElementById('search-input');
@@ -795,8 +798,13 @@ document.addEventListener('langchange', () => {
   }
   const titleEl = document.getElementById('page-title');
   if (titleEl) {
-    if (currentShelfId === 'all') titleEl.textContent = t('sidebar.all_library');
-    else if (currentShelfId === 'reading') titleEl.textContent = t('sidebar.currently_reading');
+    if (currentShelfId === 'all') titleEl.textContent = '📚 ' + t('sidebar.all_library');
+    else if (currentShelfId === 'reading') titleEl.textContent = '📖 ' + t('sidebar.currently_reading');
+  }
+  if (editMode) {
+    updateEditToolbar();
+    const editBtn = document.getElementById('edit-mode-btn');
+    if (editBtn) editBtn.textContent = t('common.cancel');
   }
   applyFilter();
 });

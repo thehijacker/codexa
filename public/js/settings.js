@@ -3,7 +3,9 @@ import { toast, confirmDialog, setButtonLoading } from './ui.js';
 import { t } from './i18n.js';
 import { showPanel } from './router.js';
 
-let _initialized = false;
+let _initialized    = false;
+let _cachedServers  = [];
+let _editingServerId = null;
 
 export async function initSettings() {
   if (_initialized) return;
@@ -303,9 +305,6 @@ async function loadOpdsServers() {
   }
 }
 
-let _cachedServers = [];
-let _editingServerId = null; // null = add mode, number = edit mode
-
 const opdsFormTitle   = document.getElementById('opds-form-title');
 const btnCancelEdit   = document.getElementById('btn-cancel-opds-edit');
 
@@ -422,17 +421,16 @@ btnCancelEdit.addEventListener('click', exitEditMode);
   loadSettings();
   loadOpdsServers();
   loadAdminSection();
-} // end initSettings
 
-document.addEventListener('langchange', () => {
-  if (!_initialized) return;
-  renderOpdsServers(_cachedServers);
-  if (_editingServerId !== null) {
-    document.getElementById('opds-form-title').textContent = t('settings.opds_edit_title');
-    document.getElementById('btn-add-opds-server').textContent = t('settings.btn_save_opds_edit');
-  } else {
-    document.getElementById('opds-form-title').textContent = t('settings.opds_add_title');
-    document.getElementById('btn-add-opds-server').textContent = t('settings.btn_add_opds');
-  }
-  if (!document.getElementById('admin-card').hidden) loadAdminUsers();
-});
+  document.addEventListener('langchange', () => {
+    renderOpdsServers(_cachedServers);
+    if (_editingServerId !== null) {
+      document.getElementById('opds-form-title').textContent = t('settings.opds_edit_title');
+      document.getElementById('btn-add-opds-server').textContent = t('settings.btn_save_opds_edit');
+    } else {
+      document.getElementById('opds-form-title').textContent = t('settings.opds_add_title');
+      document.getElementById('btn-add-opds-server').textContent = t('settings.btn_add_opds');
+    }
+    if (!document.getElementById('admin-card').hidden) loadAdminUsers();
+  });
+} // end initSettings

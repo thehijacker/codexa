@@ -2147,7 +2147,7 @@ async function seekToPercentage(targetPct) {
 
 // ── External + internal kosync ────────────────────────────────────────────────
 // KOReader identifies books by MD5 of file content — use file_hash_md5 so our
-// entries in Grimmory/Booklore line up with what KOReader stores there.
+// entries in Grimmory line up with what KOReader stores there.
 function externalDocKey() {
   // Priority: user-supplied KOReader hash > computed MD5 > SHA-256 fallback
   return currentBook.kosync_hash || currentBook.file_hash_md5 || currentBook.file_hash;
@@ -2812,6 +2812,16 @@ async function init() {
       } catch (e) { console.warn('[kosync] navigate failed:', e.message); }
     }
 
+    // Capture final position after all navigation (local seek + sync) is complete.
+    // The `relocated` event is suppressed while isReady=false, so any navigation
+    // that happened above (seekToPercentage / sync jump) may not have updated
+    // currentCfi/currentPct yet — read them directly from the rendition now.
+    {
+      const loc = rendition.currentLocation();
+      if (loc?.start?.cfi) currentCfi = loc.start.cfi;
+      if (loc?.start?.percentage != null) currentPct = loc.start.percentage;
+      console.log('[pos] final position before isReady cfi:', currentCfi.slice(0,60), 'pct:', (currentPct*100).toFixed(2)+'%');
+    }
     // Only allow saves after the initial position (local or synced) is fully displayed
     console.log('[pos] isReady=true, currentCfi:', currentCfi.slice(0,60));
     isReady = true;

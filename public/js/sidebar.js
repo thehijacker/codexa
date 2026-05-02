@@ -47,6 +47,7 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
     collapseBtn.title = t('sidebar.expand');
   }
   collapseBtn.addEventListener('click', () => {
+    if (window.matchMedia('(max-width: 768px)').matches) { closeSidebar(); return; }
     const collapsed = sidebar.classList.toggle('collapsed');
     collapseBtn.textContent = collapsed ? '›' : '‹';
     collapseBtn.title = collapsed ? t('sidebar.expand') : t('sidebar.collapse');
@@ -269,6 +270,7 @@ document.addEventListener('langchange', () => {
   if (_activePage !== 'library') loadNavCounts();
   // Re-attach event listeners (sidebar HTML was replaced)
   sidebar.querySelector('#sidebar-collapse-btn')?.addEventListener('click', () => {
+    if (window.matchMedia('(max-width: 768px)').matches) { closeSidebar(); return; }
     const collapseBtn = sidebar.querySelector('#sidebar-collapse-btn');
     const collapsed = sidebar.classList.toggle('collapsed');
     collapseBtn.textContent = collapsed ? '›' : '‹';

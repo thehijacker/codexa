@@ -13,7 +13,7 @@
 const LANG_KEY  = 'br_lang';
 const FALLBACK  = 'sl';
 // Bump this when locale files change to bust the localStorage cache
-const CACHE_VER = '22';
+const CACHE_VER = '24';
 const CACHE_VER_KEY = 'br_strings_ver';
 
 /** Language codes → display names shown in the picker. Add entries here to add languages. */
@@ -118,114 +118,100 @@ export function applyTranslations() {
 }
 
 /**
- * Render 🌐 + native <select> side by side (expanded / login).
- * When the select is hidden by CSS (collapsed sidebar), clicking 🌐 opens a
- * fixed popup instead — position:fixed escapes overflow-x:hidden on the sidebar.
+ * Build a custom styled language dropdown (same look as the sort menu).
+ * @param {HTMLElement} container  — cleared and filled with the picker
+ * @param {object} opts
+ * @param {boolean} opts.opensUpward   — true = list opens above button (sidebar footer)
+ * @param {boolean} opts.sidebarMode   — true = handle collapsed-sidebar fixed positioning
  */
-export function initIconLangPicker(container) {
+function _buildLangMenu(container, { opensUpward = false, sidebarMode = false } = {}) {
   if (!container) return;
 
   const wrap = document.createElement('div');
-  wrap.className = 'lang-picker-wrap';
+  wrap.className = 'lang-menu-wrap';
 
-  const icon = document.createElement('span');
-  icon.className = 'lang-picker-icon';
-  icon.textContent = '🌐';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'lang-menu-btn';
+  btn.setAttribute('aria-haspopup', 'listbox');
+  btn.setAttribute('aria-expanded', 'false');
+  btn.innerHTML = `<span class="lang-picker-icon">🌐</span><span class="lang-menu-label"></span><span class="lang-menu-caret">▾</span>`;
 
-  const select = document.createElement('select');
-  select.className = 'lang-picker';
-  select.setAttribute('aria-label', 'Language');
-  for (const [code, name] of Object.entries(SUPPORTED_LANGS)) {
-    const opt = document.createElement('option');
-    opt.value = code;
-    opt.textContent = name;
-    if (code === _lang) opt.selected = true;
-    select.appendChild(opt);
+  const list = document.createElement('div');
+  list.className = 'lang-menu-list hidden' + (opensUpward ? ' lang-menu-up' : '');
+  list.setAttribute('role', 'listbox');
+
+  function syncLabel() {
+    btn.querySelector('.lang-menu-label').textContent = SUPPORTED_LANGS[_lang] || _lang;
   }
-  select.addEventListener('change', () => setLang(select.value));
-  document.addEventListener('langchange', () => { select.value = _lang; });
 
-  // Popup used only when select is hidden (collapsed sidebar)
-  const popup = document.createElement('div');
-  popup.className = 'lang-icon-popup';
-  popup.style.display = 'none';
-
-  function renderPopup() {
-    popup.innerHTML = '';
-    for (const [code, label] of Object.entries(SUPPORTED_LANGS)) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'lang-icon-option' + (code === _lang ? ' active' : '');
-      btn.textContent = label;
-      btn.addEventListener('click', async (e) => {
+  function renderList() {
+    syncLabel();
+    list.innerHTML = '';
+    for (const [code, name] of Object.entries(SUPPORTED_LANGS)) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'lang-menu-option' + (code === _lang ? ' active' : '');
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', code === _lang ? 'true' : 'false');
+      item.innerHTML = `<span>${name}</span><span class="lang-menu-check">✓</span>`;
+      item.addEventListener('click', async (e) => {
         e.stopPropagation();
-        popup.style.display = 'none';
+        closeList();
         await setLang(code);
-        renderPopup();
       });
-      popup.appendChild(btn);
+      list.appendChild(item);
     }
   }
-  renderPopup();
-  document.addEventListener('langchange', () => renderPopup());
 
-  icon.addEventListener('click', (e) => {
-    // Only act when the select is hidden (collapsed sidebar mode)
-    if (getComputedStyle(select).display !== 'none') return;
+  function openList() {
+    renderList();
+    if (sidebarMode && container.closest('.app-sidebar')?.classList.contains('collapsed')) {
+      // Escape overflow-x: hidden with position:fixed.
+      // The picker is always in the sidebar footer, so always open upward.
+      const rect = btn.getBoundingClientRect();
+      list.style.cssText = `position:fixed;left:${rect.right + 8}px;bottom:${window.innerHeight - rect.top + 4}px;top:auto;right:auto;`;
+    } else {
+      list.style.cssText = '';
+    }
+    list.classList.remove('hidden');
+    btn.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeList() {
+    list.classList.add('hidden');
+    btn.setAttribute('aria-expanded', 'false');
+  }
+
+  btn.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (popup.style.display !== 'none') { popup.style.display = 'none'; return; }
-    renderPopup();
-    const rect = icon.getBoundingClientRect();
-    popup.style.left = rect.left + 'px';
-    popup.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
-    popup.style.top = 'auto';
-    popup.style.display = '';
+    list.classList.contains('hidden') ? openList() : closeList();
   });
+  document.addEventListener('click', closeList);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeList(); });
+  document.addEventListener('langchange', renderList);
 
-  document.addEventListener('click', () => { popup.style.display = 'none'; });
-
-  wrap.appendChild(icon);
-  wrap.appendChild(select);
-  wrap.appendChild(popup);
+  wrap.appendChild(btn);
+  wrap.appendChild(list);
   container.innerHTML = '';
   container.appendChild(wrap);
+
+  renderList();
 }
 
 /**
- * Create and append a language-selector <select> to container.
- * Changing the selection calls setLang() — no page reload.
+ * Sidebar language picker: custom dropdown, opens upward.
+ * In collapsed-sidebar mode the list uses position:fixed to escape overflow clipping.
+ */
+export function initIconLangPicker(container) {
+  _buildLangMenu(container, { opensUpward: true, sidebarMode: true });
+}
+
+/**
+ * Login-page language picker: custom dropdown, opens downward.
  */
 export function initLangPicker(container) {
-  if (!container) return;
-  container.innerHTML = '';
-
-  const wrap   = document.createElement('div');
-  wrap.className = 'lang-picker-wrap';
-
-  const label  = document.createElement('span');
-  label.className  = 'lang-picker-label';
-  label.dataset.i18n = 'common.language';
-  label.textContent  = t('common.language');
-
-  const select = document.createElement('select');
-  select.className = 'lang-picker';
-  select.setAttribute('aria-label', 'Language');
-
-  for (const [code, name] of Object.entries(SUPPORTED_LANGS)) {
-    const opt = document.createElement('option');
-    opt.value       = code;
-    opt.textContent = name;
-    if (code === _lang) opt.selected = true;
-    select.appendChild(opt);
-  }
-
-  select.addEventListener('change', () => setLang(select.value));
-  // Keep select in sync if language is changed from another picker on the same page
-  document.addEventListener('langchange', () => { select.value = _lang; });
-
-  wrap.appendChild(label);
-  wrap.appendChild(select);
-  container.appendChild(wrap);
+  _buildLangMenu(container, { opensUpward: false, sidebarMode: false });
 }
 
 // ── Internal ──────────────────────────────────────────────────────────────────
