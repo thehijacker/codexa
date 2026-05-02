@@ -327,6 +327,8 @@
   </div><!-- /.app-body -->
 
   <div id="toast-container"></div>
+  <!-- Pre-apply collapsed sidebar to prevent flash on load -->
+  <script>try { if (localStorage.getItem('sidebarCollapsed') === '1') document.getElementById('app-sidebar').classList.add('collapsed'); } catch {}</script>
   <script type="module">
     import { initI18n } from '/js/i18n.js';
     import { initSidebar } from '/js/sidebar.js';

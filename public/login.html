@@ -130,10 +130,10 @@
   <script type="module">
     import { apiFetch, setToken } from '/js/api.js';
     import { setButtonLoading }  from '/js/ui.js';
-    import { initI18n, t, initLangPicker } from '/js/i18n.js';
+    import { initI18n, t, initIconLangPicker } from '/js/i18n.js';
 
     await initI18n();
-    initLangPicker(document.getElementById('lang-picker-login'));
+    initIconLangPicker(document.getElementById('lang-picker-login'));
 
     // Redirect if already logged in
     const existingToken = localStorage.getItem('br_token');

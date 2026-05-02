@@ -1,8 +1,13 @@
 ﻿const express  = require('express');
 const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
-const { getDb } = require('../db');
+const path     = require('path');
+const fs       = require('fs');
+const { getDb, DATA_DIR } = require('../db');
 const { authenticateToken } = require('../middleware/auth');
+
+const BOOKS_DIR  = path.join(DATA_DIR, 'books');
+const COVERS_DIR = path.join(DATA_DIR, 'covers');
 
 const router      = express.Router();
 const SALT_ROUNDS = 12;
@@ -110,6 +115,70 @@ router.put('/admin/registration', authenticateToken, (req, res) => {
   const db = getDb();
   db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('registration_enabled', ?)").run(enabled ? '1' : '0');
   res.json({ enabled });
+});
+
+// ── Change own password ───────────────────────────────────────────────────────
+router.put('/password', authenticateToken, async (req, res) => {
+  try {
+    const { password, password2 } = req.body;
+    if (typeof password !== 'string' || password.length < 8) {
+      return res.status(400).json({ error: 'Geslo mora imeti vsaj 8 znakov.' });
+    }
+    if (password !== password2) {
+      return res.status(400).json({ error: 'Gesli se ne ujemata.' });
+    }
+    const hash = await bcrypt.hash(password, SALT_ROUNDS);
+    const db   = getDb();
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, req.user.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[auth] change password error:', err.message);
+    res.status(500).json({ error: 'Napaka pri spremembi gesla.' });
+  }
+});
+
+// ── Admin: list non-admin users ───────────────────────────────────────────────
+router.get('/admin/users', authenticateToken, (req, res) => {
+  if (!isAdmin(req.user.id)) return res.status(403).json({ error: 'Samo administrator.' });
+  const db      = getDb();
+  const adminId = db.prepare('SELECT id FROM users ORDER BY id ASC LIMIT 1').get()?.id;
+  const users   = db.prepare(
+    'SELECT id, username, name, created_at FROM users WHERE id != ? ORDER BY created_at ASC'
+  ).all(adminId);
+  const bookCounts = db.prepare(
+    'SELECT user_id, COUNT(*) AS cnt FROM books WHERE user_id != ? GROUP BY user_id'
+  ).all(adminId);
+  const countMap = Object.fromEntries(bookCounts.map(r => [r.user_id, r.cnt]));
+  res.json(users.map(u => ({ ...u, book_count: countMap[u.id] || 0 })));
+});
+
+// ── Admin: delete a user and all their data/files ─────────────────────────────
+router.delete('/admin/users/:id', authenticateToken, (req, res) => {
+  if (!isAdmin(req.user.id)) return res.status(403).json({ error: 'Samo administrator.' });
+  const db        = getDb();
+  const adminId   = db.prepare('SELECT id FROM users ORDER BY id ASC LIMIT 1').get()?.id;
+  const targetId  = parseInt(req.params.id, 10);
+  if (targetId === adminId) return res.status(400).json({ error: 'Ne moreš izbrisati administratorja.' });
+  const target = db.prepare('SELECT id FROM users WHERE id = ?').get(targetId);
+  if (!target) return res.status(404).json({ error: 'Uporabnik ni najden.' });
+
+  // Collect files before deleting DB records
+  const books = db.prepare('SELECT filename, cover_path FROM books WHERE user_id = ?').all(targetId);
+
+  // Delete user (cascades all DB records via foreign keys)
+  db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
+
+  // Remove book files and covers
+  for (const book of books) {
+    try { fs.unlinkSync(path.join(BOOKS_DIR, String(targetId), book.filename)); } catch { /* gone */ }
+    if (book.cover_path) {
+      try { fs.unlinkSync(path.join(COVERS_DIR, book.cover_path)); } catch { /* gone */ }
+    }
+  }
+  // Remove the user's book directory
+  try { fs.rmdirSync(path.join(BOOKS_DIR, String(targetId))); } catch { /* gone or non-empty */ }
+
+  res.status(204).end();
 });
 
 module.exports = router;

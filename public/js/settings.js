@@ -183,11 +183,54 @@ async function loadAdminSection() {
   try {
     const { isAdmin, user: _ } = await apiFetch('/auth/me');
     if (!isAdmin) return;
-    // Show admin card and load current registration status
     adminCard.hidden = false;
     const { enabled } = await apiFetch('/auth/registration-status');
     adminRegTgl.checked = enabled;
+    await loadAdminUsers();
   } catch (_) { /* not admin or error — keep hidden */ }
+}
+
+async function loadAdminUsers() {
+  const list = document.getElementById('admin-users-list');
+  if (!list) return;
+  try {
+    const users = await apiFetch('/auth/admin/users');
+    if (!users.length) {
+      list.innerHTML = `<p style="color:var(--color-text-muted);font-size:.85rem;margin:0" data-i18n="settings.admin_users_empty">${t('settings.admin_users_empty')}</p>`;
+      return;
+    }
+    list.innerHTML = users.map(u => `
+      <div class="admin-user-row" data-id="${u.id}">
+        <div class="admin-user-info">
+          <span class="admin-user-name">${escHtml(u.username)}</span>
+          <span class="admin-user-meta">${t('settings.admin_users_books', { n: u.book_count })}</span>
+        </div>
+        <button class="btn btn-danger btn-sm admin-user-delete-btn" data-id="${u.id}" data-username="${escHtml(u.username)}">${t('common.delete')}</button>
+      </div>
+    `).join('');
+    list.querySelectorAll('.admin-user-delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => deleteAdminUser(Number(btn.dataset.id), btn.dataset.username));
+    });
+  } catch (err) {
+    toast.error(t('settings.admin_err_load_users', { msg: err.message }));
+  }
+}
+
+function deleteAdminUser(id, username) {
+  confirmDialog(
+    t('settings.admin_users_delete_confirm', { username }),
+    async () => {
+      try {
+        await apiFetch(`/auth/admin/users/${id}`, { method: 'DELETE' });
+        toast.success(t('settings.admin_users_deleted'));
+        await loadAdminUsers();
+      } catch (err) {
+        toast.error(t('settings.admin_err_delete_user', { msg: err.message }));
+      }
+    },
+    t('common.delete'),
+    true
+  );
 }
 
 btnSaveReg?.addEventListener('click', async () => {
@@ -205,6 +248,26 @@ btnSaveReg?.addEventListener('click', async () => {
     setButtonLoading(btnSaveReg, false, t('settings.btn_save'));
   }
 });
+// ── Change password ───────────────────────────────────────────────────────────
+const btnChangePw = document.getElementById('btn-change-pw');
+btnChangePw?.addEventListener('click', async () => {
+  const pw1 = document.getElementById('pw-new').value;
+  const pw2 = document.getElementById('pw-confirm').value;
+  if (pw1.length < 8) { toast.error(t('settings.change_pw_short')); return; }
+  if (pw1 !== pw2)    { toast.error(t('settings.change_pw_mismatch')); return; }
+  setButtonLoading(btnChangePw, true, t('settings.btn_saving'));
+  try {
+    await apiFetch('/auth/password', { method: 'PUT', body: JSON.stringify({ password: pw1, password2: pw2 }) });
+    document.getElementById('pw-new').value     = '';
+    document.getElementById('pw-confirm').value = '';
+    toast.success(t('settings.change_pw_success'));
+  } catch (err) {
+    toast.error(t('common.error_msg', { msg: err.message }));
+  } finally {
+    setButtonLoading(btnChangePw, false, t('settings.change_pw_btn'));
+  }
+});
+
 // ── General settings (localStorage only) ─────────────────────────────────────
 const autoOpenToggle = document.getElementById('auto-open-last-toggle');
 if (autoOpenToggle) {
@@ -368,6 +431,7 @@ document.addEventListener('langchange', () => {
     opdsFormTitle.textContent = t('settings.opds_add_title');
     btnAddOpds.textContent    = t('settings.btn_add_opds');
   }
+  if (!document.getElementById('admin-card').hidden) loadAdminUsers();
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────

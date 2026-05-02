@@ -130,6 +130,11 @@
     .setting-toggle-row { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
     .setting-toggle-label { font-size:.9rem; font-weight:500; color:var(--color-text); }
     .setting-toggle-hint { font-size:.78rem; color:var(--color-text-muted); margin-top:.2rem; line-height:1.5; }
+    .admin-user-row { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.5rem 0; border-bottom:1px solid var(--color-border); }
+    .admin-user-row:last-child { border-bottom:none; }
+    .admin-user-info { display:flex; flex-direction:column; gap:.1rem; min-width:0; }
+    .admin-user-name { font-size:.875rem; font-weight:500; color:var(--color-text); }
+    .admin-user-meta { font-size:.75rem; color:var(--color-text-muted); }
   </style>
 </head>
 <body class="sidebar-layout">
@@ -165,6 +170,21 @@
           <input type="checkbox" id="auto-open-last-toggle" />
           <span class="toggle-slider"></span>
         </label>
+      </div>
+
+      <hr class="section-divider" style="margin-top:1.25rem">
+
+      <div style="font-size:.875rem;font-weight:600;margin-bottom:.75rem" data-i18n="settings.change_pw_title">Sprememba gesla</div>
+      <div class="form-group">
+        <label for="pw-new" data-i18n="settings.change_pw_new">Novo geslo</label>
+        <input type="password" id="pw-new" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
+      </div>
+      <div class="form-group">
+        <label for="pw-confirm" data-i18n="settings.change_pw_confirm">Potrdi geslo</label>
+        <input type="password" id="pw-confirm" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" />
+      </div>
+      <div class="card-actions">
+        <button id="btn-change-pw" class="btn btn-primary btn-sm" data-i18n="settings.change_pw_btn">Spremeni geslo</button>
       </div>
     </div>
 
@@ -286,12 +306,19 @@
       <div class="card-actions" style="margin-top:.5rem">
         <button id="btn-save-reg" class="btn btn-primary btn-sm" data-i18n="common.save">Shrani</button>
       </div>
+
+      <hr class="section-divider">
+
+      <div style="font-size:.875rem;font-weight:600;margin-bottom:.75rem" data-i18n="settings.admin_users_title">Upravljanje uporabnikov</div>
+      <div id="admin-users-list"></div>
     </div>
 
   </main>
   </div><!-- /.app-body -->
 
   <div id="toast-container"></div>
+  <!-- Pre-apply collapsed sidebar to prevent flash on load -->
+  <script>try { if (localStorage.getItem('sidebarCollapsed') === '1') document.getElementById('app-sidebar').classList.add('collapsed'); } catch {}</script>
   <script type="module">
     import { initI18n } from '/js/i18n.js';
     import { initSidebar } from '/js/sidebar.js';

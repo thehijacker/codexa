@@ -13,7 +13,7 @@
 const LANG_KEY  = 'br_lang';
 const FALLBACK  = 'sl';
 // Bump this when locale files change to bust the localStorage cache
-const CACHE_VER = '20';
+const CACHE_VER = '22';
 const CACHE_VER_KEY = 'br_strings_ver';
 
 /** Language codes → display names shown in the picker. Add entries here to add languages. */
@@ -115,6 +115,80 @@ export function applyTranslations() {
     const v = _strings[titleKey];
     if (v) document.title = `${v} — Codexa`;
   }
+}
+
+/**
+ * Render 🌐 + native <select> side by side (expanded / login).
+ * When the select is hidden by CSS (collapsed sidebar), clicking 🌐 opens a
+ * fixed popup instead — position:fixed escapes overflow-x:hidden on the sidebar.
+ */
+export function initIconLangPicker(container) {
+  if (!container) return;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'lang-picker-wrap';
+
+  const icon = document.createElement('span');
+  icon.className = 'lang-picker-icon';
+  icon.textContent = '🌐';
+
+  const select = document.createElement('select');
+  select.className = 'lang-picker';
+  select.setAttribute('aria-label', 'Language');
+  for (const [code, name] of Object.entries(SUPPORTED_LANGS)) {
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = name;
+    if (code === _lang) opt.selected = true;
+    select.appendChild(opt);
+  }
+  select.addEventListener('change', () => setLang(select.value));
+  document.addEventListener('langchange', () => { select.value = _lang; });
+
+  // Popup used only when select is hidden (collapsed sidebar)
+  const popup = document.createElement('div');
+  popup.className = 'lang-icon-popup';
+  popup.style.display = 'none';
+
+  function renderPopup() {
+    popup.innerHTML = '';
+    for (const [code, label] of Object.entries(SUPPORTED_LANGS)) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'lang-icon-option' + (code === _lang ? ' active' : '');
+      btn.textContent = label;
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        popup.style.display = 'none';
+        await setLang(code);
+        renderPopup();
+      });
+      popup.appendChild(btn);
+    }
+  }
+  renderPopup();
+  document.addEventListener('langchange', () => renderPopup());
+
+  icon.addEventListener('click', (e) => {
+    // Only act when the select is hidden (collapsed sidebar mode)
+    if (getComputedStyle(select).display !== 'none') return;
+    e.stopPropagation();
+    if (popup.style.display !== 'none') { popup.style.display = 'none'; return; }
+    renderPopup();
+    const rect = icon.getBoundingClientRect();
+    popup.style.left = rect.left + 'px';
+    popup.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+    popup.style.top = 'auto';
+    popup.style.display = '';
+  });
+
+  document.addEventListener('click', () => { popup.style.display = 'none'; });
+
+  wrap.appendChild(icon);
+  wrap.appendChild(select);
+  wrap.appendChild(popup);
+  container.innerHTML = '';
+  container.appendChild(wrap);
 }
 
 /**

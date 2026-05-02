@@ -764,20 +764,50 @@ input:focus, select:focus, textarea:focus {
   font-size: .78rem;
   cursor: pointer;
 }
-/* Standalone picker on login page */
+/* Globe icon prefix for the lang picker */
+.lang-picker-icon {
+  font-size: .9rem;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  line-height: 1;
+}
+/* Collapsed sidebar: hide select, center globe, make it clickable */
+.app-sidebar.collapsed .lang-picker        { display: none; }
+.app-sidebar.collapsed .lang-picker-icon   { font-size: 1.2rem; cursor: pointer; }
+.app-sidebar.collapsed .lang-picker-wrap   { justify-content: center; padding: .4rem 0; }
+/* Popup for collapsed-sidebar mode — position:fixed escapes overflow-x:hidden */
+.lang-icon-popup {
+  position: fixed;
+  min-width: 160px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius, 6px);
+  box-shadow: 0 4px 16px rgba(0,0,0,.25);
+  overflow: hidden;
+  z-index: 400;
+}
+.lang-icon-option {
+  display: block;
+  width: 100%;
+  padding: .45rem .75rem;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text);
+  font-size: .85rem;
+}
+.lang-icon-option:hover { background: var(--color-surface2); }
+.lang-icon-option.active { color: var(--color-accent); font-weight: 600; }
+
+/* Login page lang row */
 .login-lang-row {
   display: flex;
-  align-items: center;
   justify-content: flex-end;
-  gap: .5rem;
   margin-bottom: .6rem;
-  font-size: .8rem;
-  color: var(--color-text-muted);
 }
-.login-lang-row .lang-picker {
-  width: auto;
-  flex: none;
-}
+.login-lang-row .lang-picker-wrap { padding: .1rem 0; }
+.login-lang-row .lang-picker { width: auto; flex: none; }
 
 /* Body area next to sidebar */
 .app-body {

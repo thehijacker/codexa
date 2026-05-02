@@ -4,7 +4,7 @@
  * Exports: initSidebar, reloadShelves, getShelves, setActive
  */
 import { apiFetch, requireAuth, clearToken } from './api.js';
-import { t, initLangPicker } from './i18n.js';
+import { t, initIconLangPicker } from './i18n.js';
 
 const LIB_THEME_KEY = 'br_library_theme';
 const LIB_THEMES = new Set(['system', 'day', 'night', 'eink']);
@@ -34,7 +34,7 @@ export async function initSidebar({ activePage = 'library', onShelfSelect = null
 
   sidebar.innerHTML = buildSidebarHtml();
   initLibraryThemeControls(sidebar);
-  initLangPicker(sidebar.querySelector('#sidebar-lang-picker'));
+  initSidebarLangPicker(sidebar.querySelector('#sidebar-lang-picker'));
 
   // Username
   const user = JSON.parse(localStorage.getItem('br_user') || '{}');
@@ -91,6 +91,17 @@ export async function initSidebar({ activePage = 'library', onShelfSelect = null
   }
 
   await reloadShelves();
+  if (activePage !== 'library') await loadNavCounts();
+}
+
+async function loadNavCounts() {
+  try {
+    const books = await apiFetch('/books');
+    const allEl     = document.getElementById('nav-all-count');
+    const readingEl = document.getElementById('nav-reading-count');
+    if (allEl)     allEl.textContent     = books.length;
+    if (readingEl) readingEl.textContent = books.filter(b => (b.percentage || 0) > 0).length;
+  } catch { /* non-critical */ }
 }
 
 export async function reloadShelves() {
@@ -131,6 +142,10 @@ function navigate(shelfId) {
   closeSidebar();
 }
 
+function initSidebarLangPicker(container) {
+  initIconLangPicker(container);
+}
+
 function buildSidebarHtml() {
   return `
     <div class="sidebar-header">
@@ -141,10 +156,12 @@ function buildSidebarHtml() {
       <a href="/" class="sidebar-item" id="nav-currently-reading">
         <span class="sidebar-item-icon">📖</span>
         <span class="sidebar-item-label">${t('sidebar.currently_reading')}</span>
+        <span class="shelf-count" id="nav-reading-count"></span>
       </a>
       <a href="/" class="sidebar-item" id="nav-all-books">
         <span class="sidebar-item-icon">📚</span>
         <span class="sidebar-item-label">${t('sidebar.all_library')}</span>
+        <span class="shelf-count" id="nav-all-count"></span>
       </a>
       <div class="sidebar-section">
         <div class="sidebar-section-header">
@@ -216,7 +233,7 @@ document.addEventListener('langchange', () => {
   const username = sidebar.querySelector('#sidebar-username')?.textContent || '';
   sidebar.innerHTML = buildSidebarHtml();
   initLibraryThemeControls(sidebar);
-  initLangPicker(sidebar.querySelector('#sidebar-lang-picker'));
+  initSidebarLangPicker(sidebar.querySelector('#sidebar-lang-picker'));
   const unameEl = sidebar.querySelector('#sidebar-username');
   if (unameEl) unameEl.textContent = username;
   // Restore active page
@@ -228,6 +245,7 @@ document.addEventListener('langchange', () => {
     setActive(_activeShelfId);
   }
   renderShelves();
+  if (_activePage !== 'library') loadNavCounts();
   // Re-attach event listeners
   sidebar.querySelector('#sidebar-collapse-btn')?.addEventListener('click', () => {
     const collapseBtn = sidebar.querySelector('#sidebar-collapse-btn');

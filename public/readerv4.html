@@ -573,6 +573,14 @@
 
   <div id="toast-container"></div>
 
+  <!-- Apply auto-hide header class before module executes to prevent layout flash -->
+  <script>
+    try {
+      const _p = JSON.parse(localStorage.getItem('br_reader_prefs') || '{}');
+      if (_p.autoHideHeader) document.querySelector('.reader-layout').classList.add('autohide-header');
+    } catch {}
+  </script>
+
   <!-- JSZip must be loaded before epub.js -->
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/localforage@1.10.0/dist/localforage.min.js"></script>

@@ -510,13 +510,16 @@ function updateSeriesFilterBar() {
 }
 
 function applyFilter() {
+  const allCountEl = document.getElementById('nav-all-count');
+  const readingCountEl = document.getElementById('nav-reading-count');
+  if (allCountEl)     allCountEl.textContent     = books.length;
+  if (readingCountEl) readingCountEl.textContent = books.filter(b => (b.percentage || 0) > 0).length;
+
   const q = (document.getElementById('search-input')?.value || '').trim().toLowerCase();
   let list = books;
 
   if (currentShelfId === 'reading') {
     list = list.filter(b => (b.percentage || 0) > 0);
-  } else if (currentShelfId === 'all') {
-    list = list.filter(b => (b.percentage || 0) === 0);
   } else if (currentShelfBookIds !== null) {
     list = list.filter(b => currentShelfBookIds.has(b.id));
   }
