@@ -1473,8 +1473,11 @@ async function showDictPopup(word) {
       resultsEl.innerHTML = data.results.map((r, i) => {
         // HTML type: render as HTML but strip any <script>/<style> for safety.
         // Plain text type (m/g/others): escape and preserve newlines.
+        // Also auto-detect HTML content: some dicts declare sametypesequence=m but
+        // actually contain HTML/markup (common in community StarDict dictionaries).
+        const looksLikeHtml = r.type !== 'h' && /<[a-zA-Z][^>]*>/.test(r.definition);
         let defHtml;
-        if (r.type === 'h') {
+        if (r.type === 'h' || looksLikeHtml) {
           const clean = r.definition
             .replace(/<script[\s\S]*?<\/script>/gi, '')
             .replace(/<style[\s\S]*?<\/style>/gi, '');
