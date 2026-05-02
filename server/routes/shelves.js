@@ -23,7 +23,7 @@ router.get('/', (req, res) => {
 router.post('/', (req, res) => {
   const { name } = req.body || {};
   if (!name || !String(name).trim()) {
-    return res.status(400).json({ error: 'Ime police je obvezno' });
+    return res.status(400).json({ error: 'error.shelf_name_required' });
   }
   const db     = getDb();
   const result = db.prepare(
@@ -40,13 +40,13 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   const { name } = req.body || {};
   if (!name || !String(name).trim()) {
-    return res.status(400).json({ error: 'Ime police je obvezno' });
+    return res.status(400).json({ error: 'error.shelf_name_required' });
   }
   const db    = getDb();
   const shelf = db.prepare(
     'SELECT id FROM shelves WHERE id = ? AND user_id = ?'
   ).get(req.params.id, req.user.id);
-  if (!shelf) return res.status(404).json({ error: 'Polica ni najdena' });
+  if (!shelf) return res.status(404).json({ error: 'error.shelf_not_found' });
 
   db.prepare('UPDATE shelves SET name = ? WHERE id = ?')
     .run(String(name).trim().slice(0, 100), shelf.id);
@@ -59,7 +59,7 @@ router.delete('/:id', (req, res) => {
   const shelf = db.prepare(
     'SELECT id FROM shelves WHERE id = ? AND user_id = ?'
   ).get(req.params.id, req.user.id);
-  if (!shelf) return res.status(404).json({ error: 'Polica ni najdena' });
+  if (!shelf) return res.status(404).json({ error: 'error.shelf_not_found' });
 
   db.prepare('DELETE FROM shelves WHERE id = ?').run(shelf.id);
   res.status(204).end();
@@ -71,7 +71,7 @@ router.get('/for-book/:bookId', (req, res) => {
   const book = db.prepare(
     'SELECT id FROM books WHERE id = ? AND user_id = ?'
   ).get(req.params.bookId, req.user.id);
-  if (!book) return res.status(404).json({ error: 'Knjiga ni najdena' });
+  if (!book) return res.status(404).json({ error: 'error.book_not_found' });
 
   const rows = db.prepare(`
     SELECT bs.shelf_id
@@ -88,7 +88,7 @@ router.get('/:id/books', (req, res) => {
   const shelf = db.prepare(
     'SELECT id FROM shelves WHERE id = ? AND user_id = ?'
   ).get(req.params.id, req.user.id);
-  if (!shelf) return res.status(404).json({ error: 'Polica ni najdena' });
+  if (!shelf) return res.status(404).json({ error: 'error.shelf_not_found' });
 
   const rows = db.prepare(`
     SELECT b.id FROM book_shelves bs
@@ -101,18 +101,18 @@ router.get('/:id/books', (req, res) => {
 // ── POST /api/shelves/:id/books ───────────────────────────────────────────────
 router.post('/:id/books', (req, res) => {
   const { bookId } = req.body || {};
-  if (!bookId) return res.status(400).json({ error: 'bookId je obvezen' });
+  if (!bookId) return res.status(400).json({ error: 'error.book_id_required' });
 
   const db    = getDb();
   const shelf = db.prepare(
     'SELECT id FROM shelves WHERE id = ? AND user_id = ?'
   ).get(req.params.id, req.user.id);
-  if (!shelf) return res.status(404).json({ error: 'Polica ni najdena' });
+  if (!shelf) return res.status(404).json({ error: 'error.shelf_not_found' });
 
   const book = db.prepare(
     'SELECT id FROM books WHERE id = ? AND user_id = ?'
   ).get(bookId, req.user.id);
-  if (!book) return res.status(404).json({ error: 'Knjiga ni najdena' });
+  if (!book) return res.status(404).json({ error: 'error.book_not_found' });
 
   db.prepare(
     'INSERT OR IGNORE INTO book_shelves (shelf_id, book_id) VALUES (?, ?)'
@@ -126,7 +126,7 @@ router.delete('/:id/books/:bookId', (req, res) => {
   const shelf = db.prepare(
     'SELECT id FROM shelves WHERE id = ? AND user_id = ?'
   ).get(req.params.id, req.user.id);
-  if (!shelf) return res.status(404).json({ error: 'Polica ni najdena' });
+  if (!shelf) return res.status(404).json({ error: 'error.shelf_not_found' });
 
   db.prepare(
     'DELETE FROM book_shelves WHERE shelf_id = ? AND book_id = ?'

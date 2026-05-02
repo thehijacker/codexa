@@ -68,12 +68,12 @@ router.get('/sync-sse', async (req, res) => {
   req.on('close', () => { cancelled = true; });
 
   const { serverId, folderUrl, shelfName } = req.query;
-  if (serverId === undefined || serverId === null) return done({ type: 'error', message: 'Manjka serverId' });
-  if (!shelfName || !String(shelfName).trim()) return done({ type: 'error', message: 'Manjka shelfName' });
+  if (serverId === undefined || serverId === null) return done({ type: 'error', message: 'error.server_id_required' });
+  if (!shelfName || !String(shelfName).trim()) return done({ type: 'error', message: 'error.shelf_name_required' });
 
   const servers = getServers(user.id);
   const server  = getServerById(servers, serverId);
-  if (!server) return done({ type: 'error', message: 'Strežnik ni najden' });
+  if (!server) return done({ type: 'error', message: 'error.server_not_found' });
 
   const targetUrl = folderUrl ? resolveUrl(String(folderUrl), server.url) : server.url;
 
@@ -392,8 +392,8 @@ router.get('/servers', (req, res) => {
 // ── POST /api/opds/servers ────────────────────────────────────────────────────
 router.post('/servers', (req, res) => {
   const { name, url, username, password } = req.body || {};
-  if (!name || !url) return res.status(400).json({ error: 'name in url sta obvezna' });
-  if (!url.startsWith('http')) return res.status(400).json({ error: 'URL mora začeti z http' });
+  if (!name || !url) return res.status(400).json({ error: 'error.name_url_required' });
+  if (!url.startsWith('http')) return res.status(400).json({ error: 'error.url_must_start_http' });
 
   const db      = getDb();
   const servers = getServers(req.user.id);
@@ -413,7 +413,7 @@ router.put('/servers/:id', (req, res) => {
   const db      = getDb();
   const servers = getServers(req.user.id);
   const server  = getServerById(servers, req.params.id);
-  if (!server) return res.status(404).json({ error: 'Strežnik ni najden' });
+  if (!server) return res.status(404).json({ error: 'error.server_not_found' });
 
   const { name, url, username, password } = req.body || {};
   if (name)     server.name     = String(name).slice(0, 80);
@@ -432,7 +432,7 @@ router.delete('/servers/:id', (req, res) => {
   const servers = getServers(req.user.id);
   const idx     = parseInt(req.params.id, 10);
   if (isNaN(idx) || idx < 0 || idx >= servers.length) {
-    return res.status(404).json({ error: 'Strežnik ni najden' });
+    return res.status(404).json({ error: 'error.server_not_found' });
   }
   servers.splice(idx, 1);
   db.prepare('UPDATE user_settings SET opds_servers = ? WHERE user_id = ?')
@@ -445,7 +445,7 @@ router.delete('/servers/:id', (req, res) => {
 router.get('/browse/:id', async (req, res) => {
   const servers = getServers(req.user.id);
   const server  = getServerById(servers, req.params.id);
-  if (!server) return res.status(404).json({ error: 'Strežnik ni najden' });
+  if (!server) return res.status(404).json({ error: 'error.server_not_found' });
 
   const rawUrl    = req.query.url ? String(req.query.url) : server.url;
   const targetUrl = resolveUrl(rawUrl, server.url);
@@ -472,10 +472,10 @@ router.get('/browse/:id', async (req, res) => {
 router.get('/search/:id', async (req, res) => {
   const servers = getServers(req.user.id);
   const server  = getServerById(servers, req.params.id);
-  if (!server) return res.status(404).json({ error: 'Strežnik ni najden' });
+  if (!server) return res.status(404).json({ error: 'error.server_not_found' });
 
   const q = String(req.query.q || '').trim();
-  if (!q) return res.status(400).json({ error: 'Manjka iskalni niz' });
+  if (!q) return res.status(400).json({ error: 'error.search_query_required' });
 
   const headers = buildAuthHeaders(server.username, server.password);
 
@@ -548,15 +548,15 @@ router.get('/search/:id', async (req, res) => {
 router.post('/sync', async (req, res) => {
   const { serverId, folderUrl, shelfName } = req.body || {};
   if (serverId === undefined || serverId === null) {
-    return res.status(400).json({ error: 'Manjka serverId' });
+    return res.status(400).json({ error: 'error.server_id_required' });
   }
   if (!shelfName || !String(shelfName).trim()) {
-    return res.status(400).json({ error: 'Manjka shelfName' });
+    return res.status(400).json({ error: 'error.shelf_name_required' });
   }
 
   const servers = getServers(req.user.id);
   const server  = getServerById(servers, serverId);
-  if (!server) return res.status(404).json({ error: 'Strežnik ni najden' });
+  if (!server) return res.status(404).json({ error: 'error.server_not_found' });
 
   const targetUrl = folderUrl ? resolveUrl(String(folderUrl), server.url) : server.url;
 
@@ -679,10 +679,10 @@ router.post('/sync', async (req, res) => {
 router.post('/download/:id', async (req, res) => {
   const servers = getServers(req.user.id);
   const server  = getServerById(servers, req.params.id);
-  if (!server) return res.status(404).json({ error: 'Strežnik ni najden' });
+  if (!server) return res.status(404).json({ error: 'error.server_not_found' });
 
   const { href, title, author } = req.body || {};
-  if (!href) return res.status(400).json({ error: 'Manjka href' });
+  if (!href) return res.status(400).json({ error: 'error.href_required' });
 
   const resolvedHref = resolveUrl(href, server.url);
 
@@ -726,7 +726,7 @@ router.post('/download/:id', async (req, res) => {
 
       if (db.prepare('SELECT id FROM books WHERE user_id = ? AND file_hash = ?').get(req.user.id, fileHash)) {
         fs.unlinkSync(tmpPath);
-        return res.status(409).json({ error: 'Ta knjiga je že v vaši knjižnici' });
+        return res.status(409).json({ error: 'error.book_already_in_library' });
       }
 
       const filename = `${fileHash}.epub`;

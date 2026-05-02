@@ -47,9 +47,7 @@ router.get('/:id', (req, res) => {
   const book = db.prepare(
     'SELECT * FROM books WHERE id = ? AND user_id = ?'
   ).get(req.params.id, req.user.id);
-  if (!book) return res.status(404).json({ error: 'Knjiga ni najdena' });
-
-  if (!book.file_hash_md5) {
+  if (!book) return res.status(404).json({ error: 'error.book_not_found' }); {
     const filePath = path.join(BOOKS_DIR, String(req.user.id), book.filename);
     if (fs.existsSync(filePath)) {
       try {
@@ -69,11 +67,11 @@ router.get('/:id/file', (req, res) => {
   const book = db.prepare(
     'SELECT * FROM books WHERE id = ? AND user_id = ?'
   ).get(req.params.id, req.user.id);
-  if (!book) return res.status(404).json({ error: 'Knjiga ni najdena' });
+  if (!book) return res.status(404).json({ error: 'error.book_not_found' });
 
   const filePath = path.join(BOOKS_DIR, String(req.user.id), book.filename);
   if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: 'Datoteka knjige ni najdena na disku' });
+    return res.status(404).json({ error: 'error.book_file_not_found' });
   }
 
   res.setHeader('Content-Type', 'application/epub+zip');
@@ -100,7 +98,7 @@ router.get('/:id/file', (req, res) => {
 // ── POST /api/books — upload ───────────────────────────────────────────────────
 router.post('/', upload.single('epub'), async (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ error: 'EPUB datoteka je obvezna' });
+    return res.status(400).json({ error: 'error.epub_required' });
   }
 
   const tmpPath = req.file.path;
@@ -117,7 +115,7 @@ router.post('/', upload.single('epub'), async (req, res) => {
       'SELECT id FROM books WHERE user_id = ? AND file_hash = ?'
     ).get(req.user.id, fileHash)) {
       fs.unlinkSync(tmpPath);
-      return res.status(409).json({ error: 'Ta knjiga je že v vaši knjižnici' });
+      return res.status(409).json({ error: 'error.book_already_in_library' });
     }
 
     const filename = `${fileHash}.epub`;
@@ -144,7 +142,7 @@ router.post('/', upload.single('epub'), async (req, res) => {
     // Best-effort cleanup of temp file
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     console.error('[books] upload error:', err.message);
-    res.status(500).json({ error: 'Napaka pri nalaganju knjige' });
+    res.status(500).json({ error: 'error.book_upload_failed' });
   }
 });
 
@@ -152,10 +150,10 @@ router.post('/', upload.single('epub'), async (req, res) => {
 router.patch('/:id', (req, res) => {
   const db   = getDb();
   const book = db.prepare('SELECT id FROM books WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
-  if (!book) return res.status(404).json({ error: 'Knjiga ni najdena' });
+  if (!book) return res.status(404).json({ error: 'error.book_not_found' });
 
   const { kosync_hash } = req.body;
-  if (kosync_hash === undefined) return res.status(400).json({ error: 'Ni polj za posodobitev' });
+  if (kosync_hash === undefined) return res.status(400).json({ error: 'error.no_update_fields' });
 
   // Validate: must be empty string or 32-char hex MD5
   const h = String(kosync_hash).trim().toLowerCase();
@@ -197,11 +195,11 @@ router.post('/:id/reextract-cover', (req, res) => {
   const book = db.prepare(
     'SELECT * FROM books WHERE id = ? AND user_id = ?'
   ).get(req.params.id, req.user.id);
-  if (!book) return res.status(404).json({ error: 'Knjiga ni najdena' });
+  if (!book) return res.status(404).json({ error: 'error.book_not_found' });
 
   const epubPath = path.join(BOOKS_DIR, String(req.user.id), book.filename);
   if (!fs.existsSync(epubPath)) {
-    return res.status(404).json({ error: 'EPUB datoteka ni najdena' });
+    return res.status(404).json({ error: 'error.epub_not_found' });
   }
 
   // Remove old cover file if it existed
@@ -221,7 +219,7 @@ router.delete('/:id', (req, res) => {
   const book = db.prepare(
     'SELECT * FROM books WHERE id = ? AND user_id = ?'
   ).get(req.params.id, req.user.id);
-  if (!book) return res.status(404).json({ error: 'Knjiga ni najdena' });
+  if (!book) return res.status(404).json({ error: 'error.book_not_found' });
 
   // Remove epub file
   const filePath = path.join(BOOKS_DIR, String(req.user.id), book.filename);
@@ -241,9 +239,9 @@ router.delete('/:id', (req, res) => {
 // eslint-disable-next-line no-unused-vars
 router.use((err, _req, res, _next) => {
   if (err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({ error: 'Datoteka je prevelika (največ 300 MB)' });
+    return res.status(413).json({ error: 'error.file_too_large' });
   }
-  res.status(400).json({ error: err.message || 'Napaka pri nalaganju' });
+  res.status(400).json({ error: err.message || 'error.book_upload_failed' });
 });
 
 module.exports = router;

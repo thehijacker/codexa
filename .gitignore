@@ -8,3 +8,4 @@ npm-debug.log*
 .claude/
 temp/
 backfill-series.js
+public/check_translation.py

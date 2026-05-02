@@ -1450,7 +1450,7 @@ async function showDictPopup(word) {
   }
 
   wordEl.textContent = word;
-  resultsEl.innerHTML = '<div class="dict-loading">Iščem\u2026</div>';
+  resultsEl.innerHTML = `<div class="dict-loading">${t('reader.dict_loading')}</div>`;
   backdrop.classList.add('open');
   popup.classList.add('open');
   popup.setAttribute('aria-hidden', 'false');

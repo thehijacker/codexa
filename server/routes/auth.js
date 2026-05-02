@@ -19,7 +19,7 @@ const authLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Preveč poskusov. Počakajte 15 minut.' },
+  message: { error: 'error.too_many_attempts' },
 });
 
 function isValidUsername(u) {
@@ -60,22 +60,22 @@ router.post('/register', authLimiter, async (req, res) => {
   try {
     const { name, username, password } = req.body;
     if (!username || !password) {
-      return res.status(400).json({ error: 'Uporabniško ime in geslo sta obvezna.' });
+      return res.status(400).json({ error: 'error.credentials_required' });
     }
     if (!isValidUsername(username)) {
-      return res.status(400).json({ error: 'Uporabniško ime mora imeti 3–32 znakov.' });
+      return res.status(400).json({ error: 'error.username_invalid' });
     }
     if (typeof password !== 'string' || password.length < 8) {
-      return res.status(400).json({ error: 'Geslo mora imeti vsaj 8 znakov.' });
+      return res.status(400).json({ error: 'error.password_too_short' });
     }
     const cleanName = typeof name === 'string' ? name.trim().slice(0, 100) : '';
     const db = getDb();
     const hasUsers = !!db.prepare('SELECT 1 FROM users LIMIT 1').get();
     if (hasUsers && !isRegistrationEnabled(db)) {
-      return res.status(403).json({ error: 'Registracija novih uporabnikov je onemogočena.' });
+      return res.status(403).json({ error: 'error.registration_disabled' });
     }
     if (db.prepare('SELECT id FROM users WHERE username = ?').get(username)) {
-      return res.status(409).json({ error: 'Uporabniško ime je zasedeno.' });
+      return res.status(409).json({ error: 'error.username_taken' });
     }
     const password_hash = await bcrypt.hash(password, SALT_ROUNDS);
     const result = db.prepare(
@@ -86,7 +86,7 @@ router.post('/register', authLimiter, async (req, res) => {
     res.status(201).json({ token: signToken(newUser), user: safeUser(newUser) });
   } catch (err) {
     console.error('[auth] register error:', err.message);
-    res.status(500).json({ error: 'Registracija ni uspela.' });
+    res.status(500).json({ error: 'error.register_failed' });
   }
 });
 
@@ -95,19 +95,19 @@ router.post('/login', authLimiter, async (req, res) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) {
-      return res.status(400).json({ error: 'Uporabniško ime in geslo sta obvezna.' });
+      return res.status(400).json({ error: 'error.credentials_required' });
     }
     const db   = getDb();
     const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
     const hashToCheck = user ? user.password_hash : DUMMY_HASH;
     const valid = await bcrypt.compare(String(password), hashToCheck);
     if (!user || !valid) {
-      return res.status(401).json({ error: 'Napačno uporabniško ime ali geslo.' });
+      return res.status(401).json({ error: 'error.wrong_credentials' });
     }
     res.json({ token: signToken(user), user: safeUser(user) });
   } catch (err) {
     console.error('[auth] login error:', err.message);
-    res.status(500).json({ error: 'Prijava ni uspela.' });
+    res.status(500).json({ error: 'error.login_failed' });
   }
 });
 
@@ -119,9 +119,9 @@ router.get('/me', authenticateToken, (req, res) => {
 });
 
 router.put('/admin/registration', authenticateToken, (req, res) => {
-  if (!isAdmin(req.user.id)) return res.status(403).json({ error: 'Samo administrator.' });
+  if (!isAdmin(req.user.id)) return res.status(403).json({ error: 'error.admin_only' });
   const { enabled } = req.body;
-  if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'Manjka polje enabled.' });
+  if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'error.admin_only' });
   const db = getDb();
   db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('registration_enabled', ?)").run(enabled ? '1' : '0');
   res.json({ enabled });
@@ -132,10 +132,10 @@ router.put('/password', authenticateToken, async (req, res) => {
   try {
     const { password, password2 } = req.body;
     if (typeof password !== 'string' || password.length < 8) {
-      return res.status(400).json({ error: 'Geslo mora imeti vsaj 8 znakov.' });
+      return res.status(400).json({ error: 'error.password_too_short' });
     }
     if (password !== password2) {
-      return res.status(400).json({ error: 'Gesli se ne ujemata.' });
+      return res.status(400).json({ error: 'error.password_mismatch' });
     }
     const hash = await bcrypt.hash(password, SALT_ROUNDS);
     const db   = getDb();
@@ -143,13 +143,13 @@ router.put('/password', authenticateToken, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[auth] change password error:', err.message);
-    res.status(500).json({ error: 'Napaka pri spremembi gesla.' });
+    res.status(500).json({ error: 'error.password_change_failed' });
   }
 });
 
 // ── Admin: list non-admin users ───────────────────────────────────────────────
 router.get('/admin/users', authenticateToken, (req, res) => {
-  if (!isAdmin(req.user.id)) return res.status(403).json({ error: 'Samo administrator.' });
+  if (!isAdmin(req.user.id)) return res.status(403).json({ error: 'error.admin_only' });
   const db      = getDb();
   const adminId = db.prepare('SELECT id FROM users ORDER BY id ASC LIMIT 1').get()?.id;
   const users   = db.prepare(
@@ -164,13 +164,13 @@ router.get('/admin/users', authenticateToken, (req, res) => {
 
 // ── Admin: delete a user and all their data/files ─────────────────────────────
 router.delete('/admin/users/:id', authenticateToken, (req, res) => {
-  if (!isAdmin(req.user.id)) return res.status(403).json({ error: 'Samo administrator.' });
+  if (!isAdmin(req.user.id)) return res.status(403).json({ error: 'error.admin_only' });
   const db        = getDb();
   const adminId   = db.prepare('SELECT id FROM users ORDER BY id ASC LIMIT 1').get()?.id;
   const targetId  = parseInt(req.params.id, 10);
-  if (targetId === adminId) return res.status(400).json({ error: 'Ne moreš izbrisati administratorja.' });
+  if (targetId === adminId) return res.status(400).json({ error: 'error.cannot_delete_admin' });
   const target = db.prepare('SELECT id FROM users WHERE id = ?').get(targetId);
-  if (!target) return res.status(404).json({ error: 'Uporabnik ni najden.' });
+  if (!target) return res.status(404).json({ error: 'error.user_not_found' });
 
   // Collect files before deleting DB records
   const books = db.prepare('SELECT filename, cover_path FROM books WHERE user_id = ?').all(targetId);

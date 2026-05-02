@@ -2,6 +2,7 @@
  * api.js — centralised fetch wrapper
  * Reads the JWT from localStorage and attaches it to every request.
  */
+import { t } from './i18n.js';
 
 const API_BASE = '/api';
 
@@ -31,20 +32,29 @@ export async function apiFetch(path, options = {}) {
     headers,
   });
 
-  // If the server sends 401, clear credentials and redirect to login
+  // If the server sends 401 AND we had a token, it means the session expired.
+  // If there was no token (e.g. a login attempt with wrong credentials), fall
+  // through to the normal error handler so body.error is translated correctly.
   if (res.status === 401) {
-    clearToken();
-    if (!window.location.pathname.includes('/login.html')) {
-      window.location.href = '/login.html';
+    const hadToken = !!getToken();
+    if (hadToken) {
+      clearToken();
+      if (!window.location.pathname.includes('/login.html')) {
+        window.location.href = '/login.html';
+      }
+      throw new Error(t('error.session_expired'));
     }
-    throw new Error('Seja je potekla. Prosimo, prijavite se znova.');
   }
 
   if (!res.ok) {
-    let msg = `Napaka ${res.status}`;
+    let msg = t('error.http_error', { status: res.status });
     try {
       const body = await res.json();
-      msg = body.error || msg;
+      // body.error may be an i18n key (e.g. 'error.wrong_credentials') or a plain message
+      if (body.error) {
+        const translated = t(body.error);
+        msg = (translated !== body.error) ? translated : body.error;
+      }
     } catch { /* ignore */ }
     throw new Error(msg);
   }

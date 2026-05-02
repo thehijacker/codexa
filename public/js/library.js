@@ -645,7 +645,12 @@ async function handleFiles(fileList) {
         headers: { Authorization: `Bearer ${localStorage.getItem('br_token')}` },
         body: formData,
       });
-      if (!r.ok) throw new Error(((await r.json().catch(() => ({}))).error) || `Napaka ${r.status}`);
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        const code = body.error || '';
+        const translated = t(code);
+        throw new Error((translated !== code && code) ? translated : (code || t('error.http_error', { status: r.status })));
+      }
       uploaded++;
     } catch (err) { failed++; console.error('Upload failed:', file.name, err.message); }
   }
