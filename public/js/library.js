@@ -1,7 +1,8 @@
 import { apiFetch } from './api.js';
 import { toast, confirmDialog, setButtonLoading } from './ui.js';
-import { initSidebar, reloadShelves, getShelves, setActive } from './sidebar.js';
-import { t, initI18n } from './i18n.js';
+import { reloadShelves, getShelves, setActive } from './sidebar.js';
+import { t } from './i18n.js';
+import { showPanel } from './router.js';
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let books               = [];
@@ -136,8 +137,6 @@ function initSortMenu() {
   syncLabel();
 }
 
-document.getElementById('sort-select').addEventListener('change', applyFilter);
-
 // ── Render grid ───────────────────────────────────────────────────────────────
 function renderGrid(list) {
   const grid       = document.getElementById('book-grid');
@@ -258,49 +257,6 @@ function updateEditToolbar() {
   }
 }
 
-document.getElementById('edit-mode-btn').addEventListener('click', toggleEditMode);
-
-document.getElementById('edit-assign-btn').addEventListener('click', () => {
-  if (!selectedBooks.size) return;
-  openBulkAssignModal();
-});
-
-document.getElementById('edit-remove-btn')?.addEventListener('click', () => {
-  if (!selectedBooks.size || typeof currentShelfId !== 'number') return;
-  confirmDialog(
-    t('library.confirm_remove_from_shelf', { n: selectedBooks.size }),
-    async () => {
-      for (const bookId of selectedBooks) {
-        try { await apiFetch(`/shelves/${currentShelfId}/books/${bookId}`, { method: 'DELETE' }); } catch { /* skip */ }
-      }
-      toast.success(t('library.toast_removed_from_shelf'));
-      selectedBooks.clear();
-      await loadBooks();
-      await reloadShelves();
-      await refreshShelfFilter();
-    }
-  );
-});
-
-document.getElementById('edit-delete-btn').addEventListener('click', () => {
-  if (!selectedBooks.size) return;
-  confirmDialog(
-    t('library.confirm_del_books', { n: selectedBooks.size }),
-    async () => {
-      for (const bookId of selectedBooks) {
-        try { await apiFetch(`/books/${bookId}`, { method: 'DELETE' }); } catch { /* skip */ }
-      }
-      toast.success(t('library.toast_books_deleted'));
-      selectedBooks.clear();
-      editMode = false;
-      document.getElementById('edit-mode-btn').textContent = t('library.btn_edit');
-      document.getElementById('edit-toolbar').classList.add('hidden');
-      await loadBooks();
-      await reloadShelves();
-      applyFilter();
-    }
-  );
-});
 
 // ── Bulk assign modal ─────────────────────────────────────────────────────────
 function openBulkAssignModal() {
@@ -453,7 +409,7 @@ async function openInfoModal(book) {
 }
 
 // ── Shelf selection ───────────────────────────────────────────────────────────
-async function selectShelf(shelfId) {
+export async function selectShelf(shelfId) {
   currentShelfId = shelfId;
   seriesFilter   = null;
   updateSeriesFilterBar();
@@ -537,19 +493,6 @@ function applyFilter() {
   renderGrid(sortBooks(list));
 }
 
-document.getElementById('search-input').addEventListener('input', () => {
-  seriesFilter = null;
-  updateSeriesFilterBar();
-  applyFilter();
-});
-
-document.getElementById('series-filter-clear')?.addEventListener('click', () => {
-  filterBySeries(null);
-});
-
-// ── Sidebar events ────────────────────────────────────────────────────────────
-document.addEventListener('sidebar:addshelf',  ()  => openAddShelfModal());
-document.addEventListener('sidebar:editshelf', e   => openShelfEditModal(e.detail));
 
 // ── Add shelf modal ───────────────────────────────────────────────────────────
 function openAddShelfModal() {
@@ -675,37 +618,12 @@ async function deleteBook(id) {
 }
 
 // ── Upload ────────────────────────────────────────────────────────────────────
-const dropZone     = document.getElementById('drop-zone');
-const fileInput    = document.getElementById('file-input');
-const uploadBtn    = document.getElementById('upload-btn');
-const uploadMenu   = document.getElementById('upload-menu');
-const uploadStatus = document.getElementById('upload-status');
+let dropZone, fileInput, uploadBtn, uploadMenu, uploadStatus;
 
-uploadBtn.addEventListener('click', e => { e.stopPropagation(); uploadMenu.classList.toggle('hidden'); });
-document.addEventListener('click', () => uploadMenu.classList.add('hidden'));
-// Dismiss tapped card state when touching outside any book card (mobile UX)
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('.book-card'))
-    document.querySelectorAll('.book-card.tapped').forEach(c => c.classList.remove('tapped'));
-});
-document.getElementById('upload-file-btn').addEventListener('click', () => {
-  uploadMenu.classList.add('hidden');
-  showDropZone();
-});
 function showDropZone() {
   dropZone.classList.toggle('hidden');
   if (!dropZone.classList.contains('hidden')) dropZone.scrollIntoView({ behavior: 'smooth' });
 }
-document.getElementById('empty-upload-btn').addEventListener('click', showDropZone);
-dropZone.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', () => handleFiles(fileInput.files));
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-dropZone.addEventListener('drop', e => {
-  e.preventDefault();
-  dropZone.classList.remove('drag-over');
-  handleFiles(e.dataTransfer.files);
-});
 
 async function handleFiles(fileList) {
   const epubs = [...fileList].filter(f => f.name.endsWith('.epub'));
@@ -742,31 +660,122 @@ async function handleFiles(fileList) {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-await initI18n();
-initSortMenu();
-await initSidebar({
-  activePage:    'library',
-  onShelfSelect: selectShelf,
-  activeShelfId: initialShelf === 'reading' ? 'reading'
-               : initialShelf !== 'all'     ? Number(initialShelf)
-               : 'all',
-});
+let _initialized = false;
 
-if (initialShelf !== 'all') {
-  await selectShelf(
-    initialShelf === 'reading' ? 'reading' : Number(initialShelf)
-  );
+export async function initLibrary() {
+  if (_initialized) return;
+  _initialized = true;
+
+  // DOM refs
+  dropZone     = document.getElementById('drop-zone');
+  fileInput    = document.getElementById('file-input');
+  uploadBtn    = document.getElementById('upload-btn');
+  uploadMenu   = document.getElementById('upload-menu');
+  uploadStatus = document.getElementById('upload-status');
+
+  // Sort
+  initSortMenu();
+  document.getElementById('sort-select').addEventListener('change', applyFilter);
+
+  // Edit mode
+  document.getElementById('edit-mode-btn').addEventListener('click', toggleEditMode);
+  document.getElementById('edit-assign-btn').addEventListener('click', () => {
+    if (!selectedBooks.size) return;
+    openBulkAssignModal();
+  });
+  document.getElementById('edit-remove-btn')?.addEventListener('click', () => {
+    if (!selectedBooks.size || typeof currentShelfId !== 'number') return;
+    confirmDialog(
+      t('library.confirm_remove_from_shelf', { n: selectedBooks.size }),
+      async () => {
+        for (const bookId of selectedBooks) {
+          try { await apiFetch(`/shelves/${currentShelfId}/books/${bookId}`, { method: 'DELETE' }); } catch { /* skip */ }
+        }
+        toast.success(t('library.toast_removed_from_shelf'));
+        selectedBooks.clear();
+        await loadBooks();
+        await reloadShelves();
+        await refreshShelfFilter();
+      }
+    );
+  });
+  document.getElementById('edit-delete-btn').addEventListener('click', () => {
+    if (!selectedBooks.size) return;
+    confirmDialog(
+      t('library.confirm_del_books', { n: selectedBooks.size }),
+      async () => {
+        for (const bookId of selectedBooks) {
+          try { await apiFetch(`/books/${bookId}`, { method: 'DELETE' }); } catch { /* skip */ }
+        }
+        toast.success(t('library.toast_books_deleted'));
+        selectedBooks.clear();
+        editMode = false;
+        document.getElementById('edit-mode-btn').textContent = t('library.btn_edit');
+        document.getElementById('edit-toolbar').classList.add('hidden');
+        await loadBooks();
+        await reloadShelves();
+        applyFilter();
+      }
+    );
+  });
+
+  // Search + series filter
+  document.getElementById('search-input').addEventListener('input', () => {
+    seriesFilter = null;
+    updateSeriesFilterBar();
+    applyFilter();
+  });
+  document.getElementById('series-filter-clear')?.addEventListener('click', () => {
+    filterBySeries(null);
+  });
+
+  // Sidebar events
+  document.addEventListener('sidebar:addshelf',  ()  => openAddShelfModal());
+  document.addEventListener('sidebar:editshelf', e   => openShelfEditModal(e.detail));
+
+  // Upload
+  uploadBtn.addEventListener('click', e => { e.stopPropagation(); uploadMenu.classList.toggle('hidden'); });
+  document.addEventListener('click', () => uploadMenu.classList.add('hidden'));
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.book-card'))
+      document.querySelectorAll('.book-card.tapped').forEach(c => c.classList.remove('tapped'));
+  });
+  document.getElementById('upload-file-btn').addEventListener('click', () => {
+    uploadMenu.classList.add('hidden');
+    showDropZone();
+  });
+  document.getElementById('upload-opds-btn')?.addEventListener('click', () => {
+    uploadMenu.classList.add('hidden');
+    showPanel('opds');
+  });
+  document.getElementById('empty-upload-btn').addEventListener('click', showDropZone);
+  dropZone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    handleFiles(e.dataTransfer.files);
+  });
+
+  // Initial shelf
+  if (initialShelf !== 'all') {
+    await selectShelf(
+      initialShelf === 'reading' ? 'reading' : Number(initialShelf)
+    );
+  }
+  if (initialSearch) {
+    const searchEl = document.getElementById('search-input');
+    if (searchEl) searchEl.value = initialSearch;
+  }
+
+  loadBooks();
 }
-
-if (initialSearch) {
-  const searchEl = document.getElementById('search-input');
-  if (searchEl) searchEl.value = initialSearch;
-}
-
-loadBooks();
 
 // Re-render language-dependent content when language changes
 document.addEventListener('langchange', () => {
+  if (!_initialized) return;
   // Update hidden <option> textContent
   document.querySelectorAll('#sort-select option[data-i18n]').forEach(opt => {
     const v = t(opt.dataset.i18n);

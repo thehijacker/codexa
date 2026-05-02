@@ -1,10 +1,13 @@
-import { apiFetch, requireAuth } from './api.js';
+import { apiFetch } from './api.js';
 import { toast, confirmDialog, setButtonLoading } from './ui.js';
-import { t, initI18n } from './i18n.js';
+import { t } from './i18n.js';
+import { showPanel } from './router.js';
 
-await initI18n();
+let _initialized = false;
 
-if (!requireAuth()) throw new Error('not authenticated');
+export async function initSettings() {
+  if (_initialized) return;
+  _initialized = true;
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const kosyncUrl              = document.getElementById('kosync-url');
@@ -277,13 +280,6 @@ if (autoOpenToggle) {
   });
 }
 
-// ── Logout ────────────────────────────────────────────────────────────────────
-document.getElementById('btn-logout')?.addEventListener('click', () => {
-  localStorage.removeItem('br_token');
-  localStorage.removeItem('br_user');
-  window.location.href = '/login.html';
-});
-
 // ── OPDS server management ────────────────────────────────────────────────────
 const opdsServerList = document.getElementById('opds-server-list');
 const opdsEmpty      = document.getElementById('opds-empty');
@@ -346,10 +342,11 @@ function renderOpdsServers(servers) {
     row.style.cssText = 'display:flex;align-items:center;gap:.75rem;padding:.6rem 0;border-bottom:1px solid var(--color-border)';
     row.innerHTML = `
       <div style="flex:1;min-width:0;font-weight:600;font-size:.875rem">${escHtml(s.name)}</div>
-      <a href="/opds.html" class="btn btn-secondary btn-sm" style="white-space:nowrap">${t('settings.opds_open')}</a>
+      <button class="btn btn-secondary btn-sm opds-open-btn" style="white-space:nowrap">${t('settings.opds_open')}</button>
       <button class="btn btn-secondary btn-sm opds-edit-btn">${t('settings.opds_edit')}</button>
       <button class="btn btn-danger btn-sm opds-del-btn">${t('settings.opds_remove')}</button>
     `;
+    row.querySelector('.opds-open-btn').addEventListener('click', () => showPanel('opds'));
     row.querySelector('.opds-edit-btn').addEventListener('click', () => enterEditMode(s));
     row.querySelector('.opds-del-btn').addEventListener('click', () => deleteOpdsServer(s.id, s.name));
     opdsServerList.appendChild(row);
@@ -421,20 +418,21 @@ btnAddOpds.addEventListener('click', async () => {
 
 btnCancelEdit.addEventListener('click', exitEditMode);
 
+  // ── Init ──────────────────────────────────────────────────────────────────────
+  loadSettings();
+  loadOpdsServers();
+  loadAdminSection();
+} // end initSettings
+
 document.addEventListener('langchange', () => {
+  if (!_initialized) return;
   renderOpdsServers(_cachedServers);
-  // Keep form title/button in sync with current mode after language change
   if (_editingServerId !== null) {
-    opdsFormTitle.textContent = t('settings.opds_edit_title');
-    btnAddOpds.textContent    = t('settings.btn_save_opds_edit');
+    document.getElementById('opds-form-title').textContent = t('settings.opds_edit_title');
+    document.getElementById('btn-add-opds-server').textContent = t('settings.btn_save_opds_edit');
   } else {
-    opdsFormTitle.textContent = t('settings.opds_add_title');
-    btnAddOpds.textContent    = t('settings.btn_add_opds');
+    document.getElementById('opds-form-title').textContent = t('settings.opds_add_title');
+    document.getElementById('btn-add-opds-server').textContent = t('settings.btn_add_opds');
   }
   if (!document.getElementById('admin-card').hidden) loadAdminUsers();
 });
-
-// ── Init ──────────────────────────────────────────────────────────────────────
-loadSettings();
-loadOpdsServers();
-loadAdminSection();

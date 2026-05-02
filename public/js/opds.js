@@ -1,29 +1,19 @@
-import { apiFetch, requireAuth } from './api.js';
+import { apiFetch } from './api.js';
 import { toast, setButtonLoading } from './ui.js';
-import { t, initI18n, applyTranslations } from './i18n.js';
+import { t, applyTranslations } from './i18n.js';
 import { reloadShelves } from './sidebar.js';
-
-await initI18n();
-
-if (!requireAuth()) throw new Error('not authenticated');
+import { showPanel } from './router.js';
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let servers       = [];
 let currentServer = null;
 let navStack      = [];    // [{title, url, upUrl}]
 let _lastFeed     = null;  // last rendered feed, for re-render on lang change
+let _initialized  = false;
 
-// ── DOM refs ────────────────────────────────────────────────────────────────
-const serverList    = document.getElementById('server-list');
-const serverEmpty   = document.getElementById('server-empty');
-const catalogTitle  = document.getElementById('catalog-title');
-const breadcrumb    = document.getElementById('breadcrumb');
-const catalogGrid   = document.getElementById('catalog-grid');
-const catalogEmpty  = document.getElementById('catalog-empty');
-const catalogSearch = document.getElementById('catalog-search');
-const btnSearch     = document.getElementById('btn-catalog-search');
-const btnUp         = document.getElementById('btn-catalog-up');
-const loadingEl     = document.getElementById('catalog-loading');
+// ── DOM refs (assigned in initOpds) ──────────────────────────────────────────
+let serverList, serverEmpty, catalogTitle, breadcrumb, catalogGrid, catalogEmpty,
+    catalogSearch, btnSearch, btnUp, loadingEl;
 
 // ── Utility ─────────────────────────────────────────────────────────────────
 function escHtml(s) {
@@ -182,7 +172,7 @@ function renderFeed(feed) {
             body: JSON.stringify({ href: entry.acqHref, title: entry.title, author: entry.author }),
           });
           toast.success(t('opds.toast_book_added', { title: entry.title }));
-          btn.textContent = '\u2713 ' + t('opds.btn_add').replace(/^\+ /, '');
+          btn.textContent = '✓ ' + t('opds.btn_add').replace(/^\+ /, '');
           btn.disabled    = true;
           btn.className   = 'btn btn-secondary btn-sm';
         } catch (err) {
@@ -226,14 +216,11 @@ function renderBreadcrumb() {
   });
 }
 
-// ── Up button ─────────────────────────────────────────────────────────────────
-btnUp.addEventListener('click', () => {
-  if (navStack.length > 1) {
-    navStack.pop();
-    const prev = navStack[navStack.length - 1];
-    browseUrl(prev.url);
-  }
-});
+// ── Loading state ─────────────────────────────────────────────────────────────
+function setLoading(on) {
+  loadingEl.hidden   = !on;
+  btnSearch.disabled = on;
+}
 
 // ── Search ────────────────────────────────────────────────────────────────────
 async function doSearch() {
@@ -258,15 +245,6 @@ async function doSearch() {
   } finally {
     setLoading(false);
   }
-}
-
-btnSearch.addEventListener('click', doSearch);
-catalogSearch.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
-
-// ── Loading state ─────────────────────────────────────────────────────────────
-function setLoading(on) {
-  loadingEl.hidden   = !on;
-  btnSearch.disabled = on;
 }
 
 // ── OPDS Sync to shelf (SSE progress) ───────────────────────────────────────
@@ -320,7 +298,6 @@ function openSyncModal(folderUrl, folderTitle) {
     backdrop.querySelector('#sync-progress').hidden = false;
     backdrop.querySelector('#sync-modal-close').disabled = true;
 
-    const token   = encodeURIComponent(localStorage.getItem('br_token') || '');
     const params  = new URLSearchParams({
       serverId:  currentServer.id,
       folderUrl: folderUrl || '',
@@ -429,13 +406,44 @@ function openStaleDialog(staleBooks, shelfId, syncSummary) {
 
 // ── Language change ───────────────────────────────────────────────────────────
 document.addEventListener('langchange', () => {
-  applyTranslations(); // update data-i18n static elements
+  if (!_initialized) return;
+  applyTranslations();
   if (_lastFeed) {
     catalogGrid.innerHTML = '';
-    renderFeed(_lastFeed); // re-render tiles/rows with new language
+    renderFeed(_lastFeed);
   }
   // Note: do NOT call renderServerList() here — it would lose connected/error state
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-loadServers();
+export async function initOpds() {
+  if (_initialized) return;
+  _initialized = true;
+
+  serverList    = document.getElementById('server-list');
+  serverEmpty   = document.getElementById('server-empty');
+  catalogTitle  = document.getElementById('catalog-title');
+  breadcrumb    = document.getElementById('breadcrumb');
+  catalogGrid   = document.getElementById('catalog-grid');
+  catalogEmpty  = document.getElementById('catalog-empty');
+  catalogSearch = document.getElementById('catalog-search');
+  btnSearch     = document.getElementById('btn-catalog-search');
+  btnUp         = document.getElementById('btn-catalog-up');
+  loadingEl     = document.getElementById('catalog-loading');
+
+  btnUp.addEventListener('click', () => {
+    if (navStack.length > 1) {
+      navStack.pop();
+      const prev = navStack[navStack.length - 1];
+      browseUrl(prev.url);
+    }
+  });
+
+  btnSearch.addEventListener('click', doSearch);
+  catalogSearch.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+  document.getElementById('btn-opds-go-settings')?.addEventListener('click', () => showPanel('settings'));
+  document.querySelector('.btn-opds-settings-link')?.addEventListener('click', () => showPanel('settings'));
+
+  await loadServers();
+}

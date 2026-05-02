@@ -5,6 +5,7 @@
  */
 import { apiFetch, requireAuth, clearToken } from './api.js';
 import { t, initIconLangPicker } from './i18n.js';
+import { showPanel, getCurrentPanel } from './router.js';
 
 const LIB_THEME_KEY = 'br_library_theme';
 const LIB_THEMES = new Set(['system', 'day', 'night', 'eink']);
@@ -18,14 +19,12 @@ let _activeShelfId  = 'all';
 
 /**
  * @param {Object} opts
- * @param {'library'|'settings'|'opds'} opts.activePage
- * @param {Function|null} opts.onShelfSelect  called(shelfId) only on library page
+ * @param {Function|null} opts.onShelfSelect  called(shelfId) when a library shelf is selected
  * @param {string|number}  opts.activeShelfId  'all' | 'reading' | shelf-id
  */
-export async function initSidebar({ activePage = 'library', onShelfSelect = null, activeShelfId = 'all' } = {}) {
+export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' } = {}) {
   if (!requireAuth()) return;
 
-  _activePage    = activePage;
   _onShelfSelect = onShelfSelect;
   _activeShelfId = activeShelfId;
 
@@ -81,17 +80,44 @@ export async function initSidebar({ activePage = 'library', onShelfSelect = null
     document.dispatchEvent(new CustomEvent('sidebar:addshelf'));
   });
 
-  // Page-specific active item
-  if (activePage === 'settings') {
+  // Nav: Settings and OPDS panels
+  sidebar.querySelector('#nav-settings')?.addEventListener('click', e => {
+    e.preventDefault(); showPanel('settings'); closeSidebar();
+  });
+  sidebar.querySelector('#nav-opds')?.addEventListener('click', e => {
+    e.preventDefault(); showPanel('opds'); closeSidebar();
+  });
+
+  // Active item will be set by panelchange event; set initial state from router
+  const currentPanel = getCurrentPanel() || 'library';
+  if (currentPanel === 'settings') {
     sidebar.querySelector('#nav-settings')?.classList.add('sidebar-item-active');
-  } else if (activePage === 'opds') {
+  } else if (currentPanel === 'opds') {
     sidebar.querySelector('#nav-opds')?.classList.add('sidebar-item-active');
   } else {
     setActive(activeShelfId);
   }
 
+  // Update active sidebar item whenever the router switches panels
+  document.addEventListener('panelchange', e => {
+    _activePage = e.detail.panel;
+    if (_activePage === 'settings') {
+      document.querySelectorAll('#nav-all-books, #nav-currently-reading, .sidebar-shelf-item, #nav-opds')
+        .forEach(el => el.classList.remove('sidebar-item-active'));
+      document.getElementById('nav-settings')?.classList.add('sidebar-item-active');
+    } else if (_activePage === 'opds') {
+      document.querySelectorAll('#nav-all-books, #nav-currently-reading, .sidebar-shelf-item, #nav-settings')
+        .forEach(el => el.classList.remove('sidebar-item-active'));
+      document.getElementById('nav-opds')?.classList.add('sidebar-item-active');
+    } else {
+      document.getElementById('nav-settings')?.classList.remove('sidebar-item-active');
+      document.getElementById('nav-opds')?.classList.remove('sidebar-item-active');
+      setActive(_activeShelfId);
+    }
+  });
+
+  await loadNavCounts();
   await reloadShelves();
-  if (activePage !== 'library') await loadNavCounts();
 }
 
 async function loadNavCounts() {
@@ -115,7 +141,7 @@ export function getShelves() { return shelves; }
 
 export function setActive(shelfId) {
   _activeShelfId = shelfId;
-  document.querySelectorAll('#nav-all-books, #nav-currently-reading, .sidebar-shelf-item')
+  document.querySelectorAll('#nav-all-books, #nav-currently-reading, .sidebar-shelf-item, #nav-settings, #nav-opds')
     .forEach(el => el.classList.remove('sidebar-item-active'));
 
   if (shelfId === 'all') {
@@ -131,14 +157,9 @@ export function setActive(shelfId) {
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 function navigate(shelfId) {
-  if (_activePage === 'library') {
-    _onShelfSelect?.(shelfId);
-    setActive(shelfId);
-  } else {
-    window.location.href = shelfId === 'all' || shelfId === 'reading'
-      ? `/?shelf=${shelfId}`
-      : `/?shelf=${shelfId}`;
-  }
+  showPanel('library');
+  _onShelfSelect?.(shelfId);
+  setActive(shelfId);
   closeSidebar();
 }
 
@@ -171,11 +192,11 @@ function buildSidebarHtml() {
         <div id="shelves-list"></div>
       </div>
       <div class="sidebar-divider"></div>
-      <a href="/opds.html" class="sidebar-item" id="nav-opds">
+      <a href="/?panel=opds" class="sidebar-item" id="nav-opds">
         <span class="sidebar-item-icon">🌐</span>
         <span class="sidebar-item-label">${t('sidebar.online_library')}</span>
       </a>
-      <a href="/settings.html" class="sidebar-item" id="nav-settings">
+      <a href="/?panel=settings" class="sidebar-item" id="nav-settings">
         <span class="sidebar-item-icon">⚙️</span>
         <span class="sidebar-item-label">${t('sidebar.settings')}</span>
       </a>
@@ -236,7 +257,7 @@ document.addEventListener('langchange', () => {
   initSidebarLangPicker(sidebar.querySelector('#sidebar-lang-picker'));
   const unameEl = sidebar.querySelector('#sidebar-username');
   if (unameEl) unameEl.textContent = username;
-  // Restore active page
+  // Restore active panel
   if (_activePage === 'settings') {
     sidebar.querySelector('#nav-settings')?.classList.add('sidebar-item-active');
   } else if (_activePage === 'opds') {
@@ -246,7 +267,7 @@ document.addEventListener('langchange', () => {
   }
   renderShelves();
   if (_activePage !== 'library') loadNavCounts();
-  // Re-attach event listeners
+  // Re-attach event listeners (sidebar HTML was replaced)
   sidebar.querySelector('#sidebar-collapse-btn')?.addEventListener('click', () => {
     const collapseBtn = sidebar.querySelector('#sidebar-collapse-btn');
     const collapsed = sidebar.classList.toggle('collapsed');
@@ -265,6 +286,12 @@ document.addEventListener('langchange', () => {
   });
   sidebar.querySelector('#add-shelf-btn')?.addEventListener('click', () => {
     document.dispatchEvent(new CustomEvent('sidebar:addshelf'));
+  });
+  sidebar.querySelector('#nav-settings')?.addEventListener('click', e => {
+    e.preventDefault(); showPanel('settings'); closeSidebar();
+  });
+  sidebar.querySelector('#nav-opds')?.addEventListener('click', e => {
+    e.preventDefault(); showPanel('opds'); closeSidebar();
   });
 });
 
