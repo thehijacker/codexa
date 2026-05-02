@@ -140,7 +140,7 @@ router.get('/sync-sse', async (req, res) => {
         const r = await fetch(entry.acqHref, { headers, signal: AbortSignal.timeout(60000) });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const buf = Buffer.from(await r.arrayBuffer());
-        if (buf.length < 100) throw new Error('Datoteka je prazna');
+        if (buf.length < 100) throw new Error('error.file_empty');
 
         const tmpPath = path.join(TMP_DIR, `sse_${Date.now()}_${user.id}.epub`);
         fs.writeFileSync(tmpPath, buf);
@@ -154,7 +154,7 @@ router.get('/sync-sse', async (req, res) => {
             try { fs.renameSync(tmpPath, destPath); }
             catch { fs.copyFileSync(tmpPath, destPath); fs.unlinkSync(tmpPath); }
             const meta      = extractEpubMetadata(destPath, COVERS_DIR, fileHash);
-            const bookTitle  = meta.title  || entry.title  || 'Neznana knjiga';
+            const bookTitle  = meta.title  || entry.title  || 'Unknown';
             const bookAuthor = meta.author || entry.author || '';
             const fileSize   = fs.statSync(destPath).size;
             const ins = db.prepare(`
@@ -614,7 +614,7 @@ router.post('/sync', async (req, res) => {
         const r = await fetch(entry.acqHref, { headers, signal: AbortSignal.timeout(60000) });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const buf = Buffer.from(await r.arrayBuffer());
-        if (buf.length < 100) throw new Error('Datoteka je prazna');
+        if (buf.length < 100) throw new Error('error.file_empty');
 
         const tmpPath = path.join(TMP_DIR, `sync_${Date.now()}_${req.user.id}.epub`);
         fs.writeFileSync(tmpPath, buf);
@@ -634,7 +634,7 @@ router.post('/sync', async (req, res) => {
             catch { fs.copyFileSync(tmpPath, destPath); fs.unlinkSync(tmpPath); }
 
             const meta      = extractEpubMetadata(destPath, COVERS_DIR, fileHash);
-            const bookTitle  = meta.title  || entry.title  || 'Neznana knjiga';
+            const bookTitle  = meta.title  || entry.title  || 'Unknown';
             const bookAuthor = meta.author || entry.author || '';
             const fileSize   = fs.statSync(destPath).size;
 
@@ -696,13 +696,14 @@ router.post('/download/:id', async (req, res) => {
       // Some servers redirect; check content-type loosely
       const check = ct.toLowerCase();
       if (!check.includes('epub') && !check.includes('zip') && !check.includes('octet')) {
-        throw new Error(`Nepričakovan tip vsebine: ${ct}`);
+        console.warn('[opds] unexpected content-type:', ct);
+        throw new Error('error.unexpected_content_type');
       }
     }
 
     const buf  = Buffer.from(await r.arrayBuffer());
     const size = buf.length;
-    if (size < 100) throw new Error('Datoteka je prazna ali premajhna');
+    if (size < 100) throw new Error('error.file_empty');
 
     // Pipe into the books upload handler via internal multipart-like approach.
     // We write the buffer to a temp file and then invoke the same logic as upload.
@@ -735,7 +736,7 @@ router.post('/download/:id', async (req, res) => {
       catch { fs.copyFileSync(tmpPath, destPath); fs.unlinkSync(tmpPath); }
 
       const meta     = extractEpubMetadata(destPath, COVERS_DIR, fileHash);
-      const bookTitle  = meta.title  || title  || 'Neznana knjiga';
+      const bookTitle  = meta.title  || title  || 'Unknown';
       const bookAuthor = meta.author || author || '';
       const fileSize   = fs.statSync(destPath).size;
 

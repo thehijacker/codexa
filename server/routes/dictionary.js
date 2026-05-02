@@ -76,7 +76,7 @@ router.get('/', authenticateToken, (req, res) => {
 // `dicts` is a comma-separated list of relative ids in desired search order.
 router.get('/lookup', authenticateToken, (req, res) => {
   const word = (req.query.word || '').trim();
-  if (!word) return res.status(400).json({ error: 'word parameter required' });
+  if (!word) return res.status(400).json({ error: 'error.word_required' });
   ensureDictDir();
 
   const requested = req.query.dicts

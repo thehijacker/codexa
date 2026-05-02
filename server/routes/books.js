@@ -20,7 +20,7 @@ const upload = multer({
   fileFilter: (_req, file, cb) => {
     const ok = file.mimetype === 'application/epub+zip'
             || file.originalname.toLowerCase().endsWith('.epub');
-    cb(ok ? null : new Error('Samo EPUB datoteke so dovoljene'), ok);
+    cb(ok ? null : new Error('error.epub_required'), ok);
   },
 });
 
