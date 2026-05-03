@@ -2,6 +2,7 @@ import { apiFetch } from './api.js';
 import { toast, setButtonLoading } from './ui.js';
 import { t, applyTranslations } from './i18n.js';
 import { reloadShelves } from './sidebar.js';
+import { reloadLibrary } from './library.js';
 import { showPanel } from './router.js';
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -10,6 +11,10 @@ let currentServer = null;
 let navStack      = [];    // [{title, url, upUrl}]
 let _lastFeed     = null;  // last rendered feed, for re-render on lang change
 let _initialized  = false;
+
+// Pagination state for current browse level
+let pageHistory   = [];  // stack of URLs for each page visited (index = page number - 1)
+let currentFeed   = null; // the last loaded feed (has .next, .entries etc.)
 
 // ── DOM refs (assigned in initOpds) ──────────────────────────────────────────
 let serverList, serverEmpty, catalogTitle, breadcrumb, catalogGrid, catalogEmpty,
@@ -71,10 +76,13 @@ async function browseUrl(url) {
   catalogGrid.innerHTML = '';
   catalogEmpty.hidden   = true;
   catalogSearch.value   = '';
+  // Reset pagination when navigating to a new folder
+  pageHistory = url !== undefined ? [url] : [null];
 
   try {
     const params = url ? `?url=${encodeURIComponent(url)}` : '';
     const feed   = await apiFetch(`/opds/browse/${currentServer.id}${params}`);
+    currentFeed  = feed;
 
     if (navStack.length > 0) {
       navStack[navStack.length - 1].title = feed.title || navStack[navStack.length - 1].title;
@@ -82,6 +90,7 @@ async function browseUrl(url) {
     }
     renderBreadcrumb();
     renderFeed(feed);
+    renderPagination();
     btnUp.disabled = !feed.up && navStack.length <= 1;
     return true;
   } catch (err) {
@@ -90,6 +99,75 @@ async function browseUrl(url) {
   } finally {
     setLoading(false);
   }
+}
+
+async function gotoPage(url) {
+  setLoading(true);
+  catalogGrid.innerHTML = '';
+  catalogEmpty.hidden   = true;
+  try {
+    const params = url ? `?url=${encodeURIComponent(url)}` : '';
+    const feed   = await apiFetch(`/opds/browse/${currentServer.id}${params}`);
+    currentFeed  = feed;
+    renderFeed(feed);
+    renderPagination();
+  } catch (err) {
+    toast.error(t('opds.err_browse', { msg: err.message }));
+  } finally {
+    setLoading(false);
+  }
+}
+
+function renderPagination() {
+  let bar = document.getElementById('opds-pagination');
+  if (!bar) return;
+  bar.innerHTML = '';
+
+  const feed     = currentFeed;
+  const pageNum  = pageHistory.length; // 1-based current page
+  const hasNext  = !!(feed?.next);
+  const hasPrev  = pageHistory.length > 1;
+  const bookCount = (feed?.entries || []).filter(e => !e.isNav).length;
+
+  // Only show pagination if there's something to paginate
+  if (!hasNext && !hasPrev) { bar.hidden = true; return; }
+  bar.hidden = false;
+
+  const prevBtn = document.createElement('button');
+  prevBtn.className = 'opds-page-btn';
+  prevBtn.textContent = '‹ ' + t('opds.page_prev');
+  prevBtn.disabled = !hasPrev;
+  prevBtn.addEventListener('click', async () => {
+    pageHistory.pop(); // remove current
+    const prevUrl = pageHistory[pageHistory.length - 1];
+    await gotoPage(prevUrl);
+  });
+
+  const info = document.createElement('span');
+  info.className   = 'opds-page-info';
+  info.textContent = t('opds.page_info', { page: pageNum, count: bookCount });
+
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'opds-page-btn';
+  nextBtn.textContent = t('opds.page_next') + ' ›';
+  nextBtn.disabled = !hasNext;
+  nextBtn.addEventListener('click', async () => {
+    const nextUrl = resolveClientUrl(feed.next);
+    pageHistory.push(nextUrl);
+    await gotoPage(nextUrl);
+  });
+
+  bar.appendChild(prevBtn);
+  bar.appendChild(info);
+  bar.appendChild(nextBtn);
+}
+
+// Resolve a next URL that may be relative — use the last page URL as base
+function resolveClientUrl(href) {
+  if (!href) return '';
+  if (/^https?:\/\//i.test(href)) return href;
+  const base = pageHistory[pageHistory.length - 1] || '';
+  try { return new URL(href, base).href; } catch { return href; }
 }
 
 // Nav entries → folder tiles; book entries → expandable list rows
@@ -233,12 +311,15 @@ async function doSearch() {
 
   try {
     const feed = await apiFetch(`/opds/search/${currentServer.id}?q=${encodeURIComponent(q)}`);
+    currentFeed  = feed;
+    pageHistory  = [];  // search results are a single, non-pageable set
     navStack = [
       { title: currentServer.name, url: null },
       { title: t('opds.search_crumb', { q }), url: null },
     ];
     renderBreadcrumb();
     renderFeed(feed);
+    renderPagination();
     btnUp.disabled = false;
   } catch (err) {
     toast.error(t('opds.err_search', { msg: err.message }));
@@ -327,6 +408,7 @@ function openSyncModal(folderUrl, folderTitle) {
       } else if (msg.type === 'done') {
         es.close();
         reloadShelves();
+        reloadLibrary();
       const summary = msg.errors
         ? t('opds.sync_done_errors', { added: msg.added, skipped: msg.skipped, errors: msg.errors })
         : t('opds.sync_done', { added: msg.added, skipped: msg.skipped });
@@ -357,6 +439,9 @@ function openSyncModal(folderUrl, folderTitle) {
 // ── Stale books dialog ────────────────────────────────────────────────────────
 function openStaleDialog(staleBooks, shelfId, syncSummary) {
   document.getElementById('stale-modal')?.remove();
+  // Quick lookup: bookId -> otherShelfCount
+  const otherCounts = new Map(staleBooks.map(b => [b.id, b.otherShelfCount || 0]));
+
   const backdrop = document.createElement('div');
   backdrop.id        = 'stale-modal';
   backdrop.className = 'modal-backdrop';
@@ -373,6 +458,7 @@ function openStaleDialog(staleBooks, shelfId, syncSummary) {
             <input type="checkbox" class="stale-chk" value="${b.id}" checked />
             <span>${escHtml(b.title)}</span>
             ${b.author ? `<span style="font-size:.78rem;color:var(--color-text-muted)">${escHtml(b.author)}</span>` : ''}
+            ${(b.otherShelfCount || 0) > 0 ? `<span style="font-size:.72rem;color:var(--color-accent);margin-left:auto">${t('opds.stale_also_in_shelves')}</span>` : ''}
           </label>`).join('')}
       </div>
       <div class="modal-footer">
@@ -391,16 +477,23 @@ function openStaleDialog(staleBooks, shelfId, syncSummary) {
   backdrop.querySelector('#stale-delete').addEventListener('click', async () => {
     const checked = [...backdrop.querySelectorAll('.stale-chk:checked')].map(el => Number(el.value));
     if (!checked.length) { close(); return; }
-    let deleted = 0;
+    let handled = 0;
     for (const bookId of checked) {
       try {
-        await apiFetch(`/books/${bookId}`, { method: 'DELETE' });
-        deleted++;
+        if (otherCounts.get(bookId) > 0) {
+          // Book lives on other shelves too — only remove it from this synced shelf
+          await apiFetch(`/shelves/${shelfId}/books/${bookId}`, { method: 'DELETE' });
+        } else {
+          // Book is exclusive to this shelf — delete it from the library entirely
+          await apiFetch(`/books/${bookId}`, { method: 'DELETE' });
+        }
+        handled++;
       } catch { /* ignore */ }
     }
     backdrop.remove();
     reloadShelves();
-    toast.success(t('opds.stale_deleted', { summary: syncSummary, n: deleted }));
+    reloadLibrary();
+    toast.success(t('opds.stale_deleted', { summary: syncSummary, n: handled }));
   });
 }
 
@@ -411,6 +504,7 @@ document.addEventListener('langchange', () => {
   if (_lastFeed) {
     catalogGrid.innerHTML = '';
     renderFeed(_lastFeed);
+    renderPagination();
   }
   // Note: do NOT call renderServerList() here — it would lose connected/error state
 });

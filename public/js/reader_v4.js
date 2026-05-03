@@ -12,9 +12,12 @@ if (!bookId) { window.location.href = '/'; throw new Error(); }
 
 // ── Themes ────────────────────────────────────────────────────────────────────
 const THEMES = {
-  dark:  { bg: '#1a1a2e', text: '#d8d8e8', link: '#e94560' },
+  dark:  { bg: '#111111', text: '#e0e0e0', link: '#e94560' },
   light: { bg: '#f9f9f6', text: '#1a1a1a', link: '#c73652' },
-  sepia: { bg: '#f4ecd8', text: '#3e2e1a', link: '#8b4513' },
+  sepia: { bg: '#f1e8d0', text: '#3e2e1a', link: '#8b4513' },
+  sepiaDark: { bg: '#c4b090', text: '#2e2014', link: '#7a3a10' },
+  midnight:  { bg: '#0f172a', text: '#e2e8f0', link: '#38bdf8' },
+  nord:      { bg: '#2e3440', text: '#d8dee9', link: '#88c0d0' },
 };
 
 /** Full shell-UI palette derived from each reader theme — applied to all panels/sidebars. */
@@ -42,15 +45,48 @@ const THEME_UI = {
     shadow:     '0 4px 24px rgba(60,40,20,.12)',
   },
   dark: {
-    bg:         '#1a1a2e',
-    surface:    '#22223a',
-    surface2:   '#2a2a46',
-    border:     'rgba(216,216,232,0.12)',
-    text:       '#d8d8e8',
-    textMuted:  '#9a9ab0',
+    bg:         '#111111',
+    surface:    '#1e1e1e',
+    surface2:   '#2a2a2a',
+    border:     'rgba(224,224,224,0.12)',
+    text:       '#e0e0e0',
+    textMuted:  '#909090',
     accent:     '#e94560',
     accentDark: '#c73652',
-    shadow:     '0 4px 24px rgba(0,0,0,.4)',
+    shadow:     '0 4px 24px rgba(0,0,0,.5)',
+  },
+  sepiaDark: {
+    bg:         '#c4b090',
+    surface:    '#b8a480',
+    surface2:   '#ac9870',
+    border:     'rgba(46,32,20,0.15)',
+    text:       '#2e2014',
+    textMuted:  '#6a5040',
+    accent:     '#7a3a10',
+    accentDark: '#5e2c0a',
+    shadow:     '0 4px 24px rgba(40,24,8,.18)',
+  },
+  midnight: {
+    bg:         '#0f172a',
+    surface:    '#1e293b',
+    surface2:   '#334155',
+    border:     'rgba(226,232,240,0.1)',
+    text:       '#e2e8f0',
+    textMuted:  '#94a3b8',
+    accent:     '#38bdf8',
+    accentDark: '#0ea5e9',
+    shadow:     '0 4px 24px rgba(0,0,0,.6)',
+  },
+  nord: {
+    bg:         '#2e3440',
+    surface:    '#3b4252',
+    surface2:   '#434c5e',
+    border:     'rgba(216,222,233,0.1)',
+    text:       '#d8dee9',
+    textMuted:  '#9099ab',
+    accent:     '#88c0d0',
+    accentDark: '#5e81ac',
+    shadow:     '0 4px 24px rgba(0,0,0,.45)',
   },
 };
 
@@ -537,6 +573,10 @@ function applyUiTheme() {
     document.documentElement.style.setProperty('--color-text-muted',  text);
     document.documentElement.style.setProperty('--color-border',      text);
     document.documentElement.style.setProperty('--color-accent',      text);
+    document.documentElement.style.setProperty('--reader-header-bg',          bg);
+    document.documentElement.style.setProperty('--reader-header-border',      text);
+    document.documentElement.style.setProperty('--reader-header-text',        text);
+    document.documentElement.style.setProperty('--reader-header-text-muted',  text);
     epubViewer.style.background = bg;
   } else {
     // Apply full reader-theme palette to all shell UI (panels, sidebars, inputs …)
@@ -550,17 +590,16 @@ function applyUiTheme() {
     document.documentElement.style.setProperty('--color-accent',      ui.accent);
     document.documentElement.style.setProperty('--color-accent-dark', ui.accentDark);
     document.documentElement.style.setProperty('--shadow',            ui.shadow);
+    // Header: translucent glass tinted to the page colour
+    const headerBg    = hexToRgba(theme.bg,   0.6);
+    const headerBdr   = hexToRgba(theme.text, 0.12);
+    const headerMuted = hexToRgba(theme.text, 0.55);
+    document.documentElement.style.setProperty('--reader-header-bg',          headerBg);
+    document.documentElement.style.setProperty('--reader-header-border',      headerBdr);
+    document.documentElement.style.setProperty('--reader-header-text',        theme.text);
+    document.documentElement.style.setProperty('--reader-header-text-muted',  headerMuted);
     epubViewer.style.background = theme.bg;
   }
-
-  // Header: translucent glass tinted to the page colour
-  const headerBg    = hexToRgba(theme.bg,   0.6);
-  const headerBdr   = hexToRgba(theme.text, 0.12);
-  const headerMuted = hexToRgba(theme.text, 0.55);
-  document.documentElement.style.setProperty('--reader-header-bg',           headerBg);
-  document.documentElement.style.setProperty('--reader-header-border',       headerBdr);
-  document.documentElement.style.setProperty('--reader-header-text',         theme.text);
-  document.documentElement.style.setProperty('--reader-header-text-muted',   headerMuted);
 }
 
 function applyPageShadow() {
@@ -962,6 +1001,47 @@ function updateChapProgressBar() {
 function updateBookProgressBar() {
   if (!prefs.statusBar.bookProgressBar.show || !sbBookProgFill) return;
   sbBookProgFill.style.width = (currentPct * 100) + '%';
+}
+
+// Build hairline chapter markers on the jump-to-% slider.
+// Called after TOC and/or locations are available; safe to call multiple times.
+function buildChapterMarkers() {
+  const container = document.getElementById('sb-chap-markers');
+  if (!container) return;
+  container.innerHTML = '';
+  // Only top-level TOC entries (depth 0) — no need to mark every sub-section
+  const topLevel = tocFlatItems.filter(t => t.depth === 0);
+  if (topLevel.length < 2) return;
+  const spineItems = book?.spine?.spineItems || [];
+  const spineTotal = spineItems.length || 1;
+
+  topLevel.forEach(({ href }, i) => {
+    if (i === 0) return; // first chapter starts at 0% — no marker needed
+    const hrefBase = (href || '').split('#')[0];
+    let pct = null;
+
+    // Prefer accurate percentage from epub.js locations table
+    if (book?.locations?.length() > 0) {
+      const spineItem = book.spine.get(hrefBase);
+      if (spineItem?.cfiBase) {
+        pct = book.locations.percentageFromCfi(`epubcfi(${spineItem.cfiBase}!/4/1:0)`);
+      }
+    }
+    // Fallback: spine-index ratio (no locations needed)
+    if (pct == null) {
+      const idx = spineItems.findIndex(s => {
+        const sh = (s.href || '').split('#')[0];
+        return sh === hrefBase || sh.endsWith('/' + hrefBase.split('/').pop());
+      });
+      if (idx > 0) pct = idx / spineTotal;
+    }
+
+    if (pct == null || pct <= 0.001 || pct >= 0.999) return;
+    const marker = document.createElement('div');
+    marker.className = 'sb-chap-marker';
+    marker.style.left = (pct * 100).toFixed(2) + '%';
+    container.appendChild(marker);
+  });
 }
 
 // ── Auto-hide header ──────────────────────────────────────────────────────────
@@ -2104,8 +2184,10 @@ function initLocations() {
         if (pct != null && isReady) {
           currentPct = pct;
           progressFillEl.style.width  = Math.round(pct * 100) + '%';
+          updateStatusBar(lastLocation || rendition?.currentLocation());
         }
       }
+      buildChapterMarkers(); // refine markers now that accurate locations are available
       return;
     } catch { localStorage.removeItem(key); /* corrupt — regenerate */ }
   }
@@ -2118,8 +2200,10 @@ function initLocations() {
         if (pct != null && isReady) {
           currentPct = pct;
           progressFillEl.style.width  = Math.round(pct * 100) + '%';
+          updateStatusBar(lastLocation || rendition?.currentLocation());
         }
       }
+      buildChapterMarkers(); // refine markers now that accurate locations are available
     }).catch(() => {});
   }, 1500);
 }
@@ -2331,7 +2415,12 @@ async function syncOnOpen(localProgress) {
   // If the remote xpointer exactly matches our last-pushed xpointer, both readers
   // are at the same paragraph — skip the dialog even if percentages differ (they
   // are on different scales and the mismatch is expected, not a real position gap).
-  const localXPointer = int?.progress || null;
+  // NOTE: this optimisation only makes sense when comparing an EXTERNAL position
+  // (ext) with what the web reader last wrote to the internal store (int).
+  // When best === int (KOReader pushes directly here, no external server), both
+  // sides would be the same object → always a match → dialog never shows.
+  // In that case set localXPointer to null so we fall through to the pct check.
+  const localXPointer = (best !== int) ? (int?.progress || null) : null;
   const xpointerMatch = !!(localXPointer && best.progress && localXPointer === best.progress);
   console.log('[kosync] xpointerMatch:', xpointerMatch, 'local:', localXPointer, 'remote:', best.progress);
 
@@ -2661,6 +2750,28 @@ document.getElementById('settings-close').addEventListener('click', closePanels)
 panelBackdrop.addEventListener('click', closePanels);
 document.getElementById('btn-prev').addEventListener('click', e => { e.stopPropagation(); goPrev(); });
 document.getElementById('btn-next').addEventListener('click', e => { e.stopPropagation(); goNext(); });
+
+// ── Chapter navigation buttons on book progress bar ────────────────────────────
+function findCurrentTocChapIdx() {
+  const norm = h => (h || '').split('#')[0].replace(/_split_\d+(\.\w+)$/, '$1').toLowerCase();
+  const base = norm(currentHref).split('/').pop();
+  const tops = tocFlatItems.filter(t => t.depth === 0);
+  let found = -1;
+  tops.forEach((t, i) => {
+    const tb = norm(t.href || '').split('/').pop();
+    if (base && tb && (base === tb || base.includes(tb) || tb.includes(base))) found = i;
+  });
+  return { tops, idx: found };
+}
+document.getElementById('btn-prev-chap')?.addEventListener('click', () => {
+  const { tops, idx } = findCurrentTocChapIdx();
+  const target = idx > 0 ? tops[idx - 1] : (idx === 0 ? tops[0] : null);
+  if (target) rendition?.display(target.href).then(() => saveProgress({ forceRemote: true })).catch(() => {});
+});
+document.getElementById('btn-next-chap')?.addEventListener('click', () => {
+  const { tops, idx } = findCurrentTocChapIdx();
+  if (idx >= 0 && idx < tops.length - 1) rendition?.display(tops[idx + 1].href).then(() => saveProgress({ forceRemote: true })).catch(() => {});
+});
 document.querySelector('.nav-zone-prev')?.addEventListener('click', goPrev);
 document.querySelector('.nav-zone-next')?.addEventListener('click', goNext);
 document.querySelector('.nav-zone-prev')?.addEventListener('touchend', (e) => { if (e.cancelable) e.preventDefault(); goPrev(); }, { passive: false });
@@ -2721,6 +2832,7 @@ async function init() {
     book.loaded.navigation.then(nav => {
       if (nav?.toc?.length) {
         buildToc(nav.toc);
+        buildChapterMarkers(); // place markers using spine-index fallback; will be refined by initLocations
         // TOC may load after first 'relocated' — refresh chapter overlays now
         const href = lastChapterHref || '';
         if (href) {
@@ -2822,7 +2934,27 @@ async function init() {
     {
       const loc = rendition.currentLocation();
       if (loc?.start?.cfi) currentCfi = loc.start.cfi;
-      if (loc?.start?.percentage != null) currentPct = loc.start.percentage;
+      if (book.locations?.length() > 0) {
+        // Locations already generated (cached) — most accurate
+        const pct = book.locations.percentageFromCfi(currentCfi);
+        if (pct != null) currentPct = pct;
+      } else if (localProgress?.percentage > 0) {
+        // No locations cache — use server-saved percentage immediately.
+        // This is the most reliable fallback: it's our own DB value and is
+        // always available. epub.js returns 0 (not null) when locations aren't
+        // loaded, so we check this BEFORE loc.start.percentage to avoid 0 winning.
+        currentPct = localProgress.percentage;
+      } else if (syncTarget?.percentage != null) {
+        // Sync jump target — positions differed so user chose to jump here.
+        currentPct = syncTarget.percentage;
+      } else if (loc?.start?.percentage > 0) {
+        // epub.js estimate — only trust it when > 0 (0 means locations not loaded)
+        currentPct = loc.start.percentage;
+      } else if (loc?.start?.index != null) {
+        // Last resort: rough spine-position estimate
+        const total = book.spine?.spineItems?.length || book.spine?.length || 1;
+        currentPct = (loc.start.index + 1) / total;
+      }
       console.log('[pos] final position before isReady cfi:', currentCfi.slice(0,60), 'pct:', (currentPct*100).toFixed(2)+'%');
     }
     // Only allow saves after the initial position (local or synced) is fully displayed
@@ -2833,6 +2965,9 @@ async function init() {
     if (lastChapterHref) {
       chapterTitleEl.textContent = chapterLabelFromHref(lastChapterHref);
     }
+    // Immediately render correct pctBook (and other stats) into the status bar.
+    // Without this, pctBook stays 0% until the next relocated event or 30s clock tick.
+    updateStatusBar(rendition.currentLocation());
   } catch (err) {
     console.error('[reader]', err);
     loadingMsg.textContent = t('reader.err_open', { msg: err.message });

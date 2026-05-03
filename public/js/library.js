@@ -606,6 +606,12 @@ async function loadBooks() {
   }
 }
 
+// Called by external modules (e.g. opds.js) after syncing to refresh the book grid.
+export async function reloadLibrary() {
+  await loadBooks();
+  await refreshShelfFilter();
+}
+
 // ── Delete ────────────────────────────────────────────────────────────────────
 async function deleteBook(id) {
   try {

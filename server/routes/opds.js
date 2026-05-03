@@ -78,7 +78,7 @@ router.get('/sync-sse', async (req, res) => {
   const targetUrl = folderUrl ? resolveUrl(String(folderUrl), server.url) : server.url;
 
   try {
-    const feed = await fetchOpds(targetUrl, server);
+    const feed = await fetchAllOpdsPages(targetUrl, server);
     feed.entries = feed.entries.map(e => ({
       ...e,
       acqHref: resolveUrl(e.acqHref, targetUrl),
@@ -120,6 +120,8 @@ router.get('/sync-sse', async (req, res) => {
     const headers = buildAuthHeaders(server.username, server.password);
     let added = 0, skipped = 0, errors = 0;
     const syncedBookIds = new Set(); // track all book IDs touched by this sync
+    // All acquisition URLs present in the feed — used for stale detection fallback
+    const feedAcqHrefs = new Set(bookEntries.map(e => e.acqHref).filter(Boolean));
 
     for (let i = 0; i < bookEntries.length; i++) {
       if (cancelled) break;
@@ -185,13 +187,23 @@ router.get('/sync-sse', async (req, res) => {
       }
     }
 
-    // Detect stale books: in shelf before sync but NOT in the OPDS feed
+    // Detect stale books: in shelf before sync but NOT touched by this sync.
+    // A book is NOT stale if its known OPDS source URL appears in the current feed
+    // (handles: book added manually, download failed, URL changed slightly, etc.)
     const staleBooks = [];
     if (preExistingBookIds.size > 0) {
       for (const bookId of preExistingBookIds) {
-        if (!syncedBookIds.has(bookId)) {
-          const b = db.prepare('SELECT id, title, author FROM books WHERE id = ?').get(bookId);
-          if (b) staleBooks.push(b);
+        if (syncedBookIds.has(bookId)) continue;
+        // Fallback: check if any known acq_href for this book is in the current feed
+        const sources = db.prepare('SELECT acq_href FROM book_opds_sources WHERE user_id = ? AND book_id = ?').all(user.id, bookId);
+        const appearsInFeed = sources.some(s => feedAcqHrefs.has(s.acq_href));
+        if (appearsInFeed) continue;
+        const b = db.prepare('SELECT id, title, author FROM books WHERE id = ?').get(bookId);
+        if (b) {
+          const { cnt: otherShelfCount } = db.prepare(
+            'SELECT COUNT(*) AS cnt FROM book_shelves WHERE book_id = ? AND shelf_id != ?'
+          ).get(bookId, shelf.id) || { cnt: 0 };
+          staleBooks.push({ ...b, otherShelfCount });
         }
       }
     }
@@ -291,12 +303,14 @@ function normaliseAtomFeed(feed) {
 
   const selfLink = (channel.link || []).find(l => (l['@_rel'] || '') === 'self');
   const upLink   = (channel.link || []).find(l => (l['@_rel'] || '') === 'up');
+  const nextLink = (channel.link || []).find(l => (l['@_rel'] || '') === 'next');
   const titleVal = channel.title?.['#text'] || channel.title || '';
   return {
     version: 1,
     title:   decodeEntities(typeof titleVal === 'object' ? (titleVal['#text'] || 'Katalog') : String(titleVal)),
     self:    selfLink?.['@_href'] || '',
     up:      upLink?.['@_href']  || '',
+    next:    decodeEntities(nextLink?.['@_href'] || ''),
     entries,
   };
 }
@@ -342,11 +356,13 @@ function normaliseOpds2Feed(data) {
   ];
 
   const upLink   = (data.links || []).find(l => l.rel === 'up');
+  const nextLink = (data.links || []).find(l => l.rel === 'next');
   return {
     version: 2,
     title:   data.metadata?.title || 'Katalog',
     self:    '',
     up:      upLink?.href || '',
+    next:    decodeEntities(nextLink?.href || ''),
     entries,
   };
 }
@@ -367,6 +383,32 @@ async function fetchOpds(url, server) {
   // OPDS 1.x returns Atom XML
   const parsed = xmlParser.parse(body);
   return normaliseAtomFeed(parsed);
+}
+
+// Fetch all paginated OPDS pages and merge entries into the first feed object.
+async function fetchAllOpdsPages(startUrl, server, maxPages = 20) {
+  const first = await fetchOpds(startUrl, server);
+  const visitedUrls = new Set([startUrl]);
+  let nextHref = first.next ? resolveUrl(first.next, startUrl) : '';
+  let page = 1;
+  while (nextHref && page < maxPages) {
+    if (visitedUrls.has(nextHref)) {
+      break;
+    }
+    visitedUrls.add(nextHref);
+    const more = await fetchOpds(nextHref, server);
+    // Resolve acqHref/navHref relative to the page URL, then merge
+    for (const e of more.entries) {
+      first.entries.push({
+        ...e,
+        acqHref: resolveUrl(e.acqHref, nextHref),
+        navHref: resolveUrl(e.navHref, nextHref),
+      });
+    }
+    nextHref = more.next ? resolveUrl(more.next, nextHref) : '';
+    page++;
+  }
+  return first;
 }
 
 // Resolve relative URLs against the server's base URL

@@ -48,11 +48,16 @@
 
     <!-- Jump-to-percentage panel -->
     <div id="jump-pct-panel" style="display:none">
+      <button id="btn-prev-chap" class="sb-chap-nav-btn" data-i18n-title="reader.prev_chapter" title="Prejšnje poglavje">‹</button>
       <span class="setting-label" data-i18n="reader.jump_pct_label">Položaj v knjigi</span>
       <div class="jump-pct-row">
-        <input type="range" id="jump-pct-slider" min="0" max="100" step="1" value="0" />
+        <div class="jump-pct-track-wrap">
+          <input type="range" id="jump-pct-slider" min="0" max="100" step="1" value="0" />
+          <div id="sb-chap-markers"></div>
+        </div>
         <span id="jump-pct-value" class="setting-value">0%</span>
       </div>
+      <button id="btn-next-chap" class="sb-chap-nav-btn" data-i18n-title="reader.next_chapter" title="Naslednje poglavje">›</button>
     </div>
 
     <!-- Reading area -->
@@ -138,9 +143,16 @@
       <div class="setting-row">
         <div class="setting-label" data-i18n="reader.sb_theme">Tema</div>
         <div class="theme-buttons">
-          <button class="theme-btn theme-light" data-theme="light" data-i18n="reader.theme_light">Svetla</button>
-          <button class="theme-btn theme-sepia" data-theme="sepia" data-i18n="reader.theme_sepia">Sepija</button>
-          <button class="theme-btn theme-dark"  data-theme="dark"  data-i18n="reader.theme_dark">Temna</button>
+          <div class="theme-buttons-row">
+            <button class="theme-btn theme-light" data-theme="light" data-i18n="reader.theme_light">Svetla</button>
+            <button class="theme-btn theme-sepia" data-theme="sepia" data-i18n="reader.theme_sepia">Sepija</button>
+            <button class="theme-btn theme-dark"  data-theme="dark"  data-i18n="reader.theme_dark">Temna</button>
+          </div>
+          <div class="theme-buttons-row">
+            <button class="theme-btn theme-sepiaDark" data-theme="sepiaDark" data-i18n="reader.theme_sepia_dark">Sepija temna</button>
+            <button class="theme-btn theme-midnight"  data-theme="midnight"  data-i18n="reader.theme_midnight">Polnoč</button>
+            <button class="theme-btn theme-nord"      data-theme="nord"      data-i18n="reader.theme_nord">Nord</button>
+          </div>
         </div>
       </div>
 

@@ -51,7 +51,6 @@ function computeFileMd5(filePath) {
     for (let i = -1; i <= 10; i++) {
       const offset    = i < 0 ? 0 : (1024 << (2 * i));
       const bytesRead = fs.readSync(fd, buf, 0, 1024, offset);
-      console.log(`[md5]   i=${i} offset=${offset} bytesRead=${bytesRead}`);
       if (bytesRead === 0) break;
       hash.update(buf.subarray(0, bytesRead));
     }
