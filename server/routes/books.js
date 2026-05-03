@@ -131,13 +131,13 @@ router.post('/', upload.single('epub'), async (req, res) => {
       fs.unlinkSync(tmpPath);
     }
 
-    const { title, author, cover_path, series_name, series_number, description } = extractEpubMetadata(destPath, COVERS_DIR, fileHash);
+    const { title, author, cover_path, series_name, series_number, description, publisher, language, isbn, genres, pages } = extractEpubMetadata(destPath, COVERS_DIR, fileHash);
     const fileSize = fs.statSync(destPath).size;
 
     const result = db.prepare(`
-      INSERT INTO books (user_id, title, author, series_name, series_number, description, file_hash, file_hash_md5, filename, cover_path, file_size)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(req.user.id, title, author, series_name, series_number, description, fileHash, fileHashMd5, filename, cover_path, fileSize);
+      INSERT INTO books (user_id, title, author, series_name, series_number, description, publisher, language, isbn, genres, pages, file_hash, file_hash_md5, filename, cover_path, file_size)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.user.id, title, author, series_name, series_number, description, publisher, language, isbn, genres, pages, fileHash, fileHashMd5, filename, cover_path, fileSize);
 
     res.status(201).json({ id: result.lastInsertRowid, title, author, series_name, series_number, cover_path, file_hash: fileHash, file_hash_md5: fileHashMd5 });
   } catch (err) {
@@ -167,11 +167,11 @@ router.patch('/:id', (req, res) => {
   res.json({ success: true, kosync_hash: h });
 });
 
-// ── POST /api/books/reextract-all — re-extract metadata for books missing description/cover
+// ── POST /api/books/reextract-all — re-extract metadata for all books
 router.post('/reextract-all', (req, res) => {
   const db    = getDb();
   const books = db.prepare(
-    "SELECT * FROM books WHERE user_id = ? AND (description = '' OR description IS NULL OR cover_path = '' OR cover_path IS NULL)"
+    'SELECT * FROM books WHERE user_id = ?'
   ).all(req.user.id);
 
   let updated = 0, failed = 0;
@@ -183,8 +183,8 @@ router.post('/reextract-all', (req, res) => {
         try { fs.unlinkSync(path.join(COVERS_DIR, book.cover_path)); } catch { /* already gone */ }
       }
       const meta = extractEpubMetadata(epubPath, COVERS_DIR, book.file_hash);
-      db.prepare('UPDATE books SET cover_path = ?, description = ? WHERE id = ?')
-        .run(meta.cover_path, meta.description || book.description || '', book.id);
+      db.prepare('UPDATE books SET cover_path = ?, description = ?, publisher = ?, language = ?, isbn = ?, genres = ?, pages = ? WHERE id = ?')
+        .run(meta.cover_path, meta.description || book.description || '', meta.publisher || book.publisher || '', meta.language || book.language || '', meta.isbn || book.isbn || '', meta.genres || book.genres || '', meta.pages || book.pages || '', book.id);
       updated++;
     } catch { failed++; }
   }
@@ -210,8 +210,8 @@ router.post('/:id/reextract-cover', (req, res) => {
   }
 
   const meta = extractEpubMetadata(epubPath, COVERS_DIR, book.file_hash);
-  db.prepare('UPDATE books SET cover_path = ?, description = ? WHERE id = ?')
-    .run(meta.cover_path, meta.description || book.description || '', book.id);
+  db.prepare('UPDATE books SET cover_path = ?, description = ?, publisher = ?, language = ?, isbn = ?, genres = ?, pages = ? WHERE id = ?')
+    .run(meta.cover_path, meta.description || book.description || '', meta.publisher || book.publisher || '', meta.language || book.language || '', meta.isbn || book.isbn || '', meta.genres || book.genres || '', meta.pages || book.pages || '', book.id);
   res.json({ cover_path: meta.cover_path, description: meta.description });
 });
 

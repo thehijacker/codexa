@@ -75,7 +75,7 @@ function dcText(val) {
 
 // ── Main extraction function ──────────────────────────────────────────────────
 function extractEpubMetadata(epubPath, coversDir, fileHash) {
-  const result = { title: path.basename(epubPath, '.epub'), author: '', cover_path: '', series_name: '', series_number: '', description: '' };
+  const result = { title: path.basename(epubPath, '.epub'), author: '', cover_path: '', series_name: '', series_number: '', description: '', publisher: '', language: '', isbn: '', genres: '', pages: '' };
 
   try {
     const zip = new AdmZip(epubPath);
@@ -110,6 +110,36 @@ function extractEpubMetadata(epubPath, coversDir, fileHash) {
     const descRaw = metadata['dc:description'];
     if (descRaw) result.description = dcText(descRaw);
 
+    // Publisher
+    const pubRaw = metadata['dc:publisher'];
+    if (pubRaw) result.publisher = dcText(pubRaw);
+
+    // Language
+    const langRaw = metadata['dc:language'];
+    if (langRaw) result.language = dcText(langRaw);
+
+    // Genres (dc:subject — may appear multiple times)
+    const subjectRaw = metadata['dc:subject'];
+    if (subjectRaw) {
+      const subjects = Array.isArray(subjectRaw) ? subjectRaw : [subjectRaw];
+      result.genres = subjects.map(s => dcText(s)).filter(Boolean).join(', ');
+    }
+
+    // ISBN — from dc:identifier with scheme ISBN or urn:isbn: prefix
+    const identRaw = metadata['dc:identifier'];
+    if (identRaw) {
+      const identList = Array.isArray(identRaw) ? identRaw : [identRaw];
+      for (const id of identList) {
+        const scheme = String(id?.['@_opf:scheme'] || id?.['@_scheme'] || '').toUpperCase();
+        const text   = typeof id === 'string' ? id.trim() : String(id?.['#text'] || '').trim();
+        const clean  = text.replace(/^urn:isbn:/i, '').replace(/[-\s]/g, '');
+        if (scheme === 'ISBN' || /^(978|979)\d{10}$/.test(clean) || /^\d{10}$/.test(clean)) {
+          result.isbn = text.replace(/^urn:isbn:/i, '');
+          break;
+        }
+      }
+    }
+
     // Collect <meta> elements — may appear as 'meta' or 'opf:meta' depending on namespace
     const metasRaw = [
       ...(Array.isArray(metadata?.meta)       ? metadata.meta       : metadata?.meta       ? [metadata.meta]       : []),
@@ -122,10 +152,18 @@ function extractEpubMetadata(epubPath, coversDir, fileHash) {
       '@_name':     String(m['@_name']     || '').replace(/^opf:/, ''),
     }));
 
-    // Calibre series tags
+    // Calibre series tags + page count from named/property metas
     for (const m of metas) {
       if (m['@_name'] === 'calibre:series')        result.series_name   = String(m['@_content'] || '').trim();
       if (m['@_name'] === 'calibre:series_index')  result.series_number = String(m['@_content'] || '').trim();
+      if (!result.pages && ['calibre:num_pages', 'schema:numberOfPages'].includes(m['@_name'])) {
+        const v = String(m['@_content'] || '').trim();
+        if (v && v !== '0') result.pages = v;
+      }
+      if (!result.pages && ['schema:numberOfPages', 'numberOfPages'].includes(m['@_property'])) {
+        const v = String(m['#text'] || '').trim();
+        if (v && v !== '0') result.pages = v;
+      }
     }
     // EPUB 3: belongs-to-collection + group-position (linked via refines="#id")
     if (!result.series_name) {

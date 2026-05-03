@@ -118,6 +118,11 @@ function initDb() {
     [`ALTER TABLE books          ADD COLUMN description              TEXT    DEFAULT ''`,  'books.description'],
     [`ALTER TABLE books          ADD COLUMN kosync_hash              TEXT    DEFAULT ''`,  'books.kosync_hash'],
     [`ALTER TABLE books          ADD COLUMN md5_algo_v2              INTEGER DEFAULT 0`,   'books.md5_algo_v2'],
+    [`ALTER TABLE books          ADD COLUMN publisher                TEXT    DEFAULT ''`,  'books.publisher'],
+    [`ALTER TABLE books          ADD COLUMN language                 TEXT    DEFAULT ''`,  'books.language'],
+    [`ALTER TABLE books          ADD COLUMN isbn                     TEXT    DEFAULT ''`,  'books.isbn'],
+    [`ALTER TABLE books          ADD COLUMN genres                   TEXT    DEFAULT ''`,  'books.genres'],
+    [`ALTER TABLE books          ADD COLUMN pages                    TEXT    DEFAULT ''`,  'books.pages'],
     [`ALTER TABLE user_settings  ADD COLUMN kosync_internal_enabled  INTEGER DEFAULT 0`,   'user_settings.kosync_internal_enabled'],
   ];
   for (const [sql, label] of migrations) {

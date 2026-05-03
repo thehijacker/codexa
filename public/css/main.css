@@ -467,6 +467,7 @@ input:focus, select:focus, textarea:focus {
   justify-content: center;
   padding: 1rem;
   backdrop-filter: blur(2px);
+  overflow: hidden; /* prevent wheel events reaching page behind the modal */
 }
 .modal {
   background: var(--color-surface);
@@ -969,10 +970,9 @@ input:focus, select:focus, textarea:focus {
 
 /* ── Book info modal ─────────────────────────────────────────────────────────── */
 .info-modal {
-  max-width: 600px !important;
+  max-width: 720px !important;
   max-height: 90vh;
-  overflow-y: auto;
-  scrollbar-width: none; /* Firefox: hide scrollbar */
+  overflow: hidden; /* no scroll on desktop — content fits; mobile re-enables below */
 }
 .info-modal::-webkit-scrollbar { display: none; } /* Chrome/Safari: hide scrollbar */
 .info-modal-top {
@@ -982,11 +982,17 @@ input:focus, select:focus, textarea:focus {
 }
 .info-modal-cover {
   width: 110px;
+  min-width: 110px; /* prevent genres from squeezing cover */
+  height: 100%;
   min-height: 165px;
   object-fit: cover;
   border-radius: var(--radius);
   flex-shrink: 0;
   background: var(--color-surface2);
+  align-self: stretch; /* make sure height: 100% resolves against the flex row */
+}
+.info-modal-cover-clickable {
+  cursor: zoom-in;
 }
 .info-modal-cover-ph {
   width: 110px;
@@ -1004,6 +1010,35 @@ input:focus, select:focus, textarea:focus {
 .info-modal-author { font-size: .88rem; color: var(--color-text-muted); margin-bottom: .25rem; }
 .info-modal-series { font-size: .82rem; color: var(--color-accent); margin-bottom: .25rem; }
 .info-modal-filesize { font-size: .78rem; color: var(--color-text-muted); margin-top: .5rem; }
+.info-modal-genres {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+  margin-top: .6rem;
+}
+.genre-pill {
+  display: inline-block;
+  padding: .15rem .55rem;
+  font-size: .72rem;
+  font-weight: 600;
+  background: rgba(233,69,96,.12);
+  color: var(--color-accent);
+  border: 1px solid rgba(233,69,96,.25);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.info-modal-extra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem .85rem;
+  margin-top: .45rem;
+  font-size: .78rem;
+  color: var(--color-text);
+}
+.info-meta-label {
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
 .info-modal-section-title {
   font-size: .72rem;
   font-weight: 700;
@@ -1015,7 +1050,7 @@ input:focus, select:focus, textarea:focus {
 .info-modal-desc {
   font-size: .85rem;
   line-height: 1.6;
-  max-height: 180px;
+  max-height: clamp(60px, calc(90vh - 540px), 180px);
   overflow-y: auto;
   padding: .6rem .75rem;
   background: var(--color-bg);
@@ -1030,7 +1065,6 @@ input:focus, select:focus, textarea:focus {
   gap: .5rem;
   padding: .28rem 0;
   font-size: .9rem;
-  cursor: pointer;
   cursor: pointer;
 }
 .info-modal-shelf-row input[type="checkbox"] { cursor: pointer; }
@@ -1099,6 +1133,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 @media (max-width: 480px) {
+  .info-modal { overflow-y: auto; scrollbar-width: none; } /* stacked layout may need scroll on small screens */
   .info-modal-top { flex-direction: column; }
   .info-modal-cover, .info-modal-cover-ph { width: 100%; min-height: 120px; height: auto; }
   .info-modal-footer { flex-direction: column; }

@@ -253,6 +253,7 @@ function toggleBookSelect(bookId, selected) {
 function updateEditToolbar() {
   const count     = selectedBooks.size;
   const removeBtn = document.getElementById('edit-remove-btn');
+  const reextractBtn = document.getElementById('edit-reextract-btn');
   document.getElementById('edit-selected-count').textContent = t('library.edit_selected', { n: count });
   document.getElementById('edit-assign-btn').disabled = count === 0;
   document.getElementById('edit-delete-btn').disabled = count === 0;
@@ -260,6 +261,9 @@ function updateEditToolbar() {
   if (removeBtn) {
     removeBtn.disabled = count === 0 || !onShelf;
     removeBtn.classList.toggle('hidden', !onShelf);
+  }
+  if (reextractBtn) {
+    reextractBtn.classList.toggle('hidden', currentShelfId !== 'all');
   }
 }
 
@@ -351,8 +355,8 @@ async function openInfoModal(book) {
 
   const allShelves = getShelves();
   const coverHtml  = fullBook.cover_path
-    ? `<img class="info-modal-cover" src="/covers/${fullBook.cover_path}" alt="" />`
-    : `<div class="info-modal-cover info-modal-cover-ph">📖</div>`;
+    ? `<img class="info-modal-cover info-modal-cover-clickable" src="/covers/${fullBook.cover_path}" alt="" />`
+    : `<div class="info-modal-cover info-modal-cover-ph">📖</div>`;  
 
   const shelvesHtml = allShelves.length
     ? `<div class="info-modal-section-title">${t('library.info_shelves')}</div>
@@ -370,6 +374,20 @@ async function openInfoModal(book) {
        <div class="info-modal-desc">${sanitizeHtml(fullBook.description)}</div>`
     : '';
 
+  const genresHtml = fullBook.genres
+    ? `<div class="info-modal-genres">${fullBook.genres.split(',').map(g => g.trim()).filter(Boolean).map(g => `<span class="genre-pill">${escHtml(g)}</span>`).join('')}</div>`
+    : '';
+
+  const inlineMetaParts = [
+    fullBook.publisher && `<span><span class="info-meta-label">${t('library.info_publisher')}:</span>\u00a0${escHtml(fullBook.publisher)}</span>`,
+    fullBook.language  && `<span><span class="info-meta-label">${t('library.info_language')}:</span>\u00a0${escHtml(fullBook.language)}</span>`,
+    fullBook.pages     && `<span><span class="info-meta-label">${t('library.info_pages')}:</span>\u00a0${escHtml(fullBook.pages)}</span>`,
+    fullBook.isbn      && `<span><span class="info-meta-label">${t('library.info_isbn')}:</span>\u00a0${escHtml(fullBook.isbn)}</span>`,
+  ].filter(Boolean);
+  const inlineMetaHtml = inlineMetaParts.length
+    ? `<div class="info-modal-extra">${inlineMetaParts.join('')}</div>`
+    : '';
+
   const token    = encodeURIComponent(localStorage.getItem('br_token') || '');
   const backdrop = document.createElement('div');
   backdrop.id        = 'book-info-modal';
@@ -384,6 +402,8 @@ async function openInfoModal(book) {
           <div class="info-modal-author">${escHtml(fullBook.author || t('library.unknown_author'))}</div>
           ${fullBook.series_name ? `<div class="info-modal-series"><button class="series-filter-btn" data-series="${escHtml(fullBook.series_name)}" title="${t('library.series_filter_title')}">${escHtml(fullBook.series_name)}${fullBook.series_number ? ` #${escHtml(fullBook.series_number)}` : ''}</button></div>` : ''}
           ${fullBook.file_size ? `<div class="info-modal-filesize">${formatSize(fullBook.file_size)}</div>` : ''}
+          ${genresHtml}
+          ${inlineMetaHtml}
         </div>
       </div>
       ${descHtml}
@@ -402,6 +422,13 @@ async function openInfoModal(book) {
   const close = () => backdrop.remove();
   backdrop.querySelector('#info-modal-close').addEventListener('click', close);
   backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+
+  if (fullBook.cover_path) {
+    backdrop.querySelector('.info-modal-cover-clickable')?.addEventListener('click', e => {
+      e.stopPropagation();
+      openCoverPreview(fullBook);
+    });
+  }
 
   backdrop.querySelector('.series-filter-btn')?.addEventListener('click', () => {
     close();
@@ -752,6 +779,29 @@ export async function initLibrary() {
         await reloadShelves();
         applyFilter();
       }
+    );
+  });
+
+  document.getElementById('edit-reextract-btn').addEventListener('click', () => {
+    confirmDialog(
+      t('library.confirm_reextract'),
+      async () => {
+        const btn = document.getElementById('edit-reextract-btn');
+        const origText = btn.textContent;
+        setButtonLoading(btn, true);
+        try {
+          const result = await apiFetch('/books/reextract-all', { method: 'POST' });
+          toast.success(t('library.toast_reextract_done', { updated: result.updated, total: result.total }));
+          await loadBooks();
+        } catch (err) {
+          toast.error(t('common.err_prefix') + err.message);
+        } finally {
+          setButtonLoading(btn, false);
+          btn.textContent = origText;
+        }
+      },
+      t('library.btn_reextract_confirm'),
+      false
     );
   });
 

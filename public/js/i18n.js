@@ -13,7 +13,7 @@
 const LANG_KEY  = 'br_lang';
 const FALLBACK  = 'sl';
 // Bump this when locale files change to bust the localStorage cache
-const CACHE_VER = '29';
+const CACHE_VER = '31';
 const CACHE_VER_KEY = 'br_strings_ver';
 
 /** Language codes → display names shown in the picker. Add entries here to add languages. */
