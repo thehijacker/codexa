@@ -12,6 +12,7 @@ let currentShelfBookIds = null; // null = use category logic
 let editMode            = false;
 let selectedBooks       = new Set();
 let seriesFilter        = null; // active series name filter
+let sortBeforeSeriesFilter = null; // sort value saved before auto-switching to series_asc
 
 // ── URL-based shelf navigation (from settings / opds pages) ───────────────────
 const urlParams    = new URLSearchParams(location.search);
@@ -69,6 +70,13 @@ function sortBooks(list) {
     case 'title_desc':    sorted.sort((a, b) => b.title.localeCompare(a.title)); break;
     case 'author_asc':    sorted.sort((a, b) => (a.author || '').localeCompare(b.author || '')); break;
     case 'progress_desc': sorted.sort((a, b) => (b.percentage || 0) - (a.percentage || 0)); break;
+    case 'series_asc':    sorted.sort((a, b) => {
+      const sc = (a.series_name || '').localeCompare(b.series_name || '');
+      if (sc !== 0) return sc;
+      const an = parseFloat(a.series_number) || 0;
+      const bn = parseFloat(b.series_number) || 0;
+      return an - bn;
+    }); break;
   }
   return sorted;
 }
@@ -498,6 +506,22 @@ async function refreshShelfFilter(andApply = true) {
 }
 
 function filterBySeries(seriesName) {
+  const select = document.getElementById('sort-select');
+  if (seriesName) {
+    // Auto-switch to series sort, remembering current sort to restore later
+    if (select && select.value !== 'series_asc') {
+      sortBeforeSeriesFilter = select.value;
+      select.value = 'series_asc';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  } else if (sortBeforeSeriesFilter !== null) {
+    // Restore previous sort when clearing the series filter
+    if (select) {
+      select.value = sortBeforeSeriesFilter;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    sortBeforeSeriesFilter = null;
+  }
   seriesFilter = seriesName || null;
   document.getElementById('search-input').value = '';
   updateSeriesFilterBar();

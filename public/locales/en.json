@@ -48,6 +48,7 @@
   "library.sort_title_za": "Title Z–A",
   "library.sort_author_az": "Author A–Z",
   "library.sort_progress": "Progress",
+  "library.sort_series": "Series",
   "library.btn_edit": "Edit",
   "library.add_book": "Add book",
   "library.upload_file": "Upload file",
