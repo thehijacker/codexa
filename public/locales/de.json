@@ -72,6 +72,8 @@
   "library.info_desc": "Beschreibung",
   "library.btn_del_book": "🗑 Löschen",
   "library.btn_download": "⬇ Herunterladen",
+  "library.btn_read": "📖 Lesen",
+  "library.btn_cover_preview": "Cover-Vorschau",
   "library.btn_save_shelves": "Regale speichern",
   "library.bulk_title": "Regal zuweisen",
   "library.bulk_desc": "Wähle Regale für {n} ausgewählte Bücher:",

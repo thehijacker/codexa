@@ -185,6 +185,8 @@ img { max-width: 100%; display: block; }
 .btn-secondary:hover { opacity: .85; }
 .btn-danger   { background: var(--color-danger); color: #fff; }
 .btn-danger:hover { opacity: .85; }
+.btn-read     { background: #2e7d32; color: #fff; }
+.btn-read:hover { opacity: .85; text-decoration: none; }
 .btn-sm { padding: .3rem .7rem; font-size: .8rem; }
 .btn-icon {
   padding: .4rem;
@@ -970,7 +972,9 @@ input:focus, select:focus, textarea:focus {
   max-width: 600px !important;
   max-height: 90vh;
   overflow-y: auto;
+  scrollbar-width: none; /* Firefox: hide scrollbar */
 }
+.info-modal::-webkit-scrollbar { display: none; } /* Chrome/Safari: hide scrollbar */
 .info-modal-top {
   display: flex;
   gap: 1.25rem;
@@ -1032,6 +1036,31 @@ input:focus, select:focus, textarea:focus {
 .info-modal-shelf-row input[type="checkbox"] { cursor: pointer; }
 .info-modal-shelf-row .shelf-book-count { color: var(--color-text-muted); font-size: .75rem; margin-left: auto; }
 .info-modal-footer { justify-content: space-between !important; flex-wrap: wrap; gap: .5rem; }
+
+/* ── Cover preview overlay ───────────────────────────────────────────────────── */
+.cover-preview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .88);
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  cursor: zoom-out;
+  backdrop-filter: blur(4px);
+  animation: fadeIn .15s ease;
+}
+.cover-preview-img {
+  max-width: min(90vw, 420px);
+  max-height: 90vh;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 40px rgba(0,0,0,.7);
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
 /* ── OPDS nav-tile sync button ───────────────────────────────────────────────── */
 .nav-tile { position: relative; }

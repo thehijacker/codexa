@@ -72,6 +72,8 @@
   "library.info_desc": "Descrizione",
   "library.btn_del_book": "🗑 Elimina",
   "library.btn_download": "⬇ Scarica",
+  "library.btn_read": "📖 Leggi",
+  "library.btn_cover_preview": "Anteprima copertina",
   "library.btn_save_shelves": "Salva scaffali",
   "library.bulk_title": "Assegna a scaffale",
   "library.bulk_desc": "Seleziona gli scaffali per i {n} libri selezionati:",

@@ -72,6 +72,8 @@
   "library.info_desc": "Descripción",
   "library.btn_del_book": "🗑 Eliminar",
   "library.btn_download": "⬇ Descargar",
+  "library.btn_read": "📖 Leer",
+  "library.btn_cover_preview": "Vista previa de portada",
   "library.btn_save_shelves": "Guardar estanterías",
   "library.bulk_title": "Asignar a estantería",
   "library.bulk_desc": "Selecciona estanterías para {n} libros seleccionados:",

@@ -72,6 +72,8 @@
   "library.info_desc": "Description",
   "library.btn_del_book": "🗑 Delete",
   "library.btn_download": "⬇ Download",
+  "library.btn_read": "📖 Read",
+  "library.btn_cover_preview": "Cover preview",
   "library.btn_save_shelves": "Save shelves",
   "library.bulk_title": "Assign to shelf",
   "library.bulk_desc": "Select shelves for {n} selected books:",

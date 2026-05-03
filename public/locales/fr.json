@@ -72,6 +72,8 @@
   "library.info_desc": "Description",
   "library.btn_del_book": "🗑 Supprimer",
   "library.btn_download": "⬇ Télécharger",
+  "library.btn_read": "📖 Lire",
+  "library.btn_cover_preview": "Aperçu de la couverture",
   "library.btn_save_shelves": "Enregistrer les étagères",
   "library.bulk_title": "Assigner à une étagère",
   "library.bulk_desc": "Choisissez les étagères pour les {n} livres sélectionnés :",

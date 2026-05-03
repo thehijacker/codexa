@@ -169,6 +169,7 @@ function renderGrid(list) {
         <input type="checkbox" class="book-card-checkbox" ${selectedBooks.has(book.id) ? 'checked' : ''} />
       </label>
       <div class="book-card-actions">
+        ${book.cover_path ? `<button class="btn-icon cover-preview-btn" title="${t('library.btn_cover_preview')}" data-id="${book.id}">👁</button>` : ''}
         <button class="btn-icon info-btn"   title="Podrobnosti" data-id="${book.id}">ℹ</button>
         <button class="btn-icon delete-btn" title="Izbriši"     data-id="${book.id}">🗑</button>
       </div>
@@ -191,7 +192,7 @@ function renderGrid(list) {
 
     card.addEventListener('click', e => {
       if (e.target.closest('.delete-btn') || e.target.closest('.info-btn') ||
-          e.target.closest('.book-card-checkbox-wrap')) return;
+          e.target.closest('.cover-preview-btn') || e.target.closest('.book-card-checkbox-wrap')) return;
       if (editMode) {
         const newChecked = !checkbox.checked;
         checkbox.checked = newChecked;
@@ -220,6 +221,11 @@ function renderGrid(list) {
     card.querySelector('.info-btn').addEventListener('click', e => {
       e.stopPropagation();
       openInfoModal(book);
+    });
+
+    card.querySelector('.cover-preview-btn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      openCoverPreview(book);
     });
 
     grid.appendChild(card);
@@ -313,6 +319,23 @@ function openBulkAssignModal() {
   });
 }
 
+// ── Cover preview overlay ────────────────────────────────────────────────────
+function openCoverPreview(book) {
+  if (!book.cover_path) return;
+  document.getElementById('cover-preview-overlay')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id        = 'cover-preview-overlay';
+  overlay.className = 'cover-preview-overlay';
+  overlay.innerHTML = `<img src="/covers/${book.cover_path}" alt="" class="cover-preview-img" />`;
+  document.body.appendChild(overlay);
+
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey  = e => { if (e.key === 'Escape') close(); };
+  overlay.addEventListener('click', close);
+  document.addEventListener('keydown', onKey);
+}
+
 // ── Book info modal ───────────────────────────────────────────────────────────
 async function openInfoModal(book) {
   document.getElementById('book-info-modal')?.remove();
@@ -369,6 +392,8 @@ async function openInfoModal(book) {
         <button class="btn btn-danger"    id="info-modal-delete">${t('library.btn_del_book')}</button>
         <a      class="btn btn-secondary" id="info-modal-download"
                 href="/api/books/${fullBook.id}/file?download=1&token=${token}" download>${t('library.btn_download')}</a>
+        <a      class="btn btn-read"      id="info-modal-read"
+                href="/readerv4.html?id=${fullBook.id}">${t('library.btn_read')}</a>
         <button class="btn btn-primary"   id="info-modal-save">${t('library.btn_save_shelves')}</button>
       </div>
     </div>`;
