@@ -68,6 +68,7 @@ router.get('/sync-sse', async (req, res) => {
   req.on('close', () => { cancelled = true; });
 
   const { serverId, folderUrl, shelfName } = req.query;
+  const limitParam = req.query.limit ? parseInt(req.query.limit, 10) : null;
   if (serverId === undefined || serverId === null) return done({ type: 'error', message: 'error.server_id_required' });
   if (!shelfName || !String(shelfName).trim()) return done({ type: 'error', message: 'error.shelf_name_required' });
 
@@ -85,7 +86,10 @@ router.get('/sync-sse', async (req, res) => {
       navHref: resolveUrl(e.navHref, targetUrl),
     }));
 
-    const bookEntries = feed.entries.filter(e => !e.isNav && e.acqHref);
+    const allBookEntries = feed.entries.filter(e => !e.isNav && e.acqHref);
+    const bookEntries = (limitParam && limitParam > 0)
+      ? allBookEntries.slice(0, limitParam)
+      : allBookEntries;
     if (!bookEntries.length) return done({ type: 'done', added: 0, skipped: 0, errors: 0, shelfId: null });
 
     send({ type: 'start', total: bookEntries.length });
@@ -120,8 +124,8 @@ router.get('/sync-sse', async (req, res) => {
     const headers = buildAuthHeaders(server.username, server.password);
     let added = 0, skipped = 0, errors = 0;
     const syncedBookIds = new Set(); // track all book IDs touched by this sync
-    // All acquisition URLs present in the feed — used for stale detection fallback
-    const feedAcqHrefs = new Set(bookEntries.map(e => e.acqHref).filter(Boolean));
+    // All acquisition URLs present in the feed (full list, not the limited slice) — used for stale detection fallback
+    const feedAcqHrefs = new Set(allBookEntries.map(e => e.acqHref).filter(Boolean));
 
     for (let i = 0; i < bookEntries.length; i++) {
       if (cancelled) break;
@@ -417,6 +421,40 @@ function resolveUrl(href, base) {
   if (/^https?:\/\//i.test(href)) return href;
   try { return new URL(href, base).href; } catch { return href; }
 }
+
+// ── GET /api/opds/sync-count — pre-flight count for sync-to-shelf modal ────────
+router.get('/sync-count', async (req, res) => {
+  const { serverId, folderUrl } = req.query;
+  if (serverId === undefined || serverId === null)
+    return res.status(400).json({ error: 'error.server_id_required' });
+
+  const servers = getServers(req.user.id);
+  const server  = getServerById(servers, serverId);
+  if (!server) return res.status(404).json({ error: 'error.server_not_found' });
+
+  const targetUrl = folderUrl ? resolveUrl(String(folderUrl), server.url) : server.url;
+  try {
+    const feed = await fetchAllOpdsPages(targetUrl, server);
+    feed.entries = feed.entries.map(e => ({
+      ...e,
+      acqHref: resolveUrl(e.acqHref, targetUrl),
+    }));
+    const bookEntries = feed.entries.filter(e => !e.isNav && e.acqHref);
+    const total = bookEntries.length;
+
+    // Count how many the user already has via tracked OPDS sources
+    const db = getDb();
+    let alreadyHave = 0;
+    for (const e of bookEntries) {
+      if (!e.acqHref) continue;
+      const src = db.prepare('SELECT 1 FROM book_opds_sources WHERE user_id = ? AND acq_href = ?').get(req.user.id, e.acqHref);
+      if (src) alreadyHave++;
+    }
+    res.json({ total, alreadyHave });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
 
 // ── GET /api/opds/servers ─────────────────────────────────────────────────────
 router.get('/servers', (req, res) => {

@@ -345,11 +345,20 @@ function openSyncModal(folderUrl, folderTitle) {
       <p style="font-size:.85rem;color:var(--color-text-muted);margin-bottom:1.25rem;line-height:1.5">
         ${t('opds.sync_modal_hint', { folder: escHtml(folderTitle) })}
       </p>
-      <!-- Phase 1: form -->
-      <div id="sync-form">
-        <div class="form-group">
+      <!-- Phase 0: scanning spinner -->
+      <div id="sync-scanning" style="text-align:center;padding:1.5rem 0;color:var(--color-text-muted);font-size:.9rem">
+        <span class="spinner" style="margin-right:.5rem"></span>${t('opds.sync_scanning')}
+      </div>
+      <!-- Phase 1: form (shown after count is known) -->
+      <div id="sync-form" hidden>
+        <div id="sync-count-info" style="font-size:.85rem;color:var(--color-text-muted);margin-bottom:1rem;padding:.55rem .75rem;background:var(--color-bg);border:1px solid var(--color-border);border-radius:var(--radius)"></div>
+        <div class="form-group" style="margin-bottom:.9rem">
           <label for="sync-shelf-name">${t('opds.sync_shelf_label')}</label>
           <input type="text" id="sync-shelf-name" maxlength="100" value="${escHtml(folderTitle)}" autofocus />
+        </div>
+        <div class="form-group" style="margin-bottom:.25rem">
+          <label for="sync-limit">${t('opds.sync_limit_label')}</label>
+          <input type="number" id="sync-limit" min="1" max="9999" placeholder="${t('opds.sync_limit_placeholder')}" style="width:140px" />
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" id="sync-modal-cancel">${t('common.cancel')}</button>
@@ -362,7 +371,10 @@ function openSyncModal(folderUrl, folderTitle) {
         <div class="book-progress-bar" style="height:8px;margin-bottom:.5rem">
           <div id="sync-progress-fill" class="book-progress-fill" style="width:0%"></div>
         </div>
-        <div id="sync-progress-book" style="font-size:.78rem;color:var(--color-text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+        <div id="sync-progress-book" style="font-size:.78rem;color:var(--color-text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:1rem"></div>
+        <div style="text-align:right">
+          <button class="btn btn-secondary btn-sm" id="sync-abort-btn">${t('opds.sync_abort')}</button>
+        </div>
       </div>
     </div>`;
 
@@ -370,12 +382,36 @@ function openSyncModal(folderUrl, folderTitle) {
 
   const close = () => backdrop.remove();
   backdrop.querySelector('#sync-modal-close').addEventListener('click', close);
-  backdrop.querySelector('#sync-modal-cancel').addEventListener('click', close);
   backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
 
+  // ── Phase 0: pre-fetch count ──────────────────────────────────────────────
+  apiFetch(`/opds/sync-count?serverId=${encodeURIComponent(currentServer.id)}&folderUrl=${encodeURIComponent(folderUrl || '')}`)
+    .then(data => {
+      backdrop.querySelector('#sync-scanning').hidden = true;
+      const formEl    = backdrop.querySelector('#sync-form');
+      const countInfo = backdrop.querySelector('#sync-count-info');
+      const newBooks  = data.total - data.alreadyHave;
+      countInfo.innerHTML = t('opds.sync_count_info', {
+        total:       data.total,
+        alreadyHave: data.alreadyHave,
+        newBooks,
+      });
+      formEl.hidden = false;
+      backdrop.querySelector('#sync-shelf-name').focus();
+    })
+    .catch(err => {
+      const scanEl = backdrop.querySelector('#sync-scanning');
+      scanEl.innerHTML = `<span style="color:var(--color-danger)">${t('common.error_msg', { msg: err.message })}</span>`;
+    });
+
+  backdrop.querySelector('#sync-modal-cancel')?.addEventListener('click', close);
+
+  // ── Phase 1 → 2: start sync ───────────────────────────────────────────────
   backdrop.querySelector('#sync-modal-confirm').addEventListener('click', () => {
     const shelfName = backdrop.querySelector('#sync-shelf-name').value.trim();
     if (!shelfName) return;
+    const limitVal  = backdrop.querySelector('#sync-limit').value.trim();
+    const limit     = limitVal ? parseInt(limitVal, 10) : null;
 
     // Switch to progress phase
     backdrop.querySelector('#sync-form').hidden = true;
@@ -388,16 +424,31 @@ function openSyncModal(folderUrl, folderTitle) {
       shelfName,
       token:     localStorage.getItem('br_token') || '',
     });
+    if (limit && limit > 0) params.set('limit', limit);
+
     const es = new EventSource(`/api/opds/sync-sse?${params.toString()}`);
     let total = 0;
+    let aborted = false;
 
-    const fillEl = backdrop.querySelector('#sync-progress-fill');
-    const textEl = backdrop.querySelector('#sync-progress-text');
-    const bookEl = backdrop.querySelector('#sync-progress-book');
+    const fillEl  = backdrop.querySelector('#sync-progress-fill');
+    const textEl  = backdrop.querySelector('#sync-progress-text');
+    const bookEl  = backdrop.querySelector('#sync-progress-book');
+    const abortBtn = backdrop.querySelector('#sync-abort-btn');
 
-    es.addEventListener('message', e => {
+    abortBtn.addEventListener('click', () => {
+      aborted = true;
+      es.close();
+      backdrop.querySelector('#sync-modal-close').disabled = false;
+      abortBtn.disabled = true;
+      textEl.textContent = t('opds.sync_aborted');
+      bookEl.textContent = '';
+      reloadShelves();
+      reloadLibrary();
+    });
+
+    es.addEventListener('message', ev => {
       let msg;
-      try { msg = JSON.parse(e.data); } catch { return; }
+      try { msg = JSON.parse(ev.data); } catch { return; }
 
       if (msg.type === 'start') {
         total = msg.total;
@@ -412,13 +463,12 @@ function openSyncModal(folderUrl, folderTitle) {
         es.close();
         reloadShelves();
         reloadLibrary();
-      const summary = msg.errors
-        ? t('opds.sync_done_errors', { added: msg.added, skipped: msg.skipped, errors: msg.errors })
-        : t('opds.sync_done', { added: msg.added, skipped: msg.skipped });
+        const summary = msg.errors
+          ? t('opds.sync_done_errors', { added: msg.added, skipped: msg.skipped, errors: msg.errors })
+          : t('opds.sync_done', { added: msg.added, skipped: msg.skipped });
         if (msg.staleBooks && msg.staleBooks.length > 0) {
-          // Show stale books dialog before closing
           const stale = msg.staleBooks;
-          close(); // close progress modal first
+          close();
           openStaleDialog(stale, msg.shelfId, summary);
         } else {
           toast.success(summary);
@@ -432,6 +482,7 @@ function openSyncModal(folderUrl, folderTitle) {
     });
 
     es.onerror = () => {
+      if (aborted) return;
       es.close();
       toast.error(t('opds.err_sse_disconnected'));
       close();
