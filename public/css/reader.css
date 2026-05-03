@@ -447,7 +447,7 @@ html, body {
 .setting-value {
   font-size: .85rem;
   color: var(--color-text-muted);
-  min-width: 3.5rem;
+  min-width: 2.8rem;
   text-align: right;
 }
 .settings-divider {
@@ -675,12 +675,18 @@ input[type="range"]::-moz-range-thumb {
 .jump-pct-row {
   display: flex;
   align-items: center;
-  gap: .6rem;
+  gap: .75rem;
   flex: 1;
 }
 .jump-pct-row > input[type="range"] {
   flex: 1;
   min-width: 0;
+}
+#jump-pct-value {
+  min-width: unset;
+  width: 2.4rem;
+  text-align: center;
+  flex-shrink: 0;
 }
 /* In auto-hide mode the header is out of flow — panel must float just below it */
 .autohide-header #jump-pct-panel {

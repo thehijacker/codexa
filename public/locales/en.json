@@ -196,7 +196,6 @@
   "reader.sb_pos_br": "Bottom right",
   "reader.sb_icon_show": "Show icon",
   "reader.sb_icon_label": "icon",
-  "reader.jump_pct_label": "Position in book",
   "reader.btn_fullscreen": "Fullscreen",
   "reader.btn_fullscreen_exit": "Exit fullscreen",
   "reader.err_no_fullscreen": "Fullscreen is not available.",

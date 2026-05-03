@@ -48,13 +48,15 @@ router.get('/:id', (req, res) => {
     'SELECT * FROM books WHERE id = ? AND user_id = ?'
   ).get(req.params.id, req.user.id);
   if (!book) return res.status(404).json({ error: 'error.book_not_found' }); {
-    const filePath = path.join(BOOKS_DIR, String(req.user.id), book.filename);
-    if (fs.existsSync(filePath)) {
-      try {
-        const md5 = computeFileMd5(filePath);
-        db.prepare('UPDATE books SET file_hash_md5 = ? WHERE id = ?').run(md5, book.id);
-        book.file_hash_md5 = md5;
-      } catch (e) { console.error('[books] MD5 recompute error:', e.message); }
+    if (!book.file_hash_md5) {
+      const filePath = path.join(BOOKS_DIR, String(req.user.id), book.filename);
+      if (fs.existsSync(filePath)) {
+        try {
+          const md5 = computeFileMd5(filePath);
+          db.prepare('UPDATE books SET file_hash_md5 = ? WHERE id = ?').run(md5, book.id);
+          book.file_hash_md5 = md5;
+        } catch (e) { console.error('[books] MD5 recompute error:', e.message); }
+      }
     }
   }
 

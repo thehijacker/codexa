@@ -352,6 +352,10 @@ function renderOpdsServers(servers) {
   });
 }
 
+function notifyOpdsServersChanged() {
+  document.dispatchEvent(new CustomEvent('opdsserverschanged'));
+}
+
 async function deleteOpdsServer(id, name) {
   confirmDialog(
     t('settings.opds_confirm_remove', { name }),
@@ -361,6 +365,7 @@ async function deleteOpdsServer(id, name) {
         toast.success(t('settings.opds_removed'));
         if (_editingServerId === id) exitEditMode();
         loadOpdsServers();
+        notifyOpdsServersChanged();
       } catch (err) {
         toast.error(t('common.error_msg', { msg: err.message }));
       }
@@ -391,6 +396,7 @@ btnAddOpds.addEventListener('click', async () => {
       exitEditMode();
       toast.success(t('settings.opds_saved', { name }));
       loadOpdsServers();
+      notifyOpdsServersChanged();
     } catch (err) {
       toast.error(t('common.error_msg', { msg: err.message }));
     } finally {
@@ -407,6 +413,7 @@ btnAddOpds.addEventListener('click', async () => {
       exitEditMode();
       toast.success(t('settings.opds_added', { name }));
       loadOpdsServers();
+      notifyOpdsServersChanged();
     } catch (err) {
       toast.error(t('common.error_msg', { msg: err.message }));
     } finally {

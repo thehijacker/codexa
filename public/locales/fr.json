@@ -196,7 +196,6 @@
   "reader.sb_pos_br": "Bas droite",
   "reader.sb_icon_show": "Afficher l'icône",
   "reader.sb_icon_label": "Icône",
-  "reader.jump_pct_label": "Position dans le livre",
   "reader.btn_fullscreen": "Plein écran",
   "reader.btn_fullscreen_exit": "Quitter le plein écran",
   "reader.err_no_fullscreen": "Le mode plein écran n'est pas disponible.",
@@ -327,7 +326,7 @@
   "opds.stale_deleted": "{summary} Supprimés : {n} livres obsolètes.",
   "opds.page_prev": "Précédente",
   "opds.page_next": "Suivante",
-  "opds.page_info": "Page {page} · {count} livres"
+  "opds.page_info": "Page {page} · {count} livres",
   "reader.dict_loading": "Recherche…",
   "error.session_expired": "Session expirée. Veuillez vous reconnecter.",
   "error.http_error": "Erreur {status}",

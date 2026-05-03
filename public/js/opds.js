@@ -13,8 +13,9 @@ let _lastFeed     = null;  // last rendered feed, for re-render on lang change
 let _initialized  = false;
 
 // Pagination state for current browse level
-let pageHistory   = [];  // stack of URLs for each page visited (index = page number - 1)
-let currentFeed   = null; // the last loaded feed (has .next, .entries etc.)
+let pageHistory    = [];  // stack of URLs for each page visited (index = page number - 1)
+let currentFeed    = null; // the last loaded feed (has .next, .entries etc.)
+let serverStatus   = {};  // id -> 'connected' | 'error' | null
 
 // ── DOM refs (assigned in initOpds) ──────────────────────────────────────────
 let serverList, serverEmpty, catalogTitle, breadcrumb, catalogGrid, catalogEmpty,
@@ -48,7 +49,12 @@ function renderServerList() {
 
   servers.forEach(s => {
     const btn = document.createElement('button');
-    btn.className = 'server-btn' + (currentServer?.id === s.id ? ' active' : '');
+    const isActive = currentServer?.id === s.id;
+    const status   = isActive ? (serverStatus[s.id] || null) : null;
+    btn.className  = 'server-btn'
+      + (isActive           ? ' active'    : '')
+      + (status === 'connected' ? ' connected' : '')
+      + (status === 'error'     ? ' error'     : '');
     btn.innerHTML = `
       <span class="server-name">${escHtml(s.name)}</span>
     `;
@@ -63,12 +69,9 @@ async function openServer(server) {
   navStack      = [{ title: server.name, url: null }];
   renderServerList();
   const ok = await browseUrl(null);
-  // Mark the active button green on success, red on failure
-  const activeBtn = serverList.querySelector('.server-btn.active');
-  if (activeBtn) {
-    activeBtn.classList.toggle('connected', ok);
-    activeBtn.classList.toggle('error',     !ok);
-  }
+  // Store connection state so re-renders of the server list preserve it
+  serverStatus[server.id] = ok ? 'connected' : 'error';
+  renderServerList();
 }
 
 async function browseUrl(url) {
@@ -507,6 +510,26 @@ document.addEventListener('langchange', () => {
     renderPagination();
   }
   // Note: do NOT call renderServerList() here — it would lose connected/error state
+});
+
+// ── OPDS servers changed (added / edited / deleted in Settings) ───────────────
+document.addEventListener('opdsserverschanged', async () => {
+  if (!_initialized) return;
+  try {
+    const updated = await apiFetch('/opds/servers');
+    // Drop status entries for removed servers
+    const updatedIds = new Set(updated.map(s => s.id));
+    for (const id of Object.keys(serverStatus)) {
+      if (!updatedIds.has(Number(id))) delete serverStatus[id];
+    }
+    servers = updated;
+    renderServerList();
+    // If the current server was removed, open the first available one
+    if (currentServer && !servers.find(s => s.id === currentServer.id)) {
+      if (servers.length > 0) openServer(servers[0]);
+      else { currentServer = null; catalogGrid.innerHTML = ''; navStack = []; renderBreadcrumb(); }
+    }
+  } catch { /* ignore */ }
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
