@@ -264,6 +264,28 @@ input:focus, select:focus, textarea:focus {
 .toast-success { background: #388e3c; }
 .toast-error   { background: #c62828; }
 .toast-info    { background: var(--color-surface2); color: var(--color-text); }
+.toast-progress {
+  background: var(--color-surface2);
+  color: var(--color-text);
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+}
+.toast-progress-label   { font-size: .85rem; opacity: .8; }
+.toast-progress-counter { font-size: .85rem; text-align: right; opacity: .7; }
+.toast-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+.toast-progress-bar {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--color-accent);
+  transition: width .2s ease;
+}
 @keyframes slideIn {
   from { transform: translateX(100%); opacity: 0; }
   to   { transform: translateX(0);    opacity: 1; }

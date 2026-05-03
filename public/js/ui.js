@@ -33,6 +33,33 @@ export const toast = {
   info:    (msg) => showToast(msg, 'info'),
 };
 
+/**
+ * Shows a persistent toast with a progress bar.
+ * Returns an object with `update(current, total, label)` and `dismiss()`.
+ */
+export function showProgressToast(label) {
+  const container = ensureToastContainer();
+  const el = document.createElement('div');
+  el.className = 'toast toast-progress';
+  el.innerHTML =
+    `<span class="toast-progress-label">${label}</span>` +
+    `<div class="toast-progress-track"><div class="toast-progress-bar" style="width:0%"></div></div>` +
+    `<span class="toast-progress-counter"></span>`;
+  container.appendChild(el);
+  return {
+    update(current, total) {
+      const pct = total ? Math.round((current / total) * 100) : 0;
+      el.querySelector('.toast-progress-bar').style.width = pct + '%';
+      el.querySelector('.toast-progress-counter').textContent = `${current} / ${total}`;
+    },
+    dismiss() {
+      el.style.opacity = '0';
+      el.style.transition = 'opacity .3s';
+      setTimeout(() => el.remove(), 320);
+    },
+  };
+}
+
 // ── Confirm dialog ───────────────────────────────────────────────────────────
 export function confirmDialog(message, onConfirm, confirmLabel = null, danger = true) {
   const label = confirmLabel ?? t('common.delete');

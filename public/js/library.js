@@ -1,5 +1,5 @@
 import { apiFetch } from './api.js';
-import { toast, confirmDialog, setButtonLoading } from './ui.js';
+import { toast, confirmDialog, setButtonLoading, showProgressToast } from './ui.js';
 import { reloadShelves, getShelves, setActive } from './sidebar.js';
 import { t } from './i18n.js';
 import { showPanel } from './router.js';
@@ -262,6 +262,7 @@ function updateEditToolbar() {
   const count     = selectedBooks.size;
   const removeBtn = document.getElementById('edit-remove-btn');
   const reextractBtn = document.getElementById('edit-reextract-btn');
+  const selectAllBtn = document.getElementById('edit-select-all-btn');
   document.getElementById('edit-selected-count').textContent = t('library.edit_selected', { n: count });
   document.getElementById('edit-assign-btn').disabled = count === 0;
   document.getElementById('edit-delete-btn').disabled = count === 0;
@@ -272,6 +273,12 @@ function updateEditToolbar() {
   }
   if (reextractBtn) {
     reextractBtn.classList.toggle('hidden', currentShelfId !== 'all');
+  }
+  if (selectAllBtn) {
+    const visibleIds = [...document.querySelectorAll('.book-card[data-id]')].map(c => Number(c.dataset.id));
+    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedBooks.has(id));
+    selectAllBtn.textContent = allSelected ? t('library.btn_deselect_all') : t('library.btn_select_all');
+    selectAllBtn.dataset.allSelected = allSelected ? '1' : '0';
   }
 }
 
@@ -766,6 +773,30 @@ export async function initLibrary() {
 
   // Edit mode
   document.getElementById('edit-mode-btn').addEventListener('click', toggleEditMode);
+  document.getElementById('edit-select-all-btn').addEventListener('click', () => {
+    const visibleCards = [...document.querySelectorAll('.book-card[data-id]')];
+    const allSelected  = visibleCards.every(c => selectedBooks.has(Number(c.dataset.id)));
+    if (allSelected) {
+      // Deselect all
+      visibleCards.forEach(c => {
+        const id = Number(c.dataset.id);
+        selectedBooks.delete(id);
+        c.classList.remove('selected');
+        const chk = c.querySelector('.book-card-checkbox');
+        if (chk) chk.checked = false;
+      });
+    } else {
+      // Select all visible
+      visibleCards.forEach(c => {
+        const id = Number(c.dataset.id);
+        selectedBooks.add(id);
+        c.classList.add('selected');
+        const chk = c.querySelector('.book-card-checkbox');
+        if (chk) chk.checked = true;
+      });
+    }
+    updateEditToolbar();
+  });
   document.getElementById('edit-assign-btn').addEventListener('click', () => {
     if (!selectedBooks.size) return;
     openBulkAssignModal();
@@ -791,9 +822,16 @@ export async function initLibrary() {
     confirmDialog(
       t('library.confirm_del_books', { n: selectedBooks.size }),
       async () => {
-        for (const bookId of selectedBooks) {
+        const ids = [...selectedBooks];
+        const total = ids.length;
+        const progress = total > 1 ? showProgressToast(t('library.deleting_progress')) : null;
+        let done = 0;
+        for (const bookId of ids) {
           try { await apiFetch(`/books/${bookId}`, { method: 'DELETE' }); } catch { /* skip */ }
+          done++;
+          if (progress) progress.update(done, total);
         }
+        if (progress) progress.dismiss();
         toast.success(t('library.toast_books_deleted'));
         selectedBooks.clear();
         editMode = false;
