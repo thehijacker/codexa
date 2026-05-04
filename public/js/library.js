@@ -384,9 +384,11 @@ async function openInfoModal(book) {
        </div>`
     : `<div style="font-size:.82rem;color:var(--color-text-muted);margin-top:.75rem">${t('library.info_no_shelves')}</div>`;
 
-  const descHtml = fullBook.description
-    ? `<div class="info-modal-section-title" style="margin-top:1rem">${t('library.info_desc')}</div>
-       <div class="info-modal-desc">${sanitizeHtml(fullBook.description)}</div>`
+  const descTitleHtml   = fullBook.description
+    ? `<div class="info-modal-section-title" style="margin-top:1rem">${t('library.info_desc')}</div>`
+    : '';
+  const descContentHtml = fullBook.description
+    ? `<div class="info-modal-desc">${sanitizeHtml(fullBook.description)}</div>`
     : '';
 
   const genresHtml = fullBook.genres
@@ -421,7 +423,8 @@ async function openInfoModal(book) {
           ${inlineMetaHtml}
         </div>
       </div>
-      ${descHtml}
+      ${descTitleHtml}
+      ${descContentHtml ? `<div class="info-modal-body">${descContentHtml}</div>` : ''}
       ${shelvesHtml}
       <div class="modal-footer info-modal-footer">
         <button class="btn btn-danger"    id="info-modal-delete"><img src="/images/delete.svg" class="nav-icon nav-icon-delete" alt=""> ${t('library.btn_del_book')}</button>
@@ -434,7 +437,41 @@ async function openInfoModal(book) {
     </div>`;
 
   document.body.appendChild(backdrop);
-  const close = () => backdrop.remove();
+
+  // Scroll-fade mask on the body section
+  const bodyEl = backdrop.querySelector('.info-modal-body');
+  if (bodyEl) {
+    const updateFade = () => {
+      const { scrollTop, scrollHeight, clientHeight } = bodyEl;
+      const canUp   = scrollTop > 2;
+      const canDown = scrollTop + clientHeight < scrollHeight - 2;
+      let g;
+      if      (canUp && canDown) g = 'linear-gradient(to bottom, transparent 0%, black 10%, black 88%, transparent 100%)';
+      else if (canUp)            g = 'linear-gradient(to bottom, transparent 0%, black 10%)';
+      else if (canDown)          g = 'linear-gradient(to bottom, black 0%, black 88%, transparent 100%)';
+      else                       g = 'none';
+      bodyEl.style.maskImage       = g;
+      bodyEl.style.webkitMaskImage = g;
+    };
+    bodyEl.addEventListener('scroll', updateFade, { passive: true });
+    updateFade();
+  }
+
+  // Prevent mouse-wheel and touch-scroll from leaking through to the page behind the backdrop.
+  // Allow wheel/touch when it's inside the description body (which handles its own scroll).
+  backdrop.addEventListener('wheel', e => {
+    if (!bodyEl || !bodyEl.contains(e.target)) e.preventDefault();
+  }, { passive: false });
+  backdrop.addEventListener('touchmove', e => {
+    if (e.target === backdrop) e.preventDefault();
+  }, { passive: false });
+
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener('keydown', onKeyDown);
+  };
+  const onKeyDown = e => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKeyDown);
   backdrop.querySelector('#info-modal-close').addEventListener('click', close);
   backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
 
