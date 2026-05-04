@@ -6,13 +6,13 @@ A self-hosted EPUB web reader with multi-user support, OPDS browsing, KOReader s
 
 ## Screenshots
 
-| Library | Reader | Table of Contents |
-|---|---|---|
-| ![Library](screenshots/library.png) | ![Reader](screenshots/reader.png) | ![TOC](screenshots/toc.png) |
-
-| Search | Dictionary | Settings | OPDS |
-|---|---|---|---|
-| ![Search](screenshots/search.png) | ![Dictionary](screenshots/dictionary.png) | ![Settings](screenshots/settings.png) | ![OPDS](screenshots/opds_browsers.png) |
+| Library | OPDS Browser | Book Info |
+|:---:|:---:|:---:|
+| ![Library](screenshots/library.png) | ![OPDS Browser](screenshots/opds_browser.png) | ![Book Info](screenshots/book_info.png) |
+| **Reader** | **Dictionary** | **Search** |
+| ![Reader](screenshots/reader.png) | ![Dictionary](screenshots/dictionary.png) | ![Search](screenshots/search.png) |
+| **TOC** | **Settings** | **E-Ink** |
+| ![TOC](screenshots/toc.png) | ![Settings](screenshots/settings.png) | ![E-Ink](screenshots/e-ink.png) |
 
 ---
 
