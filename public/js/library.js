@@ -244,7 +244,8 @@ function renderGrid(list) {
 function toggleEditMode() {
   editMode = !editMode;
   selectedBooks.clear();
-  document.getElementById('edit-mode-btn').textContent = editMode ? t('common.cancel') : t('library.btn_edit');
+  const editBtnLabel = document.getElementById('edit-mode-btn').querySelector('span[data-i18n]');
+  if (editBtnLabel) editBtnLabel.textContent = editMode ? t('common.cancel') : t('library.btn_edit');
   document.getElementById('edit-toolbar').classList.toggle('hidden', !editMode);
   updateEditToolbar();
   applyFilter();
@@ -872,7 +873,7 @@ export async function initLibrary() {
         toast.success(t('library.toast_books_deleted'));
         selectedBooks.clear();
         editMode = false;
-        document.getElementById('edit-mode-btn').textContent = t('library.btn_edit');
+        document.getElementById('edit-mode-btn').querySelector('span[data-i18n]').textContent = t('library.btn_edit');
         document.getElementById('edit-toolbar').classList.add('hidden');
         await loadBooks();
         await reloadShelves();

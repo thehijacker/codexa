@@ -46,7 +46,10 @@
       <div class="page-header">
         <h1 id="page-title"><img src="/images/all_library.svg" class="nav-icon nav-icon-all-library" alt=""> <span data-i18n="sidebar.all_library">Vsa knjižnica</span></h1>
         <div class="library-toolbar-controls flex gap-1 flex-wrap">
-          <input type="search" id="search-input" data-i18n-placeholder="library.search_placeholder" placeholder="Iskanje…" />
+          <div class="search-wrap">
+            <img src="/images/search.svg" class="nav-icon nav-icon-search search-icon" alt="">
+            <input type="search" id="search-input" data-i18n-placeholder="library.search_placeholder" placeholder="Iskanje…" />
+          </div>
           <div class="sort-menu-wrap">
             <select id="sort-select" class="sort-select hidden" aria-hidden="true" tabindex="-1">
               <option value="added_desc" data-i18n="library.sort_newest">Najnovejše</option>
@@ -63,12 +66,12 @@
             </button>
             <div id="sort-menu-list" class="sort-menu-list hidden" role="listbox" aria-label="Vrstni red knjig"></div>
           </div>
-          <button id="edit-mode-btn" class="btn btn-secondary" data-i18n="library.btn_edit">Uredi</button>
+          <button id="edit-mode-btn" class="btn btn-secondary"><img src="/images/edit.svg" class="nav-icon nav-icon-edit" alt=""> <span data-i18n="library.btn_edit">Uredi</span></button>
           <div class="upload-menu-wrap">
             <button id="upload-btn" class="btn btn-primary">+ <span class="upload-btn-label" data-i18n="library.add_book">Dodaj knjigo </span>▾</button>
             <div id="upload-menu" class="upload-menu hidden">
-              <button id="upload-file-btn" class="upload-menu-item" data-i18n="library.upload_file">📂 Naloži datoteko</button>
-              <button id="upload-opds-btn" class="upload-menu-item" data-i18n="sidebar.online_library">🌐 Spletna knjižnica</button>
+              <button id="upload-file-btn" class="upload-menu-item"><img src="/images/book_upload.svg" class="nav-icon nav-icon-book-upload" alt=""> <span data-i18n="library.upload_file">Naloži datoteko</span></button>
+              <button id="upload-opds-btn" class="upload-menu-item"><img src="/images/online_library.svg" class="nav-icon nav-icon-online-library" alt=""> <span data-i18n="sidebar.online_library">Spletna knjižnica</span></button>
             </div>
           </div>
         </div>
@@ -93,7 +96,7 @@
 
       <!-- Upload drop zone -->
       <div class="drop-zone hidden" id="drop-zone">
-        <div style="font-size:2.5rem;margin-bottom:.75rem">📂</div>
+        <div style="font-size:2.5rem;margin-bottom:.75rem"><img src="/images/folder.svg" class="nav-icon nav-icon-folder" style="width:2.5rem;height:2.5rem" alt=""></div>
         <p style="margin-bottom:.5rem" data-i18n="library.drop_hint1">Povlecite EPUB datoteke sem</p>
         <p style="font-size:.85rem" data-i18n="library.drop_hint2">ali kliknite za izbiro</p>
         <input type="file" id="file-input" accept=".epub" multiple />

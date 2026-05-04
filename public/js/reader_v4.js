@@ -572,6 +572,7 @@ function hexToRgba(hex, alpha) {
 function applyUiTheme() {
   const theme = THEMES[prefs.theme] || THEMES.dark;
   const ui    = THEME_UI[prefs.theme] || THEME_UI.dark;
+  const safeAreaFill = document.getElementById('safe-area-fill');
 
   if (prefs.eink) {
     document.documentElement.setAttribute('data-reader-eink', '');
@@ -590,6 +591,7 @@ function applyUiTheme() {
     document.documentElement.style.setProperty('--reader-header-border',      text);
     document.documentElement.style.setProperty('--reader-header-text',        text);
     document.documentElement.style.setProperty('--reader-header-text-muted',  text);
+    if (safeAreaFill) safeAreaFill.style.background = bg;
     epubViewer.style.background = bg;
   } else {
     document.documentElement.removeAttribute('data-reader-eink');
@@ -612,6 +614,8 @@ function applyUiTheme() {
     document.documentElement.style.setProperty('--reader-header-border',      headerBdr);
     document.documentElement.style.setProperty('--reader-header-text',        theme.text);
     document.documentElement.style.setProperty('--reader-header-text-muted',  headerMuted);
+    // Safe-area fill: solid (opaque) page colour so the translucent header doesn't leak through
+    if (safeAreaFill) safeAreaFill.style.background = theme.bg;
     epubViewer.style.background = theme.bg;
   }
 }

@@ -146,6 +146,7 @@ html, body {
   background: var(--color-bg);
   color: var(--color-text);
   line-height: 1.5;
+  scrollbar-gutter: stable;
 }
 
 a { color: var(--color-accent); text-decoration: none; }
@@ -179,6 +180,9 @@ html[data-lib-theme="eink"] .nav-icon-delete            { content: url('/images/
 html[data-lib-theme="eink"] .nav-icon-download          { content: url('/images/download_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-read              { content: url('/images/read_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-save              { content: url('/images/save_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-search            { content: url('/images/search_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-edit              { content: url('/images/edit_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-book-upload       { content: url('/images/book_upload_bw.svg'); }
 
 /* ── Utility ────────────────────────────────────────────────────────────────── */
 .sr-only {
@@ -208,7 +212,7 @@ html[data-lib-theme="eink"] .nav-icon-save              { content: url('/images/
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn-primary  { background: var(--color-accent); color: #fff; }
 .btn-primary:hover  { background: var(--color-accent-dark); }
-.btn-secondary { background: var(--color-surface2); color: var(--color-text); }
+.btn-secondary { background: var(--color-surface2); color: var(--color-text); border: 1px solid var(--color-border); }
 .btn-secondary:hover { opacity: .85; }
 .btn-danger   { background: var(--color-danger); color: #fff; }
 .btn-danger:hover { opacity: .85; }
@@ -370,7 +374,6 @@ input:focus, select:focus, textarea:focus {
 .page-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   flex-wrap: wrap;
   gap: 1rem;
   margin-bottom: 1.5rem;
@@ -378,10 +381,25 @@ input:focus, select:focus, textarea:focus {
 .page-header h1 { font-size: 1.5rem; }
 .library-toolbar-controls {
   align-items: center;
+  margin-left: auto;
 }
 .library-toolbar-controls #search-input {
   width: 180px;
   min-width: 0;
+  padding-left: 2rem;
+}
+.search-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.search-wrap .search-icon {
+  position: absolute;
+  left: .5rem;
+  pointer-events: none;
+  opacity: .5;
+  width: 1em;
+  height: 1em;
 }
 
 /* ── Book grid ──────────────────────────────────────────────────────────────── */
@@ -1317,33 +1335,42 @@ input:focus, select:focus, textarea:focus {
 }
 
 @media (max-width: 600px) {
-  .upload-btn-label { display: none; }
   .library-toolbar-controls {
     width: 100%;
+    flex-wrap: wrap;
     align-items: stretch;
+    gap: .5rem;
+  }
+  /* Search fills the full first row */
+  .library-toolbar-controls .search-wrap {
+    width: 100%;
+    flex: 1 1 100%;
   }
   .library-toolbar-controls #search-input {
     flex: 1 1 0;
-    width: auto;
+    width: 100%;
     min-width: 0;
   }
-  .library-toolbar-controls .sort-menu-wrap {
-    min-width: 0;
-    flex: 0 1 auto;
-  }
+  /* Sort, edit, upload share the second row equally */
+  .library-toolbar-controls .sort-menu-wrap,
   .library-toolbar-controls #edit-mode-btn,
   .library-toolbar-controls .upload-menu-wrap {
-    flex: 0 0 auto;
-  }
-  .sort-menu-wrap {
+    flex: 1 1 0;
     min-width: 0;
   }
+  .library-toolbar-controls #edit-mode-btn,
+  .library-toolbar-controls .upload-menu-wrap > #upload-btn {
+    width: 100%;
+    justify-content: center;
+  }
   .sort-menu-btn {
-    width: auto;
-    min-width: 2.2rem;
-    padding: .48rem .65rem;
+    width: 100%;
+    justify-content: center;
+    padding: .48rem .5rem;
     gap: .35rem;
   }
+  #sort-menu-label { flex: 1; text-align: center; }
+  .upload-btn-label { display: none; }
   .sort-menu-list {
     left: 0;
     right: auto;

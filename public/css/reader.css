@@ -18,11 +18,23 @@ html, body {
   position: relative;
 }
 
+/* Solid strip that fills the safe-area zone with the page colour (no alpha).
+   Sits above the reader-layout so the translucent header doesn't expose the page bg. */
+#safe-area-fill {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: env(safe-area-inset-top, 0px);
+  background: var(--reader-page-bg, var(--color-bg));
+  transition: background .3s;
+  z-index: 10000; /* above loading overlay */
+  pointer-events: none;
+}
+
 /* ── Header sensor (auto-hide trigger) ───────────────────────────────────────── */
 #header-sensor {
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: 26px;
+  height: calc(26px + env(safe-area-inset-top, 0px));
   z-index: 19;
   pointer-events: none;
 }
