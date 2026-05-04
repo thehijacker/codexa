@@ -424,12 +424,12 @@ async function openInfoModal(book) {
       ${descHtml}
       ${shelvesHtml}
       <div class="modal-footer info-modal-footer">
-        <button class="btn btn-danger"    id="info-modal-delete">${t('library.btn_del_book')}</button>
+        <button class="btn btn-danger"    id="info-modal-delete"><img src="/images/delete.svg" class="nav-icon nav-icon-delete" alt=""> ${t('library.btn_del_book')}</button>
         <a      class="btn btn-secondary" id="info-modal-download"
-                href="/api/books/${fullBook.id}/file?download=1&token=${token}" download>${t('library.btn_download')}</a>
+                href="/api/books/${fullBook.id}/file?download=1&token=${token}" download><img src="/images/download.svg" class="nav-icon nav-icon-download" alt=""> ${t('library.btn_download')}</a>
         <a      class="btn btn-read"      id="info-modal-read"
-                href="/readerv4.html?id=${fullBook.id}">${t('library.btn_read')}</a>
-        <button class="btn btn-primary"   id="info-modal-save">${t('library.btn_save_shelves')}</button>
+                href="/readerv4.html?id=${fullBook.id}"><img src="/images/read.svg" class="nav-icon nav-icon-read" alt=""> ${t('library.btn_read')}</a>
+        <button class="btn btn-primary"   id="info-modal-save"><img src="/images/save.svg" class="nav-icon nav-icon-save" alt=""> ${t('library.btn_save_shelves')}</button>
       </div>
     </div>`;
 
@@ -485,14 +485,14 @@ export async function selectShelf(shelfId) {
 
   const titleEl = document.getElementById('page-title');
   if (shelfId === 'all') {
-    titleEl.textContent     = '📚 ' + t('sidebar.all_library');
+    titleEl.innerHTML = `<img src="/images/all_library.svg" class="nav-icon nav-icon-all-library" alt=""> ${t('sidebar.all_library')}`;
     currentShelfBookIds = null;
   } else if (shelfId === 'reading') {
-    titleEl.textContent     = '📖 ' + t('sidebar.currently_reading');
+    titleEl.innerHTML = `<img src="/images/currently_reading.svg" class="nav-icon nav-icon-currently-reading" alt=""> ${t('sidebar.currently_reading')}`;
     currentShelfBookIds = null;
   } else {
     const shelf = getShelves().find(s => s.id === shelfId);
-    titleEl.textContent = shelf ? '📂 ' + shelf.name : '📂 Polica';
+    titleEl.innerHTML = `<img src="/images/shelf.svg" class="nav-icon nav-icon-shelf" alt=""> ${escHtml(shelf ? shelf.name : 'Polica')}`;
     await refreshShelfFilter(false);
   }
 
@@ -650,7 +650,7 @@ function openShelfEditModal(shelf) {
     try {
       await apiFetch(`/shelves/${shelf.id}`, { method: 'PUT', body: JSON.stringify({ name }) });
       toast.success(t('library.toast_shelf_renamed'));
-      if (currentShelfId === shelf.id) document.getElementById('page-title').textContent = '📂 ' + name;
+      if (currentShelfId === shelf.id) document.getElementById('page-title').innerHTML = `<img src="/images/shelf.svg" class="nav-icon nav-icon-shelf" alt=""> ${escHtml(name)}`;
       close();
       await reloadShelves();
     } catch (err) { toast.error(t('common.err_prefix') + err.message); }
@@ -914,7 +914,7 @@ export async function initLibrary() {
     );
   } else {
     const titleEl = document.getElementById('page-title');
-    if (titleEl) titleEl.textContent = '📚 ' + t('sidebar.all_library');
+    if (titleEl) titleEl.innerHTML = `<img src="/images/all_library.svg" class="nav-icon nav-icon-all-library" alt=""> ${t('sidebar.all_library')}`;
   }
   if (initialSearch) {
     const searchEl = document.getElementById('search-input');
@@ -946,8 +946,8 @@ document.addEventListener('langchange', () => {
   }
   const titleEl = document.getElementById('page-title');
   if (titleEl) {
-    if (currentShelfId === 'all') titleEl.textContent = '📚 ' + t('sidebar.all_library');
-    else if (currentShelfId === 'reading') titleEl.textContent = '📖 ' + t('sidebar.currently_reading');
+    if (currentShelfId === 'all') titleEl.innerHTML = `<img src="/images/all_library.svg" class="nav-icon nav-icon-all-library" alt=""> ${t('sidebar.all_library')}`;
+    else if (currentShelfId === 'reading') titleEl.innerHTML = `<img src="/images/currently_reading.svg" class="nav-icon nav-icon-currently-reading" alt=""> ${t('sidebar.currently_reading')}`;
   }
   if (editMode) {
     updateEditToolbar();

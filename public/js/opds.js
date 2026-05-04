@@ -191,7 +191,7 @@ function renderFeed(feed) {
     navEntries.forEach(entry => {
       const tile = document.createElement('button');
       tile.className = 'nav-tile';
-      tile.innerHTML = `<span class="nav-tile-icon">📂</span><span class="nav-tile-label">${escHtml(entry.title)}</span>
+      tile.innerHTML = `<img src="/images/folder.svg" class="nav-icon nav-icon-folder" alt=""><span class="nav-tile-label">${escHtml(entry.title)}</span>
         <button class="nav-tile-sync-btn" title="${t('opds.sync_title')}">${t('opds.btn_sync_short')}</button>`;
       tile.addEventListener('click', (e) => {
         if (e.target.closest('.nav-tile-sync-btn')) return;

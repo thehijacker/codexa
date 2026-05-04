@@ -127,19 +127,31 @@ const DEFAULT_STATUS_BAR = {
 // Stat definitions — id, icon, translated label (use function to get current lang)
 function getStatusStats() {
   return [
-    { id: 'chapterPage',   icon: '\uD83D\uDCC4', label: t('reader.sb_chapter_page') },
-    { id: 'bookPage',      icon: '\uD83D\uDCDA', label: t('reader.sb_book_page') },
-    { id: 'pagesLeftChap', icon: '\u23E9',        label: t('reader.sb_pages_left_chap') },
-    { id: 'pagesLeftBook', icon: '\u23ED',        label: t('reader.sb_pages_left_book') },
-    { id: 'pctChapter',    icon: '\u25D4',        label: t('reader.sb_pct_chap') },
-    { id: 'pctBook',       icon: '\u25D5',        label: t('reader.sb_pct_book') },
-    { id: 'timeLeftChap',  icon: '\u23F1',        label: t('reader.sb_time_left_chap') },
-    { id: 'timeLeftBook',  icon: '\u23F2',        label: t('reader.sb_time_left_book') },
-    { id: 'currentTime',   icon: '\uD83D\uDD52', label: t('reader.sb_current_time') },
-    { id: 'bookTitle',     icon: '\uD83C\uDFF7',  label: t('reader.sb_book_title') },
-    { id: 'bookAuthor',    icon: '\u270D',        label: t('reader.sb_book_author') },
-    { id: 'chapterTitle',  icon: '\uD83D\uDCF0', label: t('reader.sb_chap_title') },
+    { id: 'chapterPage',   icon: '/images/chapter_page.svg',    label: t('reader.sb_chapter_page') },
+    { id: 'bookPage',      icon: '/images/book_page.svg',       label: t('reader.sb_book_page') },
+    { id: 'pagesLeftChap', icon: '/images/chapter_end.svg',     label: t('reader.sb_pages_left_chap') },
+    { id: 'pagesLeftBook', icon: '/images/book_end.svg',        label: t('reader.sb_pages_left_book') },
+    { id: 'pctChapter',    icon: '/images/chapter_progress.svg',label: t('reader.sb_pct_chap') },
+    { id: 'pctBook',       icon: '/images/book_progress.svg',   label: t('reader.sb_pct_book') },
+    { id: 'timeLeftChap',  icon: '/images/time_end_chapter.svg',label: t('reader.sb_time_left_chap') },
+    { id: 'timeLeftBook',  icon: '/images/time_end_book.svg',   label: t('reader.sb_time_left_book') },
+    { id: 'currentTime',   icon: '/images/time.svg',            label: t('reader.sb_current_time') },
+    { id: 'bookTitle',     icon: '/images/book_title.svg',      label: t('reader.sb_book_title') },
+    { id: 'bookAuthor',    icon: '/images/book_author.svg',     label: t('reader.sb_book_author') },
+    { id: 'chapterTitle',  icon: '/images/chapter_title.svg',   label: t('reader.sb_chap_title') },
   ];
+}
+
+/** Build an <img> tag for a status-bar icon (SVG path → CSS class derived from filename). */
+function sbIconHtml(iconSrc) {
+  const base = iconSrc.replace('/images/', '').replace('.svg', '');
+  const cls  = base.replace(/_/g, '-');
+  return `<img src="${iconSrc}" class="nav-icon nav-icon-sb nav-icon-sb-${cls}" alt="">`;
+}
+
+/** Escape a string for safe use in HTML text content. */
+function sbEsc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 const DEFAULT_PREFS = {
@@ -562,6 +574,7 @@ function applyUiTheme() {
   const ui    = THEME_UI[prefs.theme] || THEME_UI.dark;
 
   if (prefs.eink) {
+    document.documentElement.setAttribute('data-reader-eink', '');
     // E-ink: force pure black-on-white (or white-on-black) for the whole shell
     const bg   = theme.bg === '#000000' || theme.bg === '#000' || theme.bg === 'black' ? '#000' : '#fff';
     const text = bg === '#fff' ? '#000' : '#fff';
@@ -579,6 +592,7 @@ function applyUiTheme() {
     document.documentElement.style.setProperty('--reader-header-text-muted',  text);
     epubViewer.style.background = bg;
   } else {
+    document.documentElement.removeAttribute('data-reader-eink');
     // Apply full reader-theme palette to all shell UI (panels, sidebars, inputs …)
     document.documentElement.style.setProperty('--reader-page-bg',    theme.bg);
     document.documentElement.style.setProperty('--color-bg',          ui.bg);
@@ -824,11 +838,12 @@ function computeStatValue(id) {
 function computeSlot(ids) {
   if (!ids?.length) return '';
   return ids.map(id => {
-    const val  = computeStatValue(id);
+    const val      = computeStatValue(id);
     if (!val) return '';
-    const icon     = STAT_ICON[id];
+    const iconSrc  = STAT_ICON[id];
     const showIcon = prefs.statusBar.showIcons[id] !== false;   // default true
-    return (icon && showIcon) ? icon + '\u202F' + val : val;    // NARROW NO-BREAK SPACE
+    const prefix   = (iconSrc && showIcon) ? sbIconHtml(iconSrc) + '\u202F' : '';
+    return prefix + sbEsc(val);
   }).filter(Boolean).join('  |  ');
 }
 
@@ -859,22 +874,24 @@ function updateStatusBar(location) {
   const chapInBottom = isTwoPage && (pos.bl.includes('chapterPage') || pos.bc.includes('chapterPage') || pos.br.includes('chapterPage'));
 
   // Pre-build chapter page strings (used for both top & bottom if needed)
-  const cpIcon   = prefs.statusBar.showIcons['chapterPage'] !== false ? STAT_ICON['chapterPage'] + '\u202F' : '';
-  const leftVal  = startPage > 0 ? cpIcon + startPage + '/' + totalPages : '';
-  const rightVal = endPage   > 0 ? cpIcon + endPage   + '/' + totalPages : '';
+  const cpIconSrc = STAT_ICON['chapterPage'];
+  const cpImg     = (cpIconSrc && prefs.statusBar.showIcons['chapterPage'] !== false)
+                    ? sbIconHtml(cpIconSrc) + '\u202F' : '';
+  const leftVal   = startPage > 0 ? cpImg + startPage + '/' + totalPages : '';
+  const rightVal  = endPage   > 0 ? cpImg + endPage   + '/' + totalPages : '';
 
   // ── Top row ──────────────────────────────────────────────────────────────
   if (chapInTop) {
     const tlOther = computeSlot(pos.tl.filter(id => id !== 'chapterPage'));
     const tcSlot  = computeSlot(pos.tc.filter(id => id !== 'chapterPage'));
     const trOther = computeSlot(pos.tr.filter(id => id !== 'chapterPage'));
-    sbTl.textContent = [leftVal,  tlOther].filter(Boolean).join('  |  ');
-    sbTc.textContent = tcSlot;
-    sbTr.textContent = [trOther, rightVal].filter(Boolean).join('  |  ');
+    sbTl.innerHTML = [leftVal,  tlOther].filter(Boolean).join('  |  ');
+    sbTc.innerHTML = tcSlot;
+    sbTr.innerHTML = [trOther, rightVal].filter(Boolean).join('  |  ');
   } else {
-    sbTl.textContent = computeSlot(pos.tl);
-    sbTc.textContent = computeSlot(pos.tc);
-    sbTr.textContent = computeSlot(pos.tr);
+    sbTl.innerHTML = computeSlot(pos.tl);
+    sbTc.innerHTML = computeSlot(pos.tc);
+    sbTr.innerHTML = computeSlot(pos.tr);
   }
 
   // ── Bottom row ───────────────────────────────────────────────────────────
@@ -883,14 +900,14 @@ function updateStatusBar(location) {
     const blOther = computeSlot(pos.bl.filter(id => id !== 'chapterPage'));
     const bcSlot  = computeSlot(pos.bc.filter(id => id !== 'chapterPage'));
     const brOther = computeSlot(pos.br.filter(id => id !== 'chapterPage'));
-    sbBl.textContent = [leftVal,  blOther].filter(Boolean).join('  |  ');
-    sbBc.textContent = bcSlot;
-    sbBr.textContent = [brOther, rightVal].filter(Boolean).join('  |  ');
+    sbBl.innerHTML = [leftVal,  blOther].filter(Boolean).join('  |  ');
+    sbBc.innerHTML = bcSlot;
+    sbBr.innerHTML = [brOther, rightVal].filter(Boolean).join('  |  ');
   } else {
     sbBottom.classList.remove('two-page');
-    sbBl.textContent = computeSlot(pos.bl);
-    sbBc.textContent = computeSlot(pos.bc);
-    sbBr.textContent = computeSlot(pos.br);
+    sbBl.innerHTML = computeSlot(pos.bl);
+    sbBc.innerHTML = computeSlot(pos.bc);
+    sbBr.innerHTML = computeSlot(pos.br);
   }
 
   updateChapProgressBar();
@@ -903,7 +920,7 @@ function refreshStatusBarTime() {
   const pairs = [[sbTl, pos.tl], [sbTc, pos.tc], [sbTr, pos.tr],
                  [sbBl, pos.bl], [sbBc, pos.bc], [sbBr, pos.br]];
   pairs.forEach(([el, ids]) => {
-    if (ids.includes('currentTime')) el.textContent = computeSlot(ids);
+    if (ids.includes('currentTime')) el.innerHTML = computeSlot(ids);
   });
 }
 setInterval(refreshStatusBarTime, 30000);
@@ -1236,7 +1253,10 @@ function syncFullscreenButton() {
     return;
   }
   fullscreenBtn.classList.remove('hidden');
-  fullscreenBtn.textContent = isFullscreenActive() ? '\uD83D\uDDD7' : '\u26F6';
+  const img = fullscreenBtn.querySelector('img.nav-icon-fullscreen');
+  if (img) {
+    img.src = isFullscreenActive() ? '/images/fullscreen_exit.svg' : '/images/fullscreen.svg';
+  }
   fullscreenBtn.title = isFullscreenActive() ? t('reader.btn_fullscreen_exit') : t('reader.btn_fullscreen');
 }
 
@@ -1686,7 +1706,8 @@ function renderStatusSlots() {
   const chapInTop    = isTwoPage && (pos.tl.includes('chapterPage') || pos.tc.includes('chapterPage') || pos.tr.includes('chapterPage'));
   const chapInBottom = isTwoPage && (pos.bl.includes('chapterPage') || pos.bc.includes('chapterPage') || pos.br.includes('chapterPage'));
 
-  const cpIcon   = prefs.statusBar.showIcons['chapterPage'] !== false ? STAT_ICON['chapterPage'] + '\u202F' : '';
+  const cpIconSrc = STAT_ICON['chapterPage'];
+  const cpIcon    = (cpIconSrc && prefs.statusBar.showIcons['chapterPage'] !== false) ? sbIconHtml(cpIconSrc) + '\u202F' : '';
   const leftVal  = currentChapPage > 0 ? cpIcon + currentChapPage + '/' + currentChapTotal : '';
   const rightVal = currentEndPage  > 0 ? cpIcon + currentEndPage  + '/' + currentChapTotal : '';
 
@@ -1694,13 +1715,13 @@ function renderStatusSlots() {
     const tlOther = computeSlot(pos.tl.filter(id => id !== 'chapterPage'));
     const tcSlot  = computeSlot(pos.tc.filter(id => id !== 'chapterPage'));
     const trOther = computeSlot(pos.tr.filter(id => id !== 'chapterPage'));
-    sbTl.textContent = [leftVal,  tlOther].filter(Boolean).join('  |  ');
-    sbTc.textContent = tcSlot;
-    sbTr.textContent = [trOther, rightVal].filter(Boolean).join('  |  ');
+    sbTl.innerHTML = [leftVal,  tlOther].filter(Boolean).join('  |  ');
+    sbTc.innerHTML = tcSlot;
+    sbTr.innerHTML = [trOther, rightVal].filter(Boolean).join('  |  ');
   } else {
-    sbTl.textContent = computeSlot(pos.tl);
-    sbTc.textContent = computeSlot(pos.tc);
-    sbTr.textContent = computeSlot(pos.tr);
+    sbTl.innerHTML = computeSlot(pos.tl);
+    sbTc.innerHTML = computeSlot(pos.tc);
+    sbTr.innerHTML = computeSlot(pos.tr);
   }
 
   if (chapInBottom) {
@@ -1708,16 +1729,16 @@ function renderStatusSlots() {
     const blOther = computeSlot(pos.bl.filter(id => id !== 'chapterPage'));
     const bcSlot  = computeSlot(pos.bc.filter(id => id !== 'chapterPage'));
     const brOther = computeSlot(pos.br.filter(id => id !== 'chapterPage'));
-    sbBl.textContent = [leftVal,  blOther].filter(Boolean).join('  |  ');
-    sbBc.textContent = bcSlot;
-    sbBr.textContent = [brOther, rightVal].filter(Boolean).join('  |  ');
+    sbBl.innerHTML = [leftVal,  blOther].filter(Boolean).join('  |  ');
+    sbBc.innerHTML = bcSlot;
+    sbBr.innerHTML = [brOther, rightVal].filter(Boolean).join('  |  ');
     sbBottom.classList.toggle('two-page-no-center', !bcSlot);
   } else {
     sbBottom.classList.remove('two-page');
     sbBottom.classList.remove('two-page-no-center');
-    sbBl.textContent = computeSlot(pos.bl);
-    sbBc.textContent = computeSlot(pos.bc);
-    sbBr.textContent = computeSlot(pos.br);
+    sbBl.innerHTML = computeSlot(pos.bl);
+    sbBc.innerHTML = computeSlot(pos.bc);
+    sbBr.innerHTML = computeSlot(pos.br);
   }
 }
 
@@ -1735,12 +1756,13 @@ function renderSbItems() {
   getStatusStats().forEach(({ id, icon, label }) => {
     const curPos    = posOf[id] || 'off';
     const iconOn    = prefs.statusBar.showIcons[id] !== false;  // default true
+    const iconHtml  = sbIconHtml(icon);
     const row       = document.createElement('div');
     row.className   = 'sb-item-row';
     row.dataset.id  = id;
     row.innerHTML   = `
       <div class="sb-item-header">
-        <span class="sb-item-icon">${icon}</span>
+        <span class="sb-item-icon">${iconHtml}</span>
         <span class="sb-item-label">${label}</span>
         <label class="sb-icon-toggle" title="${t('reader.sb_icon_show')}">
           <input type="checkbox" class="sb-icon-chk" ${iconOn ? 'checked' : ''}>
@@ -2790,10 +2812,11 @@ async function init() {
   applyAutoHide();
   syncFullscreenButton();
   await loadCustomFonts();
-  // First-ever open: prefer Bookerly if available in user fonts
+  // First-ever open: apply defaults based on current library theme / available fonts
   if (!localStorage.getItem('br_reader_prefs')) {
     const bookerly = customFonts.find(f => f.label.toLowerCase().includes('bookerly'));
     if (bookerly) prefs.fontFamily = bookerly.value;
+    if (localStorage.getItem('br_library_theme') === 'eink') prefs.eink = true;
   }
   initSettingsUi();
   acquireWakeLock();

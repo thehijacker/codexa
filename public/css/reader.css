@@ -95,6 +95,33 @@ html, body {
   color: var(--reader-header-text-muted, var(--color-text-muted));
   border-color: var(--reader-header-border, var(--color-border));
 }
+.reader-header .btn-icon .nav-icon { width: 1.2rem; height: 1.2rem; }
+
+/* Status bar stat icons: small, vertically aligned */
+.nav-icon-sb { width: .85em; height: .85em; vertical-align: middle; display: inline; margin-right: 0.2em; }
+
+/* E-ink reader: swap coloured header icons for black-and-white variants */
+[data-reader-eink] .nav-icon-chapters   { content: url('/images/chapters_bw.svg'); }
+[data-reader-eink] .nav-icon-find       { content: url('/images/find_bw.svg'); }
+[data-reader-eink] .nav-icon-percentage { content: url('/images/percentage_bw.svg'); }
+[data-reader-eink] .nav-icon-settings   { content: url('/images/settings_bw.svg'); }
+[data-reader-eink] .nav-icon-back       { content: url('/images/back_bw.svg'); }
+[data-reader-eink] .nav-icon-fullscreen { content: url('/images/fullscreen_bw.svg'); }
+[data-reader-eink] img[src="/images/fullscreen_exit.svg"] { content: url('/images/fullscreen_exit_bw.svg'); }
+
+/* E-ink reader: swap status bar stat icons */
+[data-reader-eink] .nav-icon-sb-chapter-page    { content: url('/images/chapter_page_bw.svg'); }
+[data-reader-eink] .nav-icon-sb-book-page        { content: url('/images/book_page_bw.svg'); }
+[data-reader-eink] .nav-icon-sb-chapter-end      { content: url('/images/chapter_end_bw.svg'); }
+[data-reader-eink] .nav-icon-sb-book-end         { content: url('/images/book_end_bw.svg'); }
+[data-reader-eink] .nav-icon-sb-chapter-progress { content: url('/images/chapter_progress_bw.svg'); }
+[data-reader-eink] .nav-icon-sb-book-progress    { content: url('/images/book_progress_bw.svg'); }
+[data-reader-eink] .nav-icon-sb-time-end-chapter { content: url('/images/time_end_chapter_bw.svg'); }
+[data-reader-eink] .nav-icon-sb-time-end-book    { content: url('/images/time_end_book_bw.svg'); }
+[data-reader-eink] .nav-icon-sb-time             { content: url('/images/time_bw.svg'); }
+[data-reader-eink] .nav-icon-sb-book-title       { content: url('/images/book_title_bw.svg'); }
+[data-reader-eink] .nav-icon-sb-book-author      { content: url('/images/book_author_bw.svg'); }
+[data-reader-eink] .nav-icon-sb-chapter-title    { content: url('/images/chapter_title_bw.svg'); }
 .reader-header .btn-icon:hover {
   color: var(--reader-header-text, var(--color-text));
   border-color: var(--reader-header-text-muted, var(--color-text-muted));

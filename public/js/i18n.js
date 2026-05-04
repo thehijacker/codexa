@@ -13,7 +13,7 @@
 const LANG_KEY  = 'br_lang';
 const FALLBACK  = 'sl';
 // Bump this when locale files change to bust the localStorage cache
-const CACHE_VER = '1';
+const CACHE_VER = '2';
 const CACHE_VER_KEY = 'br_strings_ver';
 
 /** Language codes → display names shown in the picker. Add entries here to add languages. */
@@ -135,7 +135,7 @@ function _buildLangMenu(container, { opensUpward = false, sidebarMode = false } 
   btn.className = 'lang-menu-btn';
   btn.setAttribute('aria-haspopup', 'listbox');
   btn.setAttribute('aria-expanded', 'false');
-  btn.innerHTML = `<span class="lang-picker-icon">🌐</span><span class="lang-menu-label"></span><span class="lang-menu-caret">▾</span>`;
+  btn.innerHTML = `<img src="/images/language.svg" class="nav-icon nav-icon-language" alt=""><span class="lang-menu-label"></span><span class="lang-menu-caret">▾</span>`;
 
   const list = document.createElement('div');
   list.className = 'lang-menu-list hidden' + (opensUpward ? ' lang-menu-up' : '');

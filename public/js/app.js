@@ -14,7 +14,7 @@ if (!requireAuth()) {
 // Fetch and display app version in the logo and browser title
 fetch('/api/version').then(r => r.json()).then(({ version }) => {
   const logoEl = document.querySelector('a.logo');
-  if (logoEl) logoEl.innerHTML = `\uD83D\uDCDA Codexa <span class="app-version">v${version}</span>`;
+  if (logoEl) logoEl.innerHTML = `<img src="/images/codexa.svg" class="nav-icon nav-icon-codexa" alt="Codexa"> Codexa <span class="app-version">v${version}</span>`;
   document.title = `Codexa v${version}`;
 }).catch(() => {});
 

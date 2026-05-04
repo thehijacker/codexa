@@ -153,6 +153,33 @@ a:hover { text-decoration: underline; }
 
 img { max-width: 100%; display: block; }
 
+/* ── Navigation SVG icons ──────────────────────────────────────────────────── */
+.nav-icon {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+  width: 1.1em;
+  height: 1.1em;
+  object-fit: contain;
+}
+h1 .nav-icon, .logo .nav-icon { width: 1.4rem; height: 1.4rem; }
+.nav-tile .nav-icon            { width: 2rem;   height: 2rem; }
+
+/* E-ink theme: swap coloured icons for black-and-white variants */
+html[data-lib-theme="eink"] .nav-icon-codexa            { content: url('/images/codexa_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-all-library       { content: url('/images/all_library_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-currently-reading { content: url('/images/currently_reading_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-shelf             { content: url('/images/shelf_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-settings          { content: url('/images/settings_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-logout            { content: url('/images/logout_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-language          { content: url('/images/language_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-online-library    { content: url('/images/online_library_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-folder            { content: url('/images/folder_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-delete            { content: url('/images/delete_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-download          { content: url('/images/download_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-read              { content: url('/images/read_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-save              { content: url('/images/save_bw.svg'); }
+
 /* ── Utility ────────────────────────────────────────────────────────────────── */
 .sr-only {
   position: absolute; width: 1px; height: 1px;
@@ -720,7 +747,7 @@ input:focus, select:focus, textarea:focus {
 .sidebar-item-active { background: rgba(233,69,96,.12) !important; color: var(--color-accent); font-weight: 600; }
 .sidebar-item-btn { appearance: none; -webkit-appearance: none; }
 
-.sidebar-item-icon { font-size: 1rem; flex-shrink: 0; line-height: 1.2; }
+.sidebar-item-icon { font-size: 1rem; flex-shrink: 0; line-height: 1.2; display: flex; align-items: center; }
 
 .sidebar-section { margin-top: .25rem; }
 .sidebar-section-header {
@@ -1407,7 +1434,7 @@ input:focus, select:focus, textarea:focus {
   border-radius: 8px; cursor: pointer; transition: border-color .15s, background .15s; color: var(--color-text);
 }
 .nav-tile:hover { border-color: var(--color-accent); background: var(--color-surface2); }
-.nav-tile-icon { font-size: 1.8rem; line-height: 1; }
+.nav-tile-icon, .nav-tile > .nav-icon { font-size: 1.8rem; line-height: 1; }
 .nav-tile-label { font-size: .78rem; font-weight: 600; text-align: center; line-height: 1.3; }
 .book-row {
   background: var(--color-surface); border: 1px solid var(--color-border);

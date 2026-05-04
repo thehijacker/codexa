@@ -171,17 +171,17 @@ function initSidebarLangPicker(container) {
 function buildSidebarHtml() {
   return `
     <div class="sidebar-header">
-      <a href="/" class="logo">📚 Codexa</a>
+      <a href="/" class="logo"><img src="/images/codexa.svg" class="nav-icon nav-icon-codexa" alt="Codexa"> Codexa</a>
       <button id="sidebar-collapse-btn" class="sidebar-collapse-btn" title="${t('sidebar.collapse')}" aria-label="${t('sidebar.collapse')}">‹</button>
     </div>
     <nav class="sidebar-nav">
       <a href="/" class="sidebar-item" id="nav-currently-reading">
-        <span class="sidebar-item-icon">📖</span>
+        <span class="sidebar-item-icon"><img src="/images/currently_reading.svg" class="nav-icon nav-icon-currently-reading" alt=""></span>
         <span class="sidebar-item-label">${t('sidebar.currently_reading')}</span>
         <span class="shelf-count" id="nav-reading-count"></span>
       </a>
       <a href="/" class="sidebar-item" id="nav-all-books">
-        <span class="sidebar-item-icon">📚</span>
+        <span class="sidebar-item-icon"><img src="/images/all_library.svg" class="nav-icon nav-icon-all-library" alt=""></span>
         <span class="sidebar-item-label">${t('sidebar.all_library')}</span>
         <span class="shelf-count" id="nav-all-count"></span>
       </a>
@@ -194,11 +194,11 @@ function buildSidebarHtml() {
       </div>
       <div class="sidebar-divider"></div>
       <a href="/?panel=opds" class="sidebar-item" id="nav-opds">
-        <span class="sidebar-item-icon">🌐</span>
+        <span class="sidebar-item-icon"><img src="/images/online_library.svg" class="nav-icon nav-icon-online-library" alt=""></span>
         <span class="sidebar-item-label">${t('sidebar.online_library')}</span>
       </a>
       <a href="/?panel=settings" class="sidebar-item" id="nav-settings">
-        <span class="sidebar-item-icon">⚙️</span>
+        <span class="sidebar-item-icon"><img src="/images/settings.svg" class="nav-icon nav-icon-settings" alt=""></span>
         <span class="sidebar-item-label">${t('sidebar.settings')}</span>
       </a>
     </nav>
@@ -215,7 +215,7 @@ function buildSidebarHtml() {
       </div>
       <div id="sidebar-lang-picker" class="sidebar-lang-picker"></div>
       <button class="sidebar-item sidebar-item-btn" id="sidebar-logout-btn">
-        <span class="sidebar-item-icon">↪</span>
+        <span class="sidebar-item-icon"><img src="/images/logout.svg" class="nav-icon nav-icon-logout" alt=""></span>
         <span class="sidebar-item-label">${t('sidebar.logout')}</span>
       </button>
     </div>`;
@@ -230,7 +230,7 @@ function renderShelves() {
     item.className = 'sidebar-shelf-item' + (_activeShelfId === shelf.id ? ' sidebar-item-active' : '');
     item.dataset.id = shelf.id;
     item.innerHTML = `
-      <span class="sidebar-item-icon">📂</span>
+      <span class="sidebar-item-icon"><img src="/images/shelf.svg" class="nav-icon nav-icon-shelf" alt=""></span>
       <span class="sidebar-item-label">${escHtml(shelf.name)}</span>
       <span class="shelf-count">${shelf.book_count}</span>
       <button class="shelf-edit-btn" title="Uredi" data-id="${shelf.id}">✎</button>`;

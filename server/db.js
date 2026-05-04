@@ -65,6 +65,11 @@ function initDb() {
       cover_path     TEXT    DEFAULT '',
       file_size      INTEGER DEFAULT 0,
       added_at       INTEGER DEFAULT (strftime('%s', 'now')),
+      publisher      TEXT    DEFAULT '',
+      language       TEXT    DEFAULT '',
+      isbn           TEXT    DEFAULT '',
+      genres         TEXT    DEFAULT '',
+      pages          TEXT    DEFAULT '',
       UNIQUE (user_id, file_hash),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
