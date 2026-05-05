@@ -165,6 +165,8 @@
   "reader.sb_skip_close_hint": "If enabled, position is not saved automatically when returning to library or closing the tab",
   "reader.sb_hyphenation": "Word hyphenation",
   "reader.sb_hyphenation_hint": "Automatically hyphenate words at line breaks",
+  "reader.sb_bionic": "Bionic reading",
+  "reader.sb_bionic_hint": "Emphasize the beginning of words for faster reading; changing this reloads the book at the same position",
   "reader.sb_hyphenation_lang": "Hyphenation language",
   "reader.sb_hyphenation_lang_auto": "Automatic (from book)",
   "reader.sb_page_shadow": "Page border (book spine)",

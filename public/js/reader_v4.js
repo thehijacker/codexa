@@ -9,6 +9,10 @@ if (!requireAuth()) throw new Error('not authenticated');
 const params = new URLSearchParams(window.location.search);
 const bookId = params.get('id');
 if (!bookId) { window.location.href = '/'; throw new Error(); }
+const BIONIC_RELOAD_KEY = 'br_bionic_reload_state_v1';
+const BIONIC_RELOAD_MAX_AGE_MS = 5 * 60 * 1000;
+const BIONIC_PREFETCH_RADIUS = 3;
+const BIONIC_PREFETCH_CACHE_LIMIT = 7;
 
 // ── Themes ────────────────────────────────────────────────────────────────────
 const THEMES = {
@@ -175,6 +179,7 @@ const DEFAULT_PREFS = {
   disableJustify:  false,        // left-align text instead of justified
   hyphenation:    false,         // CSS hyphens: auto inside epub iframe
   hyphenLang:     '',           // empty = keep book's own lang attr; else override e.g. 'en'
+  bionicReading:  false,        // emphasize word prefixes for easier scanning
   pageGapShadow:  false,        // show epub.js center-spine box-shadow in two-page mode
   dictionaries:   [],           // ordered list of dict basenames; empty = use all
   edgePadding:    { top: 0, bottom: 0, left: 0, right: 0 },   // px inset for curved screens
@@ -205,6 +210,10 @@ let preSearchCfi = null;      // position before first result jump
 //   phase 'first'  – navigated to chapter href, waiting for relocated to re-nav to exact CFI
 //   phase 'second' – navigated to exact CFI, waiting for relocated to mark highlights
 let searchNav = null; // null | { cfi, navCfi, query, href, phase }
+let bionicWordCache = new Map();      // per-word split cache
+let bionicPageCache = new Map();      // location index cache window
+let bionicPrefetchSeq = 0;
+const bionicPrefetchInFlight = new Set();
 
 // ── Status bar state ──────────────────────────────────────────────────────────
 let currentHref      = '';    // current spine href (updated in updateProgress)
@@ -262,7 +271,7 @@ const fullscreenBtn   = document.getElementById('btn-fullscreen');
 
 // ── Prefs ─────────────────────────────────────────────────────────────────────
 // Keys that are stored per-book (content appearance).  All others are global.
-const PER_BOOK_KEYS = ['fontSize','fontFamily','lineHeight','margin','theme','overrideStyles','paraIndent','paraIndentSize','paraSpacing','dictionaries'];
+const PER_BOOK_KEYS = ['fontSize','fontFamily','lineHeight','margin','theme','overrideStyles','paraIndent','paraIndentSize','paraSpacing','dictionaries','bionicReading'];
 
 function loadPrefs() {
   try {
@@ -344,6 +353,278 @@ function persistPrefs() {
     method: 'PUT',
     body: JSON.stringify({ reader_prefs: prefs }),
   }).catch(() => {});
+}
+
+function readBionicReloadState() {
+  try {
+    const raw = sessionStorage.getItem(BIONIC_RELOAD_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.bookId !== bookId) return null;
+    if ((Date.now() - Number(parsed.ts || 0)) > BIONIC_RELOAD_MAX_AGE_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function clearBionicReloadState() {
+  try { sessionStorage.removeItem(BIONIC_RELOAD_KEY); } catch { /* ignore */ }
+}
+
+function saveBionicReloadState() {
+  const loc = rendition?.currentLocation?.();
+  const cfi = currentCfi || loc?.start?.cfi || '';
+  const pct = (() => {
+    if (book?.locations?.length?.() > 0 && cfi) {
+      const p = book.locations.percentageFromCfi(cfi);
+      if (p != null) return p;
+    }
+    if (loc?.start?.percentage != null) return loc.start.percentage;
+    return currentPct || 0;
+  })();
+  try {
+    sessionStorage.setItem(BIONIC_RELOAD_KEY, JSON.stringify({
+      bookId,
+      cfi,
+      pct,
+      bionicReading: !!prefs.bionicReading,
+      ts: Date.now(),
+    }));
+  } catch { /* ignore */ }
+}
+
+function getLocationIndexFromCfi(cfi) {
+  if (!cfi || !book?.locations?.length?.()) return null;
+  const len = book.locations.length();
+  if (!len) return null;
+  const pct = book.locations.percentageFromCfi(cfi);
+  if (pct == null) return null;
+  const idx = Math.round(pct * Math.max(0, len - 1));
+  return Math.min(len - 1, Math.max(0, idx));
+}
+
+function spineIndexFromCfi(cfi) {
+  const m = String(cfi || '').match(/epubcfi\(\s*\/6\/(\d+)/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  if (!Number.isFinite(n)) return null;
+  const idx = Math.floor(n / 2) - 1;
+  return idx >= 0 ? idx : null;
+}
+
+function pruneBionicCaches(windowIndexes = null) {
+  if (!prefs.bionicReading) {
+    bionicPageCache.clear();
+    bionicPrefetchInFlight.clear();
+    return;
+  }
+  if (windowIndexes) {
+    for (const k of Array.from(bionicPageCache.keys())) {
+      if (!windowIndexes.has(k)) bionicPageCache.delete(k);
+    }
+    return;
+  }
+  while (bionicPageCache.size > BIONIC_PREFETCH_CACHE_LIMIT) {
+    const firstKey = bionicPageCache.keys().next().value;
+    bionicPageCache.delete(firstKey);
+  }
+}
+
+function bionicFocusLength(len) {
+  if (len <= 2) return 1;
+  if (len <= 4) return 2;
+  if (len <= 6) return 3;
+  if (len <= 9) return 4;
+  return 5;
+}
+
+function splitBionicWord(word) {
+  const cached = bionicWordCache.get(word);
+  if (cached) return cached;
+  const focus = Math.min(word.length, bionicFocusLength(word.length));
+  const split = { lead: word.slice(0, focus), tail: word.slice(focus) };
+  bionicWordCache.set(word, split);
+  return split;
+}
+
+function isBionicWordCore(token) {
+  return /^[\p{L}\p{N}][\p{L}\p{N}'’-]*$/u.test(token);
+}
+
+function splitTokenPunctuation(token) {
+  const m = token.match(/^([^\p{L}\p{N}'’-]*)([\p{L}\p{N}'’-]+)([^\p{L}\p{N}'’-]*)$/u);
+  if (!m) return { prefix: '', core: token, suffix: '' };
+  return { prefix: m[1] || '', core: m[2] || '', suffix: m[3] || '' };
+}
+
+function appendBionicTextFragment(doc, fragment, text) {
+  if (!text) return;
+  const parts = text.split(/(\s+)/);
+  for (const part of parts) {
+    if (!part) continue;
+    if (/^\s+$/u.test(part)) {
+      fragment.appendChild(doc.createTextNode(part));
+      continue;
+    }
+    const { prefix, core, suffix } = splitTokenPunctuation(part);
+    const coreLetters = core.replace(/[^\p{L}\p{N}]/gu, '');
+    if (coreLetters.length < 3 || !isBionicWordCore(core)) {
+      fragment.appendChild(doc.createTextNode(part));
+      continue;
+    }
+    const { lead, tail } = splitBionicWord(core);
+    if (prefix) fragment.appendChild(doc.createTextNode(prefix));
+    const wrap = doc.createElement('span');
+    wrap.className = 'br-bionic-word';
+    const focus = doc.createElement('span');
+    focus.className = 'br-bionic-focus';
+    focus.textContent = lead;
+    wrap.appendChild(focus);
+    if (tail) wrap.appendChild(doc.createTextNode(tail));
+    fragment.appendChild(wrap);
+    if (suffix) fragment.appendChild(doc.createTextNode(suffix));
+  }
+}
+
+function shouldSkipBionicNode(node) {
+  if (!node?.parentElement) return true;
+  if (!node.nodeValue || !node.nodeValue.trim()) return true;
+  const parent = node.parentElement;
+  if (parent.closest('script,style,pre,code,kbd,samp,math,ruby,rt,rp,textarea,select,option')) return true;
+  if (parent.closest('.br-bionic-word,.br-hl')) return true;
+  return false;
+}
+
+function collectBionicTextNodes(doc) {
+  const out = [];
+  if (!doc?.body) return out;
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    if (!shouldSkipBionicNode(node)) out.push(node);
+    node = walker.nextNode();
+  }
+  return out;
+}
+
+function warmBionicWordCacheFromDocument(doc) {
+  const nodes = collectBionicTextNodes(doc);
+  nodes.forEach(node => {
+    const parts = node.nodeValue.split(/(\s+)/);
+    for (const part of parts) {
+      if (!part || /^\s+$/u.test(part)) continue;
+      const { core } = splitTokenPunctuation(part);
+      if (core && isBionicWordCore(core) && core.replace(/[^\p{L}\p{N}]/gu, '').length >= 3) {
+        splitBionicWord(core);
+      }
+    }
+  });
+}
+
+// Build a bionic-safe CFI by stripping text-node steps and char offsets.
+// Handles both simple CFIs and range CFIs (epubcfi(base,start,end)).
+// Range CFIs are converted to a simple CFI using base+start with offsets stripped.
+function makeBionicSafeCfi(cfi) {
+  if (!cfi) return cfi;
+  // Range CFI: epubcfi(base,start,end)
+  if (cfi.includes(',')) {
+    const inner = cfi.slice(8, -1); // strip 'epubcfi(' and ')'
+    const c1 = inner.indexOf(',');
+    const c2 = inner.indexOf(',', c1 + 1);
+    if (c1 !== -1 && c2 !== -1) {
+      const base  = inner.slice(0, c1);
+      let   start = inner.slice(c1 + 1, c2);
+      start = start.replace(/:(\d+)$/, '');                                           // strip :charOffset
+      start = start.replace(/\/(\d+)$/, (m, n) => parseInt(n) % 2 === 1 ? '' : m);   // strip odd (text-node) step
+      console.log('[bionic] makeBionicSafeCfi: range CFI base:', base, 'start stripped to:', start);
+      return `epubcfi(${base}${start})`;
+    }
+  }
+  // Simple CFI
+  const s1 = cfi.replace(/:(\d+)\)$/, ')');
+  const s2 = s1.replace(/\/(\d+)\)$/, (m, n) => parseInt(n) % 2 === 1 ? ')' : m);
+  return s2;
+}
+
+// Find a spine item for a given href, using direct lookup first then filename fuzzy match.
+// Handles path-prefix mismatches (e.g. TOC has "OEBPS/Text/ch.xhtml" but spine stores "Text/ch.xhtml").
+function findSpineItemForHref(href) {
+  if (!href) return null;
+  const base = href.split('#')[0];
+  const direct = book.spine.get(base);
+  if (direct) return direct;
+  // Fuzzy: match by filename — handles OEBPS/ prefix mismatches and split chapters
+  const fname = base.split('/').pop().toLowerCase();
+  return (book.spine.spineItems || []).find(s =>
+    (s.href || '').split('/').pop().toLowerCase() === fname ||
+    (s.canonical || '').split('/').pop().toLowerCase() === fname
+  ) || null;
+}
+
+function applyBionicToDocument(doc) {
+  if (!prefs.bionicReading || !doc?.body) return;
+  if (doc.documentElement?.dataset?.brBionicApplied === '1') {
+    console.log('[bionic] applyBionicToDocument: already applied, skipping');
+    return;
+  }
+  const nodes = collectBionicTextNodes(doc);
+  console.log('[bionic] applyBionicToDocument: transforming', nodes.length, 'text nodes in', doc.location?.href || '(unknown)');
+  nodes.forEach(node => {
+    const frag = doc.createDocumentFragment();
+    appendBionicTextFragment(doc, frag, node.nodeValue || '');
+    node.parentNode?.replaceChild(frag, node);
+  });
+  if (doc.documentElement?.dataset) doc.documentElement.dataset.brBionicApplied = '1';
+  console.log('[bionic] applyBionicToDocument: done');
+}
+
+function markBionicPageCached(location) {
+  const cfi = location?.start?.cfi || currentCfi;
+  const idx = getLocationIndexFromCfi(cfi);
+  if (idx == null) return;
+  bionicPageCache.delete(idx);
+  bionicPageCache.set(idx, { ts: Date.now() });
+}
+
+function scheduleBionicPrefetchAround(location = null) {
+  if (!prefs.bionicReading || !book?.locations?.length?.()) return;
+  const currentLoc = location || rendition?.currentLocation?.();
+  const idx = getLocationIndexFromCfi(currentLoc?.start?.cfi || currentCfi);
+  if (idx == null) return;
+  const len = book.locations.length();
+  const wanted = [];
+  for (let i = idx - BIONIC_PREFETCH_RADIUS; i <= idx + BIONIC_PREFETCH_RADIUS; i++) {
+    if (i >= 0 && i < len) wanted.push(i);
+  }
+  const wantedSet = new Set(wanted);
+  pruneBionicCaches(wantedSet);
+  const seq = ++bionicPrefetchSeq;
+  markBionicPageCached(currentLoc);
+  wanted.forEach(pageIdx => {
+    if (pageIdx === idx || bionicPageCache.has(pageIdx) || bionicPrefetchInFlight.has(pageIdx)) return;
+    bionicPrefetchInFlight.add(pageIdx);
+    queueMicrotask(async () => {
+      try {
+        if (seq !== bionicPrefetchSeq || !prefs.bionicReading || !book?.locations?.length?.()) return;
+        const pct = (book.locations.length() <= 1) ? 0 : (pageIdx / (book.locations.length() - 1));
+        const cfi = book.locations.cfiFromPercentage(Math.min(0.9999, Math.max(0, pct)));
+        const spineIdx = spineIndexFromCfi(cfi);
+        const item = (spineIdx != null) ? book.spine.get(spineIdx) : null;
+        if (!item) return;
+        await item.load(book.load.bind(book));
+        if (item.document) warmBionicWordCacheFromDocument(item.document);
+        item.unload();
+        bionicPageCache.delete(pageIdx);
+        bionicPageCache.set(pageIdx, { ts: Date.now(), href: item.href });
+        pruneBionicCaches();
+      } catch {
+        /* ignore prefetch failures */
+      } finally {
+        bionicPrefetchInFlight.delete(pageIdx);
+      }
+    });
+  });
 }
 
 // ── Custom font loading ───────────────────────────────────────────────────────
@@ -483,7 +764,9 @@ img {
 ${prefs.eink ? buildEinkCss(theme) : ''}
 ${prefs.paraIndent ? `p { text-indent: ${(prefs.paraIndentSize / 10).toFixed(1)}em !important; }` : 'p { text-indent: 0 !important; }'}
 ${prefs.paraSpacing > 0 ? `p { margin-bottom: ${(prefs.paraSpacing / 10).toFixed(1)}em !important; }` : ''}
-${prefs.disableJustify ? 'body, p, li, td, th, blockquote { text-align: left !important; }' : ''}
+${prefs.disableJustify
+  ? 'body, p, li, td, th, blockquote { text-align: left !important; }'
+  : 'body, p, li, td, th, blockquote { text-align: justify !important; }'}
 ${prefs.chapHeadSpacing ? `h1,h2,h3,h4,h5,h6 { margin: 0.2em 0 !important; padding: 0 !important; }
 [class*="heading"],[class*="chapter-head"],[class*="chapterHead"],[class*="chapHead"],[class*="title-block"],[class*="titleBlock"] { height:auto !important; min-height:0 !important; padding-top:0 !important; padding-bottom:0 !important; margin-top:0 !important; margin-bottom:0 !important; }
 div:has(>h1),div:has(>h2),div:has(>h3),div:has(>h4) { height:auto !important; min-height:0 !important; padding-top:0 !important; padding-bottom:0 !important; margin-top:0 !important; margin-bottom:0 !important; }` : ''}
@@ -496,6 +779,12 @@ mark.br-hl {
   border: none !important; border-radius: 0 !important;
   font: inherit !important; line-height: inherit !important;
   display: inline !important;
+}
+.br-bionic-word {
+  font-weight: inherit !important;
+}
+.br-bionic-focus {
+  font-weight: 700 !important;
 }
 `.trim();
 }
@@ -527,6 +816,10 @@ function injectIntoContents(contents) {
     (doc.body || doc.documentElement).appendChild(el);
   }
   el.textContent = buildEpubCss();
+  if (prefs.bionicReading) {
+    applyBionicToDocument(doc);
+    markBionicPageCached(contents.location?.start ? { start: contents.location.start } : rendition?.currentLocation?.());
+  }
   // No injected touch relay script needed. Touch handling is done by attachIframeDictionary and attachIframeTouchNav.
 }
 
@@ -1117,18 +1410,30 @@ function buildToc(toc, depth = 0) {
       // Delay so panel animation finishes and viewer has correct dimensions
       setTimeout(async () => {
         const [hrefBase, anchor] = (item.href || '').split('#');
-        // Resolve via spine for reliable path matching
-        const spineItem = book.spine.get(hrefBase);
-        let displayHref;
-        if (spineItem) {
-          displayHref = anchor ? `${spineItem.href}#${anchor}` : spineItem.href;
-        } else {
-          displayHref = item.href;
-        }
+        // Resolve via spine — findSpineItemForHref handles path-prefix mismatches
+        const spineItem = findSpineItemForHref(hrefBase);
+        // Use numeric index to bypass href path-mismatch issues in rendition.display()
+        // For anchor links, fall back to href#anchor (index can't encode anchor)
+        const displayTarget = spineItem?.index != null
+          ? (anchor ? `${spineItem.href}#${anchor}` : spineItem.index)
+          : item.href;
+        console.log('[bionic] TOC click: displaying', displayTarget, '(spineIdx:', spineItem?.index, ') bionic:', prefs.bionicReading);
         try {
-          await rendition.display(displayHref);
-        } catch {
-          try { await rendition.display(item.href); } catch { /* silent */ }
+          await rendition.display(displayTarget);
+          const loc = rendition?.currentLocation?.();
+          console.log('[bionic] TOC click: display succeeded, cfi:', loc?.start?.cfi?.slice(0,80));
+          scheduleBionicPrefetchAround(loc);
+        } catch (e) {
+          console.warn('[bionic] TOC click: display FAILED:', e.message);
+          // Last-resort: if we used an index, retry with raw href; if we used href, done
+          if (typeof displayTarget === 'number' && item.href) {
+            try {
+              await rendition.display(item.href);
+              const loc = rendition?.currentLocation?.();
+              console.log('[bionic] TOC click: fallback href display succeeded, cfi:', loc?.start?.cfi?.slice(0,80));
+              scheduleBionicPrefetchAround(loc);
+            } catch (e2) { console.warn('[bionic] TOC click: both display attempts failed:', e2.message); }
+          }
         }
       }, 80);
     });
@@ -1696,6 +2001,8 @@ function syncSettingsUi() {
   if (hypEl) hypEl.checked = prefs.hyphenation;
   const hypLangEl = document.getElementById('hyphen-lang-select');
   if (hypLangEl) { hypLangEl.value = prefs.hyphenLang; hypLangEl.closest('.setting-row').style.display = prefs.hyphenation ? '' : 'none'; }
+  const bionicEl = document.getElementById('bionic-reading-toggle');
+  if (bionicEl) bionicEl.checked = prefs.bionicReading;
   const pgShadowEl = document.getElementById('page-gap-shadow-toggle');
   if (pgShadowEl) pgShadowEl.checked = prefs.pageGapShadow;
   syncStatusBarSettings();
@@ -2062,7 +2369,37 @@ function initSettingsUi() {
   });
   document.getElementById('disable-justify-toggle')?.addEventListener('change', (e) => {
     prefs.disableJustify = e.target.checked;
-    reapplyStyles(); persistPrefs();
+    console.log('[justify] toggle changed → disableJustify:', prefs.disableJustify);
+    reapplyStyles();
+    // Debug: log computed text-align on first <p> in iframe after styles applied
+    setTimeout(() => {
+      try {
+        const views = rendition?.manager?.views?.asArray?.() || rendition?.manager?.views || [];
+        const view = Array.isArray(views) ? views[0] : views?.get?.(0);
+        const doc = view?.contents?.document || rendition?.getContents?.()[0]?.document;
+        if (doc) {
+          const p = doc.querySelector('p');
+          const styleEl = doc.getElementById('br-custom-styles');
+          console.log('[justify] br-custom-styles in iframe:', styleEl ? styleEl.textContent.slice(0, 300) : '(not found)');
+          if (p) {
+            const computed = doc.defaultView?.getComputedStyle(p);
+            console.log('[justify] first <p> computed text-align:', computed?.textAlign);
+            console.log('[justify] first <p> inline style text-align:', p.style.textAlign);
+            // Log all stylesheets affecting the iframe
+            const sheets = [...(doc.styleSheets || [])];
+            sheets.forEach((sheet, i) => {
+              try {
+                const rules = [...sheet.cssRules].map(r => r.cssText).join('\n');
+                if (rules.includes('text-align') || rules.includes('justify')) {
+                  console.log(`[justify] stylesheet[${i}] href:`, sheet.href || '(inline)', '\n', rules.slice(0, 500));
+                }
+              } catch { /* cross-origin */ }
+            });
+          }
+        }
+      } catch (e) { console.warn('[justify] debug error:', e.message); }
+    }, 200);
+    persistPrefs();
   });
   document.getElementById('mouse-wheel-nav-toggle')?.addEventListener('change', (e) => {
     prefs.mouseWheelNav = e.target.checked;
@@ -2085,6 +2422,12 @@ function initSettingsUi() {
   document.getElementById('hyphen-lang-select')?.addEventListener('change', (e) => {
     prefs.hyphenLang = e.target.value;
     reapplyStyles(); persistPrefs();
+  });
+  document.getElementById('bionic-reading-toggle')?.addEventListener('change', (e) => {
+    prefs.bionicReading = e.target.checked;
+    persistPrefs();
+    saveBionicReloadState();
+    location.reload();
   });
   document.getElementById('page-gap-shadow-toggle')?.addEventListener('change', (e) => {
     prefs.pageGapShadow = e.target.checked;
@@ -2179,6 +2522,7 @@ function updateProgress(location) {
   if (isReady) lastLocation = location;
   trackReadingSpeed();
   updateStatusBar(location);
+  scheduleBionicPrefetchAround(location);
 
   if (
     pendingNavDirection === 'next' &&
@@ -2244,18 +2588,35 @@ function scheduleProgressSave() {
 async function seekToPercentage(targetPct) {
   if (!book.locations?.length()) return;
   const jumpCfi = book.locations.cfiFromPercentage(targetPct);
-  if (jumpCfi) { try { await rendition.display(jumpCfi); } catch { /* ignore */ } }
+  console.log('[bionic] seekToPercentage targetPct:', (targetPct*100).toFixed(2)+'%', 'raw jumpCfi:', jumpCfi);
+  let safeCfi = jumpCfi;
+  if (prefs.bionicReading && jumpCfi) {
+    safeCfi = makeBionicSafeCfi(jumpCfi);
+    console.log('[bionic] seekToPercentage safeCfi:', safeCfi);
+  }
+  console.log('[bionic] seekToPercentage final safeCfi:', safeCfi);
+  if (safeCfi) {
+    try {
+      await rendition.display(safeCfi);
+      console.log('[bionic] seekToPercentage display(safeCfi) succeeded');
+    } catch (e) {
+      console.warn('[bionic] seekToPercentage display(safeCfi) FAILED:', e.message, '— will try rendition.next() loop only');
+    }
+  }
   for (let step = 0; step < 20; step++) {
     const loc    = rendition.currentLocation();
     const locCfi = loc?.start?.cfi;
     if (!locCfi) break;
     const curPct = book.locations.percentageFromCfi(locCfi) || 0;
+    console.log('[bionic] seekToPercentage next-loop step', step, 'curPct:', (curPct*100).toFixed(2)+'%', 'target:', (targetPct*100).toFixed(2)+'%');
     if (curPct >= targetPct - 0.005) break;
     await rendition.next();
   }
   const finalLoc = rendition.currentLocation();
   if (finalLoc?.start?.cfi) currentCfi = finalLoc.start.cfi;
   if (finalLoc?.start?.percentage != null) currentPct = finalLoc.start.percentage;
+  console.log('[bionic] seekToPercentage done, final cfi:', currentCfi?.slice(0,80));
+  scheduleBionicPrefetchAround(finalLoc || rendition?.currentLocation?.());
 }
 
 // ── External + internal kosync ────────────────────────────────────────────────
@@ -2792,11 +3153,30 @@ function findCurrentTocChapIdx() {
 document.getElementById('btn-prev-chap')?.addEventListener('click', () => {
   const { tops, idx } = findCurrentTocChapIdx();
   const target = idx > 0 ? tops[idx - 1] : (idx === 0 ? tops[0] : null);
-  if (target) rendition?.display(target.href).then(() => saveProgress({ forceRemote: true })).catch(() => {});
+  if (!target) return;
+  const spineItem = findSpineItemForHref((target.href || '').split('#')[0]);
+  const displayTarget = spineItem?.index != null ? spineItem.index : target.href;
+  console.log('[bionic] btn-prev-chap: idx', idx, '→ target href:', target?.href, '→ displayTarget:', displayTarget, 'bionic:', prefs.bionicReading);
+  rendition?.display(displayTarget).then(() => {
+    const loc = rendition?.currentLocation?.();
+    console.log('[bionic] btn-prev-chap: display succeeded, cfi:', loc?.start?.cfi?.slice(0,80));
+    saveProgress({ forceRemote: true });
+    scheduleBionicPrefetchAround(loc);
+  }).catch(e => console.warn('[bionic] btn-prev-chap display FAILED:', e.message));
 });
 document.getElementById('btn-next-chap')?.addEventListener('click', () => {
   const { tops, idx } = findCurrentTocChapIdx();
-  if (idx >= 0 && idx < tops.length - 1) rendition?.display(tops[idx + 1].href).then(() => saveProgress({ forceRemote: true })).catch(() => {});
+  if (idx < 0 || idx >= tops.length - 1) return;
+  const target = tops[idx + 1];
+  const spineItem = findSpineItemForHref((target.href || '').split('#')[0]);
+  const displayTarget = spineItem?.index != null ? spineItem.index : target.href;
+  console.log('[bionic] btn-next-chap: idx', idx, '→ next href:', target?.href, '→ displayTarget:', displayTarget, 'bionic:', prefs.bionicReading);
+  rendition?.display(displayTarget).then(() => {
+    const loc = rendition?.currentLocation?.();
+    console.log('[bionic] btn-next-chap: display succeeded, cfi:', loc?.start?.cfi?.slice(0,80));
+    saveProgress({ forceRemote: true });
+    scheduleBionicPrefetchAround(loc);
+  }).catch(e => console.warn('[bionic] btn-next-chap display FAILED:', e.message));
 });
 document.querySelector('.nav-zone-prev')?.addEventListener('click', goPrev);
 document.querySelector('.nav-zone-next')?.addEventListener('click', goNext);
@@ -2874,10 +3254,19 @@ async function init() {
 
     let startCfi      = null;
     let localProgress = null;
+    const bionicReloadState = readBionicReloadState();
+    let reloadStartPct = null;
+    let skipOpenSync = false;
+    if (bionicReloadState && bionicReloadState.bookId === bookId && bionicReloadState.bionicReading === !!prefs.bionicReading) {
+      if (bionicReloadState.cfi) startCfi = bionicReloadState.cfi;
+      if (typeof bionicReloadState.pct === 'number') reloadStartPct = bionicReloadState.pct;
+      skipOpenSync = true;
+      clearBionicReloadState();
+    }
     try {
       localProgress = await apiFetch(`/progress/${currentBook.file_hash}`).catch(() => null);
       console.log('[reader] localProgress:', localProgress?.cfi_position?.slice(0, 60), 'pct:', localProgress?.percentage);
-      if (localProgress?.cfi_position) startCfi = localProgress.cfi_position;
+      if (!startCfi && localProgress?.cfi_position) startCfi = localProgress.cfi_position;
       // Pre-load locations from cache so seekToPercentage works immediately after startRendition
       if (localProgress?.percentage != null) {
         const locsKey    = `br_locs_${currentBook.file_hash}`;
@@ -2885,6 +3274,23 @@ async function init() {
         if (cachedLocs) { try { book.locations.load(cachedLocs); } catch { localStorage.removeItem(locsKey); } }
       }
     } catch { /* start from beginning */ }
+
+    // Bionic replaces text nodes with <span> trees. Any CFI that encodes a text-node
+    // step (e.g. epubcfi(/6/14!/4[id]/794/3:143)) is invalid on the transformed DOM —
+    // epub.js toRange() throws DOMException. For ALL bionic opens (cold start or reload)
+    // reduce the CFI to the chapter href so epub.js opens safely at the chapter start;
+    // seekToPercentage() below restores the exact position via the saved percentage.
+    if (prefs.bionicReading && startCfi) {
+      const m = String(startCfi).match(/^epubcfi\(\/6\/(\d+)!/);
+      if (m) {
+        const spineIdx = Math.floor(parseInt(m[1], 10) / 2) - 1;
+        const item = spineIdx >= 0 ? book.spine.get(spineIdx) : null;
+        if (item?.href) {
+          console.log('[bionic] reduced startCfi to chapter href:', item.href);
+          startCfi = item.href;
+        }
+      }
+    }
 
     await startRendition(startCfi);
     // Capture the page-start CFI epub.js actually rendered.
@@ -2898,14 +3304,18 @@ async function init() {
     loadingOverlay.classList.add('hidden');
 
     // epub.js display(cfi) with char-offset CFIs snaps to wrong page — seek forward by pct.
-    if (localProgress?.percentage != null && book.locations.length() > 0) {
+    if (reloadStartPct != null && book.locations.length() > 0) {
+      console.log('[pos] seeking to bionic-toggle pct:', (reloadStartPct * 100).toFixed(2) + '%');
+      await seekToPercentage(reloadStartPct);
+      console.log('[pos] after bionic seek currentCfi:', currentCfi.slice(0, 60));
+    } else if (localProgress?.percentage != null && book.locations.length() > 0) {
       console.log('[pos] seeking to saved pct:', (localProgress.percentage*100).toFixed(2)+'%');
       await seekToPercentage(localProgress.percentage);
       console.log('[pos] after seek currentCfi:', currentCfi.slice(0,60));
     }
 
     // Check remote/internal sync AFTER book is visible
-    const syncTarget = prefs.skipOpenProgressCheck ? null : await syncOnOpen(localProgress);
+    const syncTarget = (prefs.skipOpenProgressCheck || skipOpenSync) ? null : await syncOnOpen(localProgress);
     if (syncTarget?.percentage != null) {
       try {
         // Any DocFragment-based xpointer — navigate to the correct spine item directly.
@@ -2918,7 +3328,9 @@ async function init() {
           const spineItem = book.spine.get(spineIdx);
           if (spineItem?.href) {
             // Try best-effort CFI from paragraph index: /body/p[M] → epubcfi(/6/N*2!/4/M*2)
-            const paraMatch = syncTarget.progress.match(/\/p\[(\d+)\]/);
+            // Skip CFI display when bionic is on — bionic transforms the DOM so epub.js
+            // toRange() will crash on any element-path CFI that no longer matches.
+            const paraMatch = !prefs.bionicReading && syncTarget.progress.match(/\/p\[(\d+)\]/);
             let navigated = false;
             if (paraMatch) {
               const guessCfi = `epubcfi(/6/${(spineIdx + 1) * 2}!/4/${parseInt(paraMatch[1]) * 2})`;
@@ -2926,8 +3338,15 @@ async function init() {
               try { await rendition.display(guessCfi); navigated = true; } catch { navigated = false; }
             }
             if (!navigated) {
-              console.log('[kosync] navigating to spine item', spineIdx, spineItem.href);
+              console.log('[kosync] navigating to spine item', spineIdx, spineItem.href, '(chapter start — no position recovery yet)');
+              console.log('[kosync] NOTE: bionic is', prefs.bionicReading ? 'ON' : 'OFF', '— will seek by pct after display if bionic');
               await rendition.display(spineItem.href);
+              const locAfterNav = rendition.currentLocation();
+              console.log('[kosync] after display(href) cfi:', locAfterNav?.start?.cfi?.slice(0,80), 'pct:', ((locAfterNav?.start?.percentage||0)*100).toFixed(2)+'%');
+              if (prefs.bionicReading && book.locations.length() > 0) {
+                console.log('[kosync] bionic ON — doing seekToPercentage(', (syncTarget.percentage*100).toFixed(2)+'%', ') after chapter nav');
+                await seekToPercentage(syncTarget.percentage);
+              }
             }
           } else {
             console.warn('[kosync] spine item not found for index', spineIdx, '— falling back to pct');

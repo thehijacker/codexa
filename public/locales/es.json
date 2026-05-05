@@ -165,6 +165,8 @@
   "reader.sb_skip_close_hint": "Si se activa, la posición no se guarda al volver a la biblioteca o cerrar la pestaña",
   "reader.sb_hyphenation": "División de palabras",
   "reader.sb_hyphenation_hint": "Dividir palabras automáticamente con guiones al final de línea",
+  "reader.sb_bionic": "Lectura biónica",
+  "reader.sb_bionic_hint": "Resalta el inicio de las palabras para una lectura más rápida; cambiar esto recarga el libro en la misma posición",
   "reader.sb_hyphenation_lang": "Idioma de división",
   "reader.sb_hyphenation_lang_auto": "Automático (del libro)",
   "reader.sb_page_shadow": "Borde de página (lomo)",

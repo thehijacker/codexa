@@ -165,6 +165,8 @@
   "reader.sb_skip_close_hint": "Si activé, la position ne sera pas enregistrée automatiquement en quittant",
   "reader.sb_hyphenation": "Césure",
   "reader.sb_hyphenation_hint": "Coupure automatique des mots en fin de ligne",
+  "reader.sb_bionic": "Lecture bionique",
+  "reader.sb_bionic_hint": "Accentue le début des mots pour une lecture plus rapide ; ce changement recharge le livre à la même position",
   "reader.sb_hyphenation_lang": "Langue de césure",
   "reader.sb_hyphenation_lang_auto": "Automatique (depuis le livre)",
   "reader.sb_page_shadow": "Ombre de page (pliure)",

@@ -165,6 +165,8 @@
   "reader.sb_skip_close_hint": "Se ativado, a posição não será guardada ao sair",
   "reader.sb_hyphenation": "Hifenização",
   "reader.sb_hyphenation_hint": "Quebra automática de palavras ao fim da linha",
+  "reader.sb_bionic": "Leitura biónica",
+  "reader.sb_bionic_hint": "Realça o início das palavras para leitura mais rápida; esta alteração recarrega o livro na mesma posição",
   "reader.sb_hyphenation_lang": "Idioma de hifenização",
   "reader.sb_hyphenation_lang_auto": "Automático (do livro)",
   "reader.sb_page_shadow": "Sombra da página (vinco)",

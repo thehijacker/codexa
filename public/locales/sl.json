@@ -165,6 +165,8 @@
   "reader.sb_skip_close_hint": "Če je vključeno, ob vrnitvi v knjižnico ali zaprtju zavihka se položaj ne shrani samodejno",
   "reader.sb_hyphenation": "Deljenje besed",
   "reader.sb_hyphenation_hint": "Samodejno deljenje besed na koncu vrstice",
+  "reader.sb_bionic": "Bionično branje",
+  "reader.sb_bionic_hint": "Poudari začetek besed za hitrejše branje; sprememba znova naloži knjigo na istem položaju",
   "reader.sb_hyphenation_lang": "Jezik deljenja",
   "reader.sb_hyphenation_lang_auto": "Samodejno (iz knjige)",
   "reader.sb_page_shadow": "Rob strani (senca knjige)",

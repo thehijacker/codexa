@@ -165,6 +165,8 @@
   "reader.sb_skip_close_hint": "Falls aktiviert, wird die Position beim Verlassen nicht automatisch gespeichert",
   "reader.sb_hyphenation": "Silbentrennung",
   "reader.sb_hyphenation_hint": "Automatische Worttrennung an Zeilenumbrüchen",
+  "reader.sb_bionic": "Bionisches Lesen",
+  "reader.sb_bionic_hint": "Betont Wortanfänge für schnelleres Lesen; eine Änderung lädt das Buch an derselben Position neu",
   "reader.sb_hyphenation_lang": "Trennungssprache",
   "reader.sb_hyphenation_lang_auto": "Automatisch (vom Buch)",
   "reader.sb_page_shadow": "Seitenrand (Buchfalz)",

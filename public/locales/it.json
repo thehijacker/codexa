@@ -164,6 +164,8 @@
   "reader.sb_skip_close_hint": "Se attivo, la posizione non verrà salvata automaticamente all'uscita",
   "reader.sb_hyphenation": "Sillabazione",
   "reader.sb_hyphenation_hint": "Sillabazione automatica delle parole a fine riga",
+  "reader.sb_bionic": "Lettura bionica",
+  "reader.sb_bionic_hint": "Evidenzia l'inizio delle parole per leggere più velocemente; questa modifica ricarica il libro nella stessa posizione",
   "reader.sb_hyphenation_lang": "Lingua sillabazione",
   "reader.sb_hyphenation_lang_auto": "Automatica (dal libro)",
   "reader.sb_page_shadow": "Ombra pagina (rilegatura)",
