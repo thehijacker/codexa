@@ -19,6 +19,7 @@ A self-hosted EPUB web reader with multi-user support, OPDS browsing, KOReader s
 ## Features
 
 - **EPUB reader** — powered by epub.js, paginated layout with custom fonts, themes, and status bar
+- **Bionic reading*** - focuses on the first few letters of words to guide the eye through text, improving reading speed and comprehension
 - **Multi-user** — JWT-based authentication, per-user library and reading progress
 - **Shelves** — organise books into custom shelves
 - **Reading progress** — automatically saved; synced across devices via KOReader
