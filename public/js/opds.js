@@ -256,6 +256,7 @@ function renderFeed(feed) {
           btn.textContent = '✓ ' + t('opds.btn_add').replace(/^\+ /, '');
           btn.disabled    = true;
           btn.className   = 'btn btn-secondary btn-sm';
+          reloadLibrary().catch(e => console.error('[opds] reloadLibrary failed:', e));
         } catch (err) {
           const msg = err.message?.includes('v vaši') || err.message?.includes('already') ? t('opds.err_already_in_library') : err.message;
           toast.error(msg);

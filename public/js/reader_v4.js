@@ -432,11 +432,10 @@ function pruneBionicCaches(windowIndexes = null) {
 }
 
 function bionicFocusLength(len) {
-  if (len <= 2) return 1;
-  if (len <= 4) return 2;
-  if (len <= 6) return 3;
-  if (len <= 9) return 4;
-  return 5;
+  if (len === 0) return 0;
+  if (len === 1) return 1;
+  const focus = Math.ceil(len * 0.4) + (len < 5 ? 1 : 0);  
+  return Math.min(focus, len - 1);
 }
 
 function splitBionicWord(word) {

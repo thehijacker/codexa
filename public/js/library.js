@@ -173,13 +173,13 @@ function renderGrid(list) {
 
     card.innerHTML = `
       ${cover}
-      <label class="book-card-checkbox-wrap" title="Izberi">
+      <label class="book-card-checkbox-wrap" title="${t('library.btn_cover_select')}">
         <input type="checkbox" class="book-card-checkbox" ${selectedBooks.has(book.id) ? 'checked' : ''} />
       </label>
       <div class="book-card-actions">
         ${book.cover_path ? `<button class="btn-icon cover-preview-btn" title="${t('library.btn_cover_preview')}" data-id="${book.id}">👁</button>` : ''}
-        <button class="btn-icon info-btn"   title="Podrobnosti" data-id="${book.id}">ℹ</button>
-        <button class="btn-icon delete-btn" title="Izbriši"     data-id="${book.id}">🗑</button>
+        <button class="btn-icon info-btn"   title="${t('library.btn_cover_info')}" data-id="${book.id}">ℹ</button>
+        <button class="btn-icon delete-btn" title="${t('library.btn_cover_delete')}"     data-id="${book.id}">🗑</button>
       </div>
       <div class="book-info">
         <div class="book-title">${escHtml(book.title)}</div>
@@ -385,6 +385,19 @@ async function openInfoModal(book) {
        </div>`
     : `<div style="font-size:.82rem;color:var(--color-text-muted);margin-top:.75rem">${t('library.info_no_shelves')}</div>`;
 
+  // Use the list-level book object for percentage — fullBook (from GET /api/books/:id)
+  // does not join reading_progress, so it always returns 0.
+  const progressPct = Math.round((book.percentage || 0) * 100);
+  const progressHtml = progressPct > 0 ? `
+    <div class="info-modal-section-title" style="margin-top:1rem">${t('library.info_progress') || 'Reading Progress'}</div>
+    <div class="info-modal-progress-row">
+      <div class="info-modal-progress-bar-wrap">
+        <div class="info-modal-progress-bar-fill" style="width:${progressPct}%"></div>
+      </div>
+      <span class="info-modal-progress-pct">${progressPct}%</span>
+      <button class="btn btn-secondary btn-sm" id="info-modal-reset-progress" style="margin-left:auto;white-space:nowrap">${t('library.btn_reset_progress') || 'Reset to 0%'}</button>
+    </div>` : '';
+
   const descTitleHtml   = fullBook.description
     ? `<div class="info-modal-section-title" style="margin-top:1rem">${t('library.info_desc')}</div>`
     : '';
@@ -424,6 +437,7 @@ async function openInfoModal(book) {
           ${inlineMetaHtml}
         </div>
       </div>
+      ${progressHtml}
       ${descTitleHtml}
       ${descContentHtml ? `<div class="info-modal-body">${descContentHtml}</div>` : ''}
       ${shelvesHtml}
@@ -486,6 +500,39 @@ async function openInfoModal(book) {
   backdrop.querySelector('.series-filter-btn')?.addEventListener('click', () => {
     close();
     filterBySeries(fullBook.series_name);
+  });
+
+  backdrop.querySelector('#info-modal-reset-progress')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      await apiFetch(`/progress/${fullBook.file_hash}`, {
+        method: 'PUT',
+        body: JSON.stringify({ cfi_position: '', percentage: 0, device: 'web' }),
+      });
+      // Update the in-memory book object and re-render the library (removes it from "Currently Reading")
+      const cached = books.find(b => b.id === fullBook.id);
+      if (cached) { cached.percentage = 0; cached.cfi_position = ''; }
+      applyFilter();
+      // Refresh the card's progress bar inline (applyFilter re-renders, but keep for instant feedback)
+      const card = document.querySelector(`.book-card[data-id="${fullBook.id}"]`);
+      if (card) {
+        card.querySelector('.book-progress-fill').style.width = '0%';
+        card.querySelector('.book-progress-text').textContent = t('library.not_started');
+      }
+      // Hide the entire progress section in the modal (progress is now 0)
+      backdrop.querySelectorAll('.info-modal-section-title, .info-modal-progress-row').forEach(el => {
+        if (el.classList.contains('info-modal-progress-row') ||
+            (el.classList.contains('info-modal-section-title') && el.nextElementSibling?.classList.contains('info-modal-progress-row'))) {
+          el.remove();
+        }
+      });
+      toast.success(t('library.toast_progress_reset') || 'Reading progress reset to 0%');
+    } catch (err) {
+      toast.error(t('common.err_prefix') + err.message);
+    } finally {
+      btn.disabled = false;
+    }
   });
 
   backdrop.querySelector('#info-modal-delete').addEventListener('click', () => {
@@ -590,13 +637,13 @@ function applyFilter() {
   const allCountEl = document.getElementById('nav-all-count');
   const readingCountEl = document.getElementById('nav-reading-count');
   if (allCountEl)     allCountEl.textContent     = books.length;
-  if (readingCountEl) readingCountEl.textContent = books.filter(b => (b.percentage || 0) > 0).length;
+  if (readingCountEl) readingCountEl.textContent = books.filter(b => { const p = b.percentage || 0; return p > 0 && p < 1; }).length;
 
   const q = (document.getElementById('search-input')?.value || '').trim().toLowerCase();
   let list = books;
 
   if (currentShelfId === 'reading') {
-    list = list.filter(b => (b.percentage || 0) > 0);
+    list = list.filter(b => { const p = b.percentage || 0; return p > 0 && p < 1; });
   } else if (currentShelfBookIds !== null) {
     list = list.filter(b => currentShelfBookIds.has(b.id));
   }
@@ -717,7 +764,7 @@ async function loadBooks() {
     booksLoaded = true;
     if (!returningFromReader && !urlParams.has('shelf') && localStorage.getItem('br_auto_open_last') === 'true') {
       const lastRead = books
-        .filter(b => (b.percentage || 0) > 0 && b.progress_updated_at)
+        .filter(b => (b.percentage || 0) > 0 && (b.percentage || 0) < 1 && b.progress_updated_at)
         .sort((a, b) => b.progress_updated_at - a.progress_updated_at)[0];
       if (lastRead) { sessionStorage.setItem('br_last_shelf', String(currentShelfId)); window.location.href = `/readerv4.html?id=${lastRead.id}`; return; }
     }

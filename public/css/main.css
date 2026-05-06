@@ -1126,6 +1126,31 @@ input:focus, select:focus, textarea:focus {
   color: var(--color-text-muted);
   margin-bottom: .4rem;
 }
+.info-modal-progress-row {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  margin-bottom: .25rem;
+}
+.info-modal-progress-bar-wrap {
+  flex: 1;
+  height: 6px;
+  background: var(--color-progress-bg, rgba(128,128,128,.2));
+  border-radius: 3px;
+  overflow: hidden;
+}
+.info-modal-progress-bar-fill {
+  height: 100%;
+  background: var(--color-accent, #6c8ebf);
+  border-radius: 3px;
+  transition: width .3s ease;
+}
+.info-modal-progress-pct {
+  font-size: .85rem;
+  font-weight: 600;
+  min-width: 2.5rem;
+  text-align: right;
+}
 .info-modal-desc {
   font-size: .85rem;
   line-height: 1.6;
