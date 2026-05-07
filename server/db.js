@@ -111,6 +111,40 @@ function initDb() {
       UNIQUE(user_id, acq_href),
       FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS bookmarks (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL,
+      book_id    INTEGER NOT NULL,
+      cfi        TEXT    NOT NULL,
+      pct        REAL    DEFAULT 0,
+      label      TEXT    DEFAULT '',
+      created_at INTEGER DEFAULT (strftime('%s', 'now')),
+      FOREIGN KEY (user_id) REFERENCES users(id)  ON DELETE CASCADE,
+      FOREIGN KEY (book_id) REFERENCES books(id)  ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS reading_sessions (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL,
+      book_id    INTEGER NOT NULL,
+      start_ts   INTEGER NOT NULL,
+      end_ts     INTEGER,
+      pages_nav  INTEGER DEFAULT 0,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS chapter_visits (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id       INTEGER NOT NULL,
+      book_id       INTEGER NOT NULL,
+      chapter_href  TEXT    NOT NULL,
+      chapter_title TEXT    DEFAULT '',
+      visited_at    INTEGER DEFAULT (strftime('%s', 'now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+    );
   `);
 
   console.log(`[db] SQLite initialized at ${DB_PATH}`);

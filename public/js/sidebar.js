@@ -89,6 +89,11 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
     e.preventDefault(); showPanel('opds'); closeSidebar();
   });
 
+  // Statistics button
+  sidebar.querySelector('#sidebar-stats-btn')?.addEventListener('click', () => {
+    document.dispatchEvent(new CustomEvent('sidebar:stats'));
+  });
+
   // Active item will be set by panelchange event; set initial state from router
   const currentPanel = getCurrentPanel() || 'library';
   if (currentPanel === 'settings') {
@@ -203,7 +208,12 @@ function buildSidebarHtml() {
       </a>
     </nav>
     <div class="sidebar-footer">
-      <div class="sidebar-username" id="sidebar-username"></div>
+      <div class="sidebar-username-row">
+        <div class="sidebar-username" id="sidebar-username"></div>
+        <button class="sidebar-stats-btn" id="sidebar-stats-btn" title="${t('stats.open')}">
+          <img src="/images/statistics.svg" class="nav-icon nav-icon-statistics" alt="">
+        </button>
+      </div>
       <div class="sidebar-theme">
         <span class="sidebar-section-title">${t('sidebar.appearance')}</span>
         <div class="sidebar-theme-group" role="radiogroup" aria-label="${t('sidebar.appearance')}">
@@ -294,6 +304,9 @@ document.addEventListener('langchange', () => {
   });
   sidebar.querySelector('#nav-opds')?.addEventListener('click', e => {
     e.preventDefault(); showPanel('opds'); closeSidebar();
+  });
+  sidebar.querySelector('#sidebar-stats-btn')?.addEventListener('click', () => {
+    document.dispatchEvent(new CustomEvent('sidebar:stats'));
   });
 });
 

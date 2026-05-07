@@ -3,7 +3,67 @@
 <head>
   <meta charset="UTF-8" />
   <script>document.documentElement.style.visibility='hidden'</script>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+  <!-- iOS 26 PWA: env(safe-area-inset-*) returns 0px at load time in standalone mode.
+       100svh also reports wrong height (793px vs true 852px innerHeight on iPhone 16).
+       Probe real values via DOM + window.innerHeight and re-apply after PWA chrome settles. -->
+  <script>
+    (function () {
+      function probeEnv(css) {
+        var el = document.createElement('div');
+        el.style.cssText = 'position:fixed;pointer-events:none;opacity:0;top:0;left:0;width:1px;height:' + css + ';';
+        document.documentElement.appendChild(el);
+        var h = el.getBoundingClientRect().height;
+        el.remove();
+        return h;
+      }
+
+      function applyInsets(isFinal) {
+        var sat = probeEnv('env(safe-area-inset-top,0px)');
+        var sab = probeEnv('env(safe-area-inset-bottom,0px)');
+
+        // PWA detection: iOS uses navigator.standalone, Android uses display-mode media query
+        var isPwa = window.navigator.standalone === true ||
+                    window.matchMedia('(display-mode: standalone)').matches ||
+                    window.matchMedia('(display-mode: fullscreen)').matches;
+
+        // SAB fallback: iOS 26 PWA returns 0 until chrome settles.
+        // Only apply 34px hardcoded on final probe, only on iOS PWA with home indicator.
+        // Android reports SAB correctly, so don't override it there.
+        var isIos = /iP(hone|ad|od)/.test(navigator.userAgent);
+        if (sab === 0 && isPwa && isIos && isFinal) sab = 34;
+
+        // --layout-h: window.innerHeight gives true full-screen height in PWA.
+        // On Android PWA innerHeight is already correct from the start.
+        // On iOS PWA 100svh is too short (excludes status bar area).
+        // On regular browser: don't override — let CSS 100svh handle it.
+        var r = document.documentElement;
+        r.style.setProperty('--sat', sat + 'px');
+        // Always set --sab: corrects the CSS default (34px) for devices that don't need it
+        if (sab > 0 || isFinal) r.style.setProperty('--sab', sab + 'px');
+        if (isPwa) r.style.setProperty('--layout-h', window.innerHeight + 'px');
+        return { sat: sat, sab: sab, isPwa: isPwa };
+      }
+
+      // First probe — correct immediately on Android PWA and desktop
+      applyInsets(false);
+
+      // Second probe after iOS PWA chrome has settled (~500ms)
+      window.addEventListener('DOMContentLoaded', function () {
+        setTimeout(function () {
+          applyInsets(false);
+          // Final probe at 1s — last chance for iOS SAB to resolve
+          setTimeout(function () { applyInsets(true); }, 500);
+        }, 500);
+      });
+
+      // Re-probe on orientation change / resize
+      window.addEventListener('resize', function () {
+        setTimeout(function () { applyInsets(true); }, 200);
+      });
+    })();
+  </script>
+  <!-- <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no" /> -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <link rel="manifest" href="/manifest.json" />
   <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
@@ -33,7 +93,10 @@
 
     <!-- Header -->
     <header class="reader-header">
-      <button id="btn-toc"         class="btn-icon" data-i18n-title="reader.btn_toc"     title="Kazalo vsebine"><img src="/images/chapters.svg" class="nav-icon nav-icon-chapters" alt=""></button>
+      <button id="btn-toc"             class="btn-icon" data-i18n-title="reader.btn_toc"           title="Kazalo vsebine"><img src="/images/chapters.svg" class="nav-icon nav-icon-chapters" alt=""></button>
+      <button id="btn-bookmarks"       class="btn-icon bookmark-btn-wrap" data-i18n-title="reader.btn_bookmarks" title="Zaznamki"><img src="/images/bookmark.svg" class="nav-icon nav-icon-bookmark" alt=""><span id="bookmarks-badge" class="bookmark-badge hidden"></span></button>
+      <button id="btn-bookmark-back"   class="btn-icon" style="display:none" data-i18n-title="reader.btn_search_back"   title="Nazaj na prejšnji položaj">↩</button>
+      <button id="btn-bookmark-accept" class="btn-icon" style="display:none" data-i18n-title="reader.btn_search_accept" title="Sprejmi položaj">✓</button>
 
       <div class="reader-book-info">
         <div id="book-title"    class="reader-book-title"></div>
@@ -116,6 +179,16 @@
     <div id="toc-list"></div>
   </aside>
 
+  <!-- Bookmarks sidebar -->
+  <aside id="bookmarks-sidebar" aria-label="Zaznamki">
+    <div class="bookmarks-sidebar-header">
+      <h2 data-i18n="reader.bookmarks_title">Zaznamki</h2>
+      <button id="btn-add-bookmark" class="btn-icon-sm" data-i18n-title="reader.btn_add_bookmark" title="Dodaj zaznamek">+</button>
+      <button id="bookmarks-close" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri zaznamke">×</button>
+    </div>
+    <div id="bookmarks-list"></div>
+  </aside>
+
   <!-- Search sidebar -->
   <aside id="search-sidebar" aria-label="Iskanje v knjigi">
     <div class="search-sidebar-header">
@@ -184,6 +257,15 @@
           <span id="line-height-value" class="setting-value">1.6</span>
         </div>
         <input type="range" id="line-height-slider" min="1.0" max="3.0" step="0.1" value="1.6" />
+      </div>
+
+      <!-- Letter spacing -->
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div class="setting-label" data-i18n="reader.sb_letter_spacing">Razmik med črkami</div>
+          <span id="letter-spacing-value" class="setting-value">0px</span>
+        </div>
+        <input type="range" id="letter-spacing-slider" min="0" max="10" step="0.5" value="0" />
       </div>
 
       <!-- Margins -->
@@ -392,20 +474,6 @@
           </label>
         </div>
       </div>
-      <div class="setting-row">
-        <div class="setting-row-inline">
-          <div>
-            <div class="setting-label" data-i18n="reader.sb_bionic">Bionično branje</div>
-            <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_bionic_hint">
-              Poudari začetek besed za hitrejše branje; sprememba znova naloži knjigo na istem položaju.
-            </div>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" id="bionic-reading-toggle" />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-      </div>
       <div class="setting-row" id="hyphen-lang-row">
         <div class="setting-label" style="font-size:.8rem" data-i18n="reader.sb_hyphenation_lang">Jezik deljenja</div>
         <select id="hyphen-lang-select" style="margin-top:.25rem">
@@ -425,6 +493,20 @@
           <option value="ru">Русский (ru)</option>
           <option value="uk">Українська (uk)</option>
         </select>
+      </div>
+      <div class="setting-row">
+        <div class="setting-row-inline">
+          <div>
+            <div class="setting-label" data-i18n="reader.sb_bionic">Bionično branje</div>
+            <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_bionic_hint">
+              Poudari začetek besed za hitrejše branje; sprememba znova naloži knjigo na istem položaju.
+            </div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="bionic-reading-toggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
       </div>
 
       <!-- Page gap shadow -->

@@ -10,6 +10,9 @@ const params = new URLSearchParams(window.location.search);
 const bookId = params.get('id');
 if (!bookId) { window.location.href = '/'; throw new Error(); }
 const BIONIC_RELOAD_KEY = 'br_bionic_reload_state_v1';
+const SESSION_KEY = 'br_interrupted_session_v1';
+const RESUME_STATE_KEY = 'br_resume_state_v1';
+const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const BIONIC_RELOAD_MAX_AGE_MS = 5 * 60 * 1000;
 const BIONIC_PREFETCH_RADIUS = 3;
 const BIONIC_PREFETCH_CACHE_LIMIT = 7;
@@ -162,6 +165,7 @@ const DEFAULT_PREFS = {
   fontSize:       18,
   fontFamily:     'Georgia, serif',
   lineHeight:     1.6,
+  letterSpacing:  0,            // extra letter spacing in tenths of px (0–100 → 0–10px)
   margin:         40,
   spread:         'auto',       // two-page default
   overrideStyles: true,
@@ -214,6 +218,11 @@ let bionicWordCache = new Map();      // per-word split cache
 let bionicPageCache = new Map();      // location index cache window
 let bionicPrefetchSeq = 0;
 const bionicPrefetchInFlight = new Set();
+let bookmarksCache = [];              // loaded bookmarks for current book
+let preBookmarkCfi = null;            // position before a bookmark jump (for back/accept)
+// Reading statistics tracking
+let statsSessionId = null;            // active reading_sessions.id
+let sessionPageCount = 0;             // page navigation events in current session
 
 // ── Status bar state ──────────────────────────────────────────────────────────
 let currentHref      = '';    // current spine href (updated in updateProgress)
@@ -268,10 +277,15 @@ const jumpPctPanel    = document.getElementById('jump-pct-panel');
 const jumpPctSlider   = document.getElementById('jump-pct-slider');
 const jumpPctValue    = document.getElementById('jump-pct-value');
 const fullscreenBtn   = document.getElementById('btn-fullscreen');
+const bookmarksSidebar = document.getElementById('bookmarks-sidebar');
+const bookmarksListEl  = document.getElementById('bookmarks-list');
+const bookmarksBadge   = document.getElementById('bookmarks-badge');
+const bookmarkBackBtn  = document.getElementById('btn-bookmark-back');
+const bookmarkAcceptBtn = document.getElementById('btn-bookmark-accept');
 
 // ── Prefs ─────────────────────────────────────────────────────────────────────
 // Keys that are stored per-book (content appearance).  All others are global.
-const PER_BOOK_KEYS = ['fontSize','fontFamily','lineHeight','margin','theme','overrideStyles','paraIndent','paraIndentSize','paraSpacing','dictionaries','bionicReading'];
+const PER_BOOK_KEYS = ['fontSize','fontFamily','lineHeight','letterSpacing','margin','theme','overrideStyles','paraIndent','paraIndentSize','paraSpacing','dictionaries','bionicReading','skipOpenProgressCheck','skipSaveOnClose'];
 
 function loadPrefs() {
   try {
@@ -366,6 +380,27 @@ function readBionicReloadState() {
   } catch {
     return null;
   }
+}
+
+function writeInterruptedSession() {
+  if (!currentBook || !isReady || !currentCfi) return;
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      bookId, title: currentBook.title, author: currentBook.author || '',
+      pct: currentPct, cfi: currentCfi, ts: Date.now(),
+    }));
+  } catch { /* quota */ }
+}
+
+function clearInterruptedSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+}
+
+/** Called by library.js before navigating to the reader — tells reader to override restore position. */
+function writeResumeState(bId, cfi, pct) {
+  try {
+    sessionStorage.setItem(RESUME_STATE_KEY, JSON.stringify({ bookId: bId, cfi, pct, ts: Date.now() }));
+  } catch { /* quota */ }
 }
 
 function clearBionicReloadState() {
@@ -763,6 +798,7 @@ img {
 ${prefs.eink ? buildEinkCss(theme) : ''}
 ${prefs.paraIndent ? `p { text-indent: ${(prefs.paraIndentSize / 10).toFixed(1)}em !important; }` : 'p { text-indent: 0 !important; }'}
 ${prefs.paraSpacing > 0 ? `p { margin-bottom: ${(prefs.paraSpacing / 10).toFixed(1)}em !important; }` : ''}
+${prefs.letterSpacing > 0 ? `body, p, li, td, th, span { letter-spacing: ${(prefs.letterSpacing / 10).toFixed(1)}px !important; }` : ''}
 ${prefs.disableJustify
   ? 'body, p, li, td, th, blockquote { text-align: left !important; }'
   : 'body, p, li, td, th, blockquote { text-align: justify !important; }'}
@@ -849,6 +885,7 @@ async function releaseWakeLock() {
 // Re-acquire after tab becomes visible again (wake lock is auto-released on hide)
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') acquireWakeLock();
+  if (document.visibilityState === 'hidden')  writeInterruptedSession();
 });
 
 // ── Host page background ──────────────────────────────────────────────────────
@@ -1508,14 +1545,22 @@ function openToc() {
 function openSettings() {
   settingsPanel.classList.add('open');
   tocSidebar.classList.remove('open');
+  bookmarksSidebar.classList.remove('open');
   panelBackdrop.classList.add('visible');
   if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek'); // hide bar when settings opens
   renderDictSettings(); // lazy-load dictionary list
 }
+function openBookmarks() {
+  bookmarksSidebar.classList.add('open');
+  tocSidebar.classList.remove('open');
+  settingsPanel.classList.remove('open');
+  panelBackdrop.classList.add('visible');
+  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+}
 function closeJumpPanel() {
   jumpPctPanel.style.display = 'none';
   // Re-evaluate auto-hide: hide header unless the mouse is still over it
-  if (prefs.autoHideHeader && !tocSidebar.classList.contains('open') && !isMouseOverHeader) {
+  if (prefs.autoHideHeader && !tocSidebar.classList.contains('open') && !bookmarksSidebar.classList.contains('open') && !isMouseOverHeader) {
     readerLayout.classList.remove('header-peek');
   }
 }
@@ -1525,6 +1570,7 @@ function closePanels() {
   tocSidebar.classList.remove('open');
   settingsPanel.classList.remove('open');
   searchSidebar.classList.remove('open');
+  bookmarksSidebar.classList.remove('open');
   panelBackdrop.classList.remove('visible');
   closeJumpPanel();
   if (searchHadFocus && typeof activeEl.blur === 'function') activeEl.blur();
@@ -1534,13 +1580,16 @@ function closePanels() {
 function hasOpenPanel() {
   return tocSidebar.classList.contains('open')
     || searchSidebar.classList.contains('open')
-    || settingsPanel.classList.contains('open');
+    || settingsPanel.classList.contains('open')
+    || bookmarksSidebar.classList.contains('open');
 }
 
 async function returnToLibrary() {
+  clearInterruptedSession();
   if (!prefs.skipSaveOnClose) {
     await saveProgress(); // await so updated_at is committed before library reloads
   }
+  await endStatsSession();
   isReady = false;          // block beforeunload from double-saving
   window.location.href = '/';
 }
@@ -1990,6 +2039,10 @@ function syncSettingsUi() {
   const psVl = document.getElementById('para-spacing-value');
   if (psEl) psEl.value = prefs.paraSpacing;
   if (psVl) psVl.textContent = (prefs.paraSpacing / 10).toFixed(1) + 'em';
+  const lsEl = document.getElementById('letter-spacing-slider');
+  const lsVl = document.getElementById('letter-spacing-value');
+  if (lsEl) lsEl.value = prefs.letterSpacing;
+  if (lsVl) lsVl.textContent = (prefs.letterSpacing / 10).toFixed(1) + 'px';
   const chEl = document.getElementById('chap-head-spacing-toggle');
   if (chEl) chEl.checked = prefs.chapHeadSpacing;
   const djEl = document.getElementById('disable-justify-toggle');
@@ -2362,6 +2415,12 @@ function initSettingsUi() {
     if (vl) vl.textContent = (prefs.paraSpacing / 10).toFixed(1) + 'em';
     reapplyStyles(); persistPrefs();
   });
+  document.getElementById('letter-spacing-slider')?.addEventListener('input', (e) => {
+    prefs.letterSpacing = parseFloat(e.target.value);
+    const vl = document.getElementById('letter-spacing-value');
+    if (vl) vl.textContent = (prefs.letterSpacing / 10).toFixed(1) + 'px';
+    reapplyStyles(); persistPrefs();
+  });
   document.getElementById('chap-head-spacing-toggle')?.addEventListener('change', (e) => {
     prefs.chapHeadSpacing = e.target.checked;
     reapplyStyles(); persistPrefs();
@@ -2502,17 +2561,23 @@ function updateProgress(location) {
   chapterTitleEl.textContent = chapterLabelFromHref(href);
   currentHref = href;
   updateActiveTocItem(href);
-  // Save on chapter boundary (when spine item changes)
+  // Save on chapter boundary (when spine item changes).
+  // Push remote for any chapter change regardless of direction (forward or TOC jump).
+  // Suppress remote push while a bookmark jump is pending (user hasn't accepted yet).
   if (isReady && oldChapterHref !== null && href && href !== oldChapterHref) {
-    const isForward = pendingNavDirection === 'next';
     const alreadySent = href === lastSentChapterHref;
-    const shouldForceRemote = isForward && !alreadySent;
+    const bookmarkPending = !!preBookmarkCfi;
     saveProgress({
-      forceRemote: shouldForceRemote,
-      allowRemote: isForward && !alreadySent,
+      forceRemote: !alreadySent && !bookmarkPending,
+      allowRemote: !alreadySent && !bookmarkPending,
     });
-    if (shouldForceRemote) {
+    writeInterruptedSession();
+    if (!alreadySent && !bookmarkPending) {
       lastSentChapterHref = href;
+    }
+    // Log chapter visit for statistics (fire-and-forget)
+    if (currentBook) {
+      logChapterVisit(currentBook.id, href, chapterLabelFromHref(href));
     }
   }
   if (href) lastChapterHref = href;
@@ -2678,7 +2743,7 @@ async function saveProgress({ forceRemote = false, allowRemote = true } = {}) {
   console.log('[pos] SAVE cfi:', cfi.slice(0,60), 'pct:', (pct*100).toFixed(2)+'%');
   const docKey = externalDocKey();
   const posChanged = cfi !== openCfi;
-  const shouldPushRemote = forceRemote || (allowRemote && posChanged);
+  const shouldPushRemote = !prefs.skipSaveOnClose && (forceRemote || (allowRemote && posChanged));
   console.log('[kosync] saveProgress docKey:', docKey, 'cfi:', cfi.slice(0, 40), 'pct:', Math.round(pct * 100) + '%', shouldPushRemote ? '' : '(no remote push)');
   const saves = [
     apiFetch(`/progress/${currentBook.file_hash}`, {
@@ -2710,7 +2775,7 @@ function saveProgressBackground() {
   const xp     = koReaderXPointer();
   const posChanged = cfi !== openCfi;
   fetch(`/api/progress/${currentBook.file_hash}`, opts({ cfi_position: cfi, percentage: pct, device: 'web' })).catch(() => {});
-  if (posChanged) {
+  if (!prefs.skipSaveOnClose && posChanged) {
     fetch(`/api/kosync/remote/${encodeURIComponent(docKey)}`,   opts({ document: docKey, progress: xp, percentage: pct, device: 'web', device_id: 'codexa-web' })).catch(() => {});
     fetch(`/api/kosync/internal/${encodeURIComponent(docKey)}`, opts({ progress: xp, percentage: pct, device: 'web', device_id: 'codexa-web' })).catch(() => {});
   }
@@ -2886,8 +2951,8 @@ async function startRendition(displayCfi = null) {
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
-function goNext() { pendingNavDirection = 'next'; rendition?.next(); }
-function goPrev() { pendingNavDirection = 'prev'; rendition?.prev(); }
+function goNext() { pendingNavDirection = 'next'; sessionPageCount++; rendition?.next(); }
+function goPrev() { pendingNavDirection = 'prev'; sessionPageCount++; rendition?.prev(); }
 
 // ── Touch / swipe navigation ──────────────────────────────────────────────────
 const SWIPE_THRESHOLD = 24;   // min px horizontal distance
@@ -3073,10 +3138,207 @@ window.addEventListener('resize', debounce(async () => {
   }
 }, 300));
 
+// ── Reading statistics ────────────────────────────────────────────────────────
+async function startStatsSession(bookId) {
+  try {
+    const res = await apiFetch('/stats/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ book_id: bookId, start_ts: Math.floor(Date.now() / 1000) }),
+    });
+    statsSessionId = res?.id || null;
+    sessionPageCount = 0;
+    console.log('[stats] session started id:', statsSessionId);
+  } catch (e) {
+    console.warn('[stats] failed to start session:', e.message);
+  }
+}
+
+function endStatsSessionBackground() {
+  if (!statsSessionId) return;
+  const id  = statsSessionId;
+  const pgs = sessionPageCount;
+  statsSessionId   = null;
+  sessionPageCount = 0;
+  const token = getToken();
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  fetch(`/api/stats/session/${id}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ end_ts: Math.floor(Date.now() / 1000), pages_nav: pgs }),
+    keepalive: true,
+  }).catch(() => {});
+}
+
+async function endStatsSession() {
+  if (!statsSessionId) return;
+  const id  = statsSessionId;
+  const pgs = sessionPageCount;
+  statsSessionId   = null;
+  sessionPageCount = 0;
+  try {
+    await apiFetch(`/stats/session/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ end_ts: Math.floor(Date.now() / 1000), pages_nav: pgs }),
+    });
+  } catch (e) {
+    console.warn('[stats] failed to end session:', e.message);
+  }
+}
+
+function logChapterVisit(bookId, href, title) {
+  if (!bookId || !href) return;
+  apiFetch('/stats/chapter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ book_id: bookId, chapter_href: href, chapter_title: title || '' }),
+  }).catch(() => {});
+}
+
+// ── Bookmarks ─────────────────────────────────────────────────────────────────
+function updateBookmarkBadge() {
+  const n = bookmarksCache.length;
+  bookmarksBadge.textContent = n > 9 ? '9+' : String(n);
+  bookmarksBadge.classList.toggle('hidden', n === 0);
+}
+
+function renderBookmarkList() {
+  if (!bookmarksCache.length) {
+    bookmarksListEl.innerHTML = `<div class="bookmarks-empty">${t('reader.bookmarks_empty')}</div>`;
+    return;
+  }
+  bookmarksListEl.innerHTML = '';
+  bookmarksCache.forEach(bm => {
+    const item = document.createElement('div');
+    item.className = 'bookmark-item';
+    item.dataset.id = String(bm.id);
+
+    const pctText = `${Math.round(bm.pct * 100)}%`;
+    const dateText = bm.created_at
+      ? new Date(bm.created_at * 1000).toLocaleDateString()
+      : '';
+
+    item.innerHTML = `
+      <div class="bookmark-info">
+        <span class="bookmark-label">${escapeHtml(bm.label || pctText)}</span>
+        <span class="bookmark-meta">${escapeHtml(pctText)}${dateText ? ' · ' + escapeHtml(dateText) : ''}</span>
+      </div>
+      <div class="bookmark-actions">
+        <button class="bookmark-action-btn edit" title="${t('reader.bookmark_edit')}">✎</button>
+        <button class="bookmark-action-btn delete" title="${t('reader.bookmark_delete')}">×</button>
+      </div>`;
+
+    // Click on info → jump (save position so user can go back / accept)
+    item.querySelector('.bookmark-info').addEventListener('click', () => {
+      if (!bm.cfi) return;
+      // Save current position for back button, same pattern as search navigation
+      if (!preBookmarkCfi && currentCfi) {
+        preBookmarkCfi = currentCfi;
+        bookmarkBackBtn.style.display   = '';
+        bookmarkAcceptBtn.style.display = '';
+      }
+      closePanels();
+      rendition?.display(bm.cfi).catch(() => {});
+    });
+
+    // Edit label
+    item.querySelector('.bookmark-action-btn.edit').addEventListener('click', () => {
+      const labelEl = item.querySelector('.bookmark-label');
+      const current = labelEl.textContent;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'bookmark-label-input';
+      input.value = current;
+      labelEl.replaceWith(input);
+      input.focus();
+      const save = async () => {
+        const newLabel = input.value.trim() || pctText;
+        try {
+          await apiFetch(`/bookmarks/${currentBook.id}/${bm.id}`, {
+            method: 'PUT',
+            body: JSON.stringify({ label: newLabel }),
+          });
+          bm.label = newLabel;
+        } catch { /* revert silently */ }
+        renderBookmarkList();
+      };
+      input.addEventListener('blur', save);
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { input.value = current; input.blur(); }
+      });
+    });
+
+    // Delete
+    item.querySelector('.bookmark-action-btn.delete').addEventListener('click', async () => {
+      try {
+        await apiFetch(`/bookmarks/${currentBook.id}/${bm.id}`, { method: 'DELETE' });
+        bookmarksCache = bookmarksCache.filter(b => b.id !== bm.id);
+        renderBookmarkList();
+        updateBookmarkBadge();
+        toast.success(t('reader.bookmark_deleted'));
+      } catch (err) {
+        toast.error(err.message || t('reader.bookmark_err_delete'));
+      }
+    });
+
+    bookmarksListEl.appendChild(item);
+  });
+}
+
+async function loadBookmarks(bookId) {
+  try {
+    bookmarksCache = await apiFetch(`/bookmarks/${bookId}`);
+    renderBookmarkList();
+    updateBookmarkBadge();
+  } catch {
+    bookmarksCache = [];
+  }
+}
+
+async function addBookmark() {
+  if (!currentBook || !rendition) return;
+  const loc   = rendition.currentLocation();
+  const cfi   = loc?.start?.cfi || currentCfi;
+  const pct   = currentPct;
+  const chapter = chapterTitleEl.textContent || '';
+  const label = `${chapter ? chapter + ' · ' : ''}${Math.round(pct * 100)}%`;
+
+  try {
+    const bm = await apiFetch(`/bookmarks/${currentBook.id}`, {
+      method: 'POST',
+      body: JSON.stringify({ cfi, pct, label }),
+    });
+    bookmarksCache.push(bm);
+    bookmarksCache.sort((a, b) => a.pct - b.pct);
+    renderBookmarkList();
+    updateBookmarkBadge();
+    toast.success(t('reader.bookmark_added'));
+  } catch (err) {
+    toast.error(err.message || t('reader.bookmark_err_add'));
+  }
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 // ── Button wiring ─────────────────────────────────────────────────────────────
 document.getElementById('btn-back').addEventListener('click', () => { void returnToLibrary(); });
 document.getElementById('btn-toc').addEventListener('click', () =>
   tocSidebar.classList.contains('open') ? closePanels() : openToc());
+document.getElementById('btn-bookmarks').addEventListener('click', () =>
+  bookmarksSidebar.classList.contains('open') ? closePanels() : openBookmarks());
+document.getElementById('bookmarks-close').addEventListener('click', closePanels);
+document.getElementById('btn-add-bookmark').addEventListener('click', () => { void addBookmark(); });
 document.getElementById('btn-search').addEventListener('click', () =>
   searchSidebar.classList.contains('open') ? closePanels() : openSearch());
 document.getElementById('btn-search-back').addEventListener('click', async () => {
@@ -3096,6 +3358,24 @@ document.getElementById('btn-search-accept').addEventListener('click', () => {
   searchAcceptBtn.style.display = 'none';
   if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
 });
+// Bookmark navigation back/accept — same pattern as search
+document.getElementById('btn-bookmark-back').addEventListener('click', async () => {
+  if (!preBookmarkCfi) return;
+  const cfi = preBookmarkCfi;
+  preBookmarkCfi = null;
+  bookmarkBackBtn.style.display   = 'none';
+  bookmarkAcceptBtn.style.display = 'none';
+  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  await rendition.display(cfi);
+});
+document.getElementById('btn-bookmark-accept').addEventListener('click', () => {
+  preBookmarkCfi = null;
+  bookmarkBackBtn.style.display   = 'none';
+  bookmarkAcceptBtn.style.display = 'none';
+  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  // Now that the user accepted the position, push progress normally
+  void saveProgress({ forceRemote: true });
+});
 document.getElementById('btn-jump-pct').addEventListener('click', () => {
   if (jumpPctPanel.style.display !== 'none') {
     closeJumpPanel();
@@ -3113,7 +3393,12 @@ jumpPctSlider.addEventListener('change', async () => {
 });
 document.addEventListener('mousedown', e => {
   if (jumpPctPanel.style.display === 'none') return;
-  if (!jumpPctPanel.contains(e.target) && e.target.id !== 'btn-jump-pct') {
+  // Ignore clicks on btn-jump-pct (or any descendant — pointer-events:none on img
+  // means the button is always the target, but use closest() as extra safety).
+  if (e.target.closest?.('#btn-jump-pct')) return;
+  // Ignore epub.js internal focus/mousedown events targeting the viewer.
+  if (e.target.closest?.('#epub-viewer') || e.target === epubViewer) return;
+  if (!jumpPctPanel.contains(e.target)) {
     closeJumpPanel();
   }
 });
@@ -3149,6 +3434,10 @@ function findCurrentTocChapIdx() {
   });
   return { tops, idx: found };
 }
+// Close the jump panel automatically after chapter nav button navigation.
+// This matches TOC behaviour and avoids the panel being stuck open with
+// the header invisible (autohide removes header-peek on close but epub.js
+// sometimes re-focuses the iframe making btn-jump-pct unreachable).
 document.getElementById('btn-prev-chap')?.addEventListener('click', () => {
   const { tops, idx } = findCurrentTocChapIdx();
   const target = idx > 0 ? tops[idx - 1] : (idx === 0 ? tops[0] : null);
@@ -3159,7 +3448,6 @@ document.getElementById('btn-prev-chap')?.addEventListener('click', () => {
   rendition?.display(displayTarget).then(() => {
     const loc = rendition?.currentLocation?.();
     console.log('[bionic] btn-prev-chap: display succeeded, cfi:', loc?.start?.cfi?.slice(0,80));
-    saveProgress({ forceRemote: true });
     scheduleBionicPrefetchAround(loc);
   }).catch(e => console.warn('[bionic] btn-prev-chap display FAILED:', e.message));
 });
@@ -3173,7 +3461,6 @@ document.getElementById('btn-next-chap')?.addEventListener('click', () => {
   rendition?.display(displayTarget).then(() => {
     const loc = rendition?.currentLocation?.();
     console.log('[bionic] btn-next-chap: display succeeded, cfi:', loc?.start?.cfi?.slice(0,80));
-    saveProgress({ forceRemote: true });
     scheduleBionicPrefetchAround(loc);
   }).catch(e => console.warn('[bionic] btn-next-chap display FAILED:', e.message));
 });
@@ -3185,6 +3472,7 @@ document.getElementById('btn-prev').addEventListener('keydown', e => { if (e.key
 document.getElementById('btn-next').addEventListener('keydown', e => { if (e.key === 'Enter') goNext(); });
 window.addEventListener('beforeunload', () => {
   if (!prefs.skipSaveOnClose) saveProgressBackground();
+  endStatsSessionBackground();
 });
 document.addEventListener('fullscreenchange', syncFullscreenButton);
 
@@ -3259,9 +3547,24 @@ async function init() {
     if (bionicReloadState && bionicReloadState.bookId === bookId && bionicReloadState.bionicReading === !!prefs.bionicReading) {
       if (bionicReloadState.cfi) startCfi = bionicReloadState.cfi;
       if (typeof bionicReloadState.pct === 'number') reloadStartPct = bionicReloadState.pct;
-      skipOpenSync = true;
+      // Do NOT skip KOSync for bionic reloads — only skip for resume-reading opens
       clearBionicReloadState();
     }
+    // Session restore: library.js writes a resume hint to sessionStorage before navigating here
+    let resumeStartPct = null;
+    try {
+      const raw = sessionStorage.getItem(RESUME_STATE_KEY);
+      sessionStorage.removeItem(RESUME_STATE_KEY);
+      if (raw) {
+        const rs = JSON.parse(raw);
+        if (rs && rs.bookId === bookId && rs.cfi) {
+          if (!startCfi) startCfi = rs.cfi;
+          if (typeof rs.pct === 'number') resumeStartPct = rs.pct;
+          skipOpenSync = true; // user explicitly chose this exact position — skip remote sync
+          console.log('[session-restore] using saved cfi:', rs.cfi.slice(0, 60), 'pct:', ((rs.pct||0)*100).toFixed(2)+'%');
+        }
+      }
+    } catch { /* ignore */ }
     try {
       localProgress = await apiFetch(`/progress/${currentBook.file_hash}`).catch(() => null);
       console.log('[reader] localProgress:', localProgress?.cfi_position?.slice(0, 60), 'pct:', localProgress?.percentage);
@@ -3307,6 +3610,10 @@ async function init() {
       console.log('[pos] seeking to bionic-toggle pct:', (reloadStartPct * 100).toFixed(2) + '%');
       await seekToPercentage(reloadStartPct);
       console.log('[pos] after bionic seek currentCfi:', currentCfi.slice(0, 60));
+    } else if (resumeStartPct != null && book.locations.length() > 0) {
+      console.log('[pos] seeking to session-restore pct:', (resumeStartPct * 100).toFixed(2) + '%');
+      await seekToPercentage(resumeStartPct);
+      console.log('[pos] after session-restore seek currentCfi:', currentCfi.slice(0, 60));
     } else if (localProgress?.percentage != null && book.locations.length() > 0) {
       console.log('[pos] seeking to saved pct:', (localProgress.percentage*100).toFixed(2)+'%');
       await seekToPercentage(localProgress.percentage);
@@ -3406,6 +3713,10 @@ async function init() {
     console.log('[pos] isReady=true, currentCfi:', currentCfi.slice(0,60));
     isReady = true;
     openCfi = currentCfi; // snapshot position-on-open for change detection
+    // Load bookmarks for this book (non-blocking)
+    void loadBookmarks(currentBook.id);
+    // Start a stats session (non-blocking)
+    void startStatsSession(currentBook.id);
     // Final chapter-name refresh — by now TOC and relocated have both fired
     if (lastChapterHref) {
       chapterTitleEl.textContent = chapterLabelFromHref(lastChapterHref);

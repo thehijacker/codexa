@@ -662,6 +662,149 @@ function applyFilter() {
 }
 
 
+// ── Statistics dialog ─────────────────────────────────────────────────────────
+async function openStatsDialog() {
+  document.getElementById('stats-modal')?.remove();
+
+  let stats = null;
+  let history = [];
+  try {
+    [stats, history] = await Promise.all([
+      apiFetch('/stats'),
+      apiFetch('/stats/history'),
+    ]);
+  } catch (err) {
+    toast.error(t('common.err_prefix') + err.message);
+    return;
+  }
+
+  function fmtDuration(secs) {
+    if (!secs || secs < 60) return `${secs || 0}s`;
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+  }
+
+  const summaryCards = [
+    { label: t('stats.total_time'),    value: fmtDuration(stats.total_secs) },
+    { label: t('stats.sessions'),      value: stats.total_sessions },
+    { label: t('stats.avg_session'),   value: fmtDuration(stats.avg_session_secs) },
+    { label: t('stats.pages_nav'),     value: stats.total_pages },
+    { label: t('stats.books_started'), value: stats.books_started },
+    { label: t('stats.books_done'),    value: stats.books_completed },
+  ];
+
+  const summaryHtml = `
+    <div class="stats-summary-grid">
+      ${summaryCards.map(c => `
+        <div class="stats-card">
+          <div class="stats-card-value">${c.value}</div>
+          <div class="stats-card-label">${c.label}</div>
+        </div>`).join('')}
+    </div>`;
+
+  const topBooksHtml = stats.top_books?.length ? `
+    <div class="stats-section-title">${t('stats.top_books')}</div>
+    <div class="stats-top-books">
+      ${stats.top_books.map(b => `
+        <div class="stats-book-row">
+          ${b.cover_path ? `<img src="/covers/${escHtml(b.cover_path)}" class="stats-book-cover" alt="">` : '<div class="stats-book-cover-ph">📖</div>'}
+          <div class="stats-book-info">
+            <div class="stats-book-title">${escHtml(b.title)}</div>
+            <div class="stats-book-meta">${escHtml(b.author || '')} · ${fmtDuration(b.total_secs)}</div>
+          </div>
+        </div>`).join('')}
+    </div>` : '';
+
+  const historyHtml = history.length ? `
+    <div class="stats-section-title" style="margin-top:1.25rem">${t('stats.chapter_history')}</div>
+    <div class="stats-history-list">
+      ${history.map(bk => `
+        <details class="stats-history-book">
+          <summary class="stats-history-summary">
+            <span class="stats-history-book-title">${escHtml(bk.book_title)}</span>
+            <span class="stats-history-count">${bk.visits.length}</span>
+            <button class="btn btn-sm btn-secondary stats-clear-book-btn" data-book-id="${bk.book_id}" title="${t('stats.clear_book_history')}" onclick="event.preventDefault();event.stopPropagation()">×</button>
+          </summary>
+          <ul class="stats-history-items">
+            ${bk.visits.map(v => `
+              <li class="stats-history-item">
+                <span class="stats-history-chapter">${escHtml(v.chapter_title || v.chapter_href)}</span>
+                <span class="stats-history-date">${new Date(v.visited_at * 1000).toLocaleDateString()}</span>
+              </li>`).join('')}
+          </ul>
+        </details>`).join('')}
+    </div>` : '';
+
+  const backdrop = document.createElement('div');
+  backdrop.id        = 'stats-modal';
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal stats-modal" role="dialog" aria-modal="true">
+      <button class="modal-close" id="stats-modal-close" aria-label="${t('common.close')}">&times;</button>
+      <h3 class="stats-modal-title">
+        <img src="/images/statistics.svg" class="nav-icon nav-icon-statistics" alt="" style="width:1.1rem;height:1.1rem;margin-right:.4rem;vertical-align:middle">
+        ${t('stats.title')}
+      </h3>
+      ${summaryHtml}
+      ${topBooksHtml}
+      ${historyHtml}
+      <div class="stats-footer">
+        <button class="btn btn-secondary" id="stats-clear-history-btn">${t('stats.clear_history')}</button>
+        <button class="btn btn-danger"    id="stats-reset-btn">${t('stats.reset_all')}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(backdrop);
+
+  const statsModalEl = backdrop.querySelector('.stats-modal');
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener('keydown', onKeyDown);
+  };
+  const onKeyDown = e => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKeyDown);
+  // Prevent wheel events from scrolling the page behind the modal
+  backdrop.addEventListener('wheel', e => {
+    if (!statsModalEl || !statsModalEl.contains(e.target)) e.preventDefault();
+  }, { passive: false });
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+  backdrop.addEventListener('touchmove', e => { if (e.target === backdrop) e.preventDefault(); }, { passive: false });
+  document.getElementById('stats-modal-close').addEventListener('click', close);
+
+  // Clear history for one book
+  backdrop.querySelectorAll('.stats-clear-book-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const bookId = btn.dataset.bookId;
+      try {
+        await apiFetch(`/stats/history/${bookId}`, { method: 'DELETE' });
+        close();
+        openStatsDialog();
+      } catch (e) {
+        toast.error(t('common.err_prefix') + e.message);
+      }
+    });
+  });
+
+  document.getElementById('stats-clear-history-btn').addEventListener('click', () => {
+    confirmDialog(t('stats.confirm_clear_history'), async () => {
+      try {
+        await apiFetch('/stats/history', { method: 'DELETE' });
+        close(); openStatsDialog();
+      } catch (e) { toast.error(t('common.err_prefix') + e.message); }
+    }, t('stats.clear_history'), false);
+  });
+
+  document.getElementById('stats-reset-btn').addEventListener('click', () => {
+    confirmDialog(t('stats.confirm_reset'), async () => {
+      try {
+        await apiFetch('/stats', { method: 'DELETE' });
+        close(); openStatsDialog();
+      } catch (e) { toast.error(t('common.err_prefix') + e.message); }
+    }, t('stats.reset_all'), true);
+  });
+}
+
 // ── Add shelf modal ───────────────────────────────────────────────────────────
 function openAddShelfModal() {
   document.getElementById('shelf-modal')?.remove();
@@ -841,6 +984,55 @@ async function handleFiles(fileList) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 let _initialized = false;
 
+function checkInterruptedSession() {
+  const SESSION_KEY = 'br_interrupted_session_v1';
+  const MAX_AGE = 24 * 60 * 60 * 1000;
+  let session = null;
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && (Date.now() - Number(parsed.ts || 0)) < MAX_AGE) session = parsed;
+    }
+  } catch { /* ignore */ }
+  if (!session) return;
+
+  const banner = document.createElement('div');
+  banner.id = 'session-restore-banner';
+  banner.className = 'session-restore-banner';
+  const pctStr = session.pct > 0 ? ` · ${Math.round(session.pct * 100)}%` : '';
+  const authorStr = session.author ? ` — ${session.author}` : '';
+  banner.innerHTML = `
+    <span class="session-restore-text">
+      <strong>${session.title}</strong>${authorStr}${pctStr}
+    </span>
+    <div class="session-restore-actions">
+      <button class="btn btn-primary btn-sm" id="session-restore-btn">${t('library.session_resume')}</button>
+      <button class="btn btn-ghost btn-sm" id="session-dismiss-btn">${t('library.session_dismiss')}</button>
+    </div>`;
+
+  const grid = document.getElementById('book-grid');
+  if (grid?.parentElement) grid.parentElement.insertBefore(banner, grid);
+
+  document.getElementById('session-restore-btn').addEventListener('click', () => {
+    try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+    // Write resume hint to sessionStorage so reader can restore exact position
+    if (session.cfi) {
+      try {
+        sessionStorage.setItem('br_resume_state_v1', JSON.stringify({
+          bookId: session.bookId, cfi: session.cfi, pct: session.pct, ts: Date.now(),
+        }));
+      } catch { /* quota */ }
+    }
+    banner.remove();
+    window.location.href = `/readerv4.html?id=${session.bookId}`;
+  });
+  document.getElementById('session-dismiss-btn').addEventListener('click', () => {
+    try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+    banner.remove();
+  });
+}
+
 export async function initLibrary() {
   if (_initialized) return;
   _initialized = true;
@@ -965,6 +1157,7 @@ export async function initLibrary() {
   // Sidebar events
   document.addEventListener('sidebar:addshelf',  ()  => openAddShelfModal());
   document.addEventListener('sidebar:editshelf', e   => openShelfEditModal(e.detail));
+  document.addEventListener('sidebar:stats',     ()  => openStatsDialog());
 
   // Upload
   uploadBtn.addEventListener('click', e => { e.stopPropagation(); uploadMenu.classList.toggle('hidden'); });
@@ -1007,6 +1200,7 @@ export async function initLibrary() {
   }
 
   loadBooks();
+  checkInterruptedSession();
 }
 
 // Re-render language-dependent content when language changes
