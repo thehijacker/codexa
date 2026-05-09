@@ -202,6 +202,7 @@ let lastChapterHref = null;  // chapter-boundary save tracking
 let lastSentChapterHref = null; // last chapter for which remote progress was pushed
 let availableDicts  = null;  // cached GET /api/dictionary response
 let pendingNavDirection = null; // 'next' or 'prev' tracking for chapter jump corrections
+let pendingWasChapterEnd = true;  // whether goNext() was called from the last page
 let isReady = false;          // true only after initial position is fully displayed
 let openCfi = '';             // CFI at the moment the book was first ready — used to skip no-op kosync pushes
 let tocFlatItems = [];
@@ -220,6 +221,9 @@ let bionicPrefetchSeq = 0;
 const bionicPrefetchInFlight = new Set();
 let bookmarksCache = [];              // loaded bookmarks for current book
 let preBookmarkCfi = null;            // position before a bookmark jump (for back/accept)
+let annotationsCache = [];            // loaded annotations for current book
+let _pendingAnnotation = null;        // {cfiRange, text} waiting for color/note pick
+let _editingAnnotationId = null;      // id of annotation being edited in note editor
 // Reading statistics tracking
 let statsSessionId = null;            // active reading_sessions.id
 let sessionPageCount = 0;             // page navigation events in current session
@@ -792,7 +796,7 @@ img {
   display:     block !important;
   margin-left: auto !important;
   margin-right: auto !important;
-  ${prefs.theme !== 'dark' ? 'mix-blend-mode: multiply !important;' : ''}
+  mix-blend-mode: multiply !important;
 }
 /* Keep native selection/callout enabled so iOS long-press and selection behave naturally. */
 ${prefs.eink ? buildEinkCss(theme) : ''}
@@ -806,6 +810,13 @@ ${prefs.chapHeadSpacing ? `h1,h2,h3,h4,h5,h6 { margin: 0.2em 0 !important; paddi
 [class*="heading"],[class*="chapter-head"],[class*="chapterHead"],[class*="chapHead"],[class*="title-block"],[class*="titleBlock"] { height:auto !important; min-height:0 !important; padding-top:0 !important; padding-bottom:0 !important; margin-top:0 !important; margin-bottom:0 !important; }
 div:has(>h1),div:has(>h2),div:has(>h3),div:has(>h4) { height:auto !important; min-height:0 !important; padding-top:0 !important; padding-bottom:0 !important; margin-top:0 !important; margin-bottom:0 !important; }` : ''}
 ${prefs.hyphenation ? 'html, body, p, li { hyphens: auto !important; }' : 'html, body, p, li { hyphens: none !important; }'}
+/* annotation highlights — rendered as <mark> in the epub DOM */
+mark.annot-hl { cursor: pointer; border-radius: 2px; color: inherit; padding: 0; }
+mark.annot-yellow { background: rgba(255,204,0,.45); }
+mark.annot-green  { background: rgba(0,210,110,.40); }
+mark.annot-blue   { background: rgba(30,160,255,.40); }
+mark.annot-pink   { background: rgba(255,80,130,.40); }
+mark.annot-hl.has-note { text-decoration: underline; text-decoration-style: solid; text-decoration-thickness: 2px; }
 /* search highlights — background only, zero layout impact */
 mark.br-hl {
   background: rgba(255,200,0,.5) !important;
@@ -844,18 +855,24 @@ function injectIntoContents(contents) {
     doc.documentElement.lang = prefs.hyphenLang;
   }
   let el = doc.getElementById('br-custom-styles');
+  const newCss = buildEpubCss();
   if (!el) {
     el = doc.createElement('style');
     el.id = 'br-custom-styles';
     // Append to body END — comes after epub.js head styles, so our !important wins
     (doc.body || doc.documentElement).appendChild(el);
+    el.textContent = newCss;
+  } else if (el.textContent !== newCss) {
+    // Only update when CSS actually changed — prevents a second ResizeObserver
+    // cycle from the 'rendered' re-inject that fires after hooks.content.
+    el.textContent = newCss;
   }
-  el.textContent = buildEpubCss();
   if (prefs.bionicReading) {
     applyBionicToDocument(doc);
     markBionicPageCached(contents.location?.start ? { start: contents.location.start } : rendition?.currentLocation?.());
   }
   // No injected touch relay script needed. Touch handling is done by attachIframeDictionary and attachIframeTouchNav.
+  injectAnnotationsIntoContents(contents);
 }
 
 function reapplyStyles() {
@@ -947,6 +964,10 @@ function applyUiTheme() {
     if (safeAreaFill) safeAreaFill.style.background = theme.bg;
     epubViewer.style.background = theme.bg;
   }
+  // SVGs loaded as <img> can't use currentColor — drive icon appearance via filter.
+  // Dark themes need icons inverted (dark SVG → light); light/sepia themes need none.
+  const needsIconInvert = ['dark', 'midnight', 'nord'].includes(prefs.theme);
+  document.documentElement.style.setProperty('--nav-icon-filter', needsIconInvert ? 'brightness(0) invert(1)' : 'none');
 }
 
 function applyPageShadow() {
@@ -1006,6 +1027,37 @@ function attachIframeDictionary(contents) {
     return text.slice(s, e).replace(/^['\u2019\-]+|['\u2019\-]+$/g, '').trim();
   }
 
+  function getWordRangeAtPoint(x, y) {
+    let node, offset;
+    if (doc.caretRangeFromPoint) {
+      const r = doc.caretRangeFromPoint(x, y);
+      if (!r) return null;
+      node = r.startContainer; offset = r.startOffset;
+    } else if (doc.caretPositionFromPoint) {
+      const p = doc.caretPositionFromPoint(x, y);
+      if (!p) return null;
+      node = p.offsetNode; offset = p.offset;
+    } else return null;
+    if (node?.nodeType === 1) {
+      const walker = doc.createTreeWalker(node, 0x4);
+      const t = walker.nextNode();
+      if (t) { node = t; offset = 0; }
+    }
+    if (!node || node.nodeType !== 3) return null;
+    const text = node.textContent;
+    let s = offset, e = offset;
+    while (s > 0 && /[\p{L}\p{N}'\u2019\-]/u.test(text[s - 1])) s--;
+    while (e < text.length && /[\p{L}\p{N}'\u2019\-]/u.test(text[e])) e++;
+    const word = text.slice(s, e).replace(/^['\u2019\-]+|['\u2019\-]+$/g, '').trim();
+    if (!word) return null;
+    try {
+      const range = doc.createRange();
+      range.setStart(node, s);
+      range.setEnd(node, e);
+      return { word, range };
+    } catch { return null; }
+  }
+
   function triggerSelectionLookup() {
     const sel = win.getSelection?.();
     const raw = (sel?.toString() || '').trim();
@@ -1026,9 +1078,20 @@ function attachIframeDictionary(contents) {
     pressTimer = setTimeout(() => {
       pressTimer = null;
       suppressNextTap = true;
-      const word = getWordAtPoint(pressX, pressY);
-      if (word) {
-        win.getSelection?.()?.removeAllRanges?.();
+      const result = getWordRangeAtPoint(pressX, pressY);
+      if (!result) return;
+      const { word, range } = result;
+      win.getSelection?.()?.removeAllRanges?.();
+      let cfiRange = '';
+      if (prefs.bionicReading) {
+        // Bionic DOM shifts CFI paths — generate a clean CFI from the pre-bionic structure
+        cfiRange = cfiFromBionicRange(range, doc, contents) || '';
+      } else {
+        try { cfiRange = contents.cfiFromRange(range); } catch {}
+      }
+      if (cfiRange) {
+        window.parent.postMessage({ type: 'annotation-select', cfiRange, text: word }, '*');
+      } else {
         window.parent.postMessage({ type: 'dict-lookup', word }, '*');
       }
     }, 450);
@@ -1069,6 +1132,500 @@ function attachIframeDictionary(contents) {
       if (word) window.parent.postMessage({ type: 'dict-lookup', word }, '*');
     });
   }
+}
+
+// Detect whether an <a> element inside the epub iframe is a footnote/endnote reference.
+// Pure function — runs in the iframe context, no epub.js API needed.
+function isFootnoteLink(anchor) {
+  const rawHref = anchor.getAttribute('href') || '';
+  if (!rawHref.includes('#')) return false;
+
+  // EPUB3 explicit attributes
+  const epubType = (anchor.getAttribute('epub:type') ||
+    anchor.getAttributeNS?.('http://www.idpf.org/2007/ops', 'type') || '').toLowerCase();
+  const role = (anchor.getAttribute('role') || '').toLowerCase();
+  if (epubType.includes('noteref') || role.includes('doc-noteref')) return true;
+
+  // Parent is <sup> — common pattern
+  if (anchor.parentElement?.tagName === 'SUP') return true;
+
+  // Anchor CONTAINS a <sup> — e.g. <a href="notes.html#fn"><sup>1</sup></a>
+  if (anchor.querySelector('sup')) return true;
+
+  // Class hint on anchor or its parent
+  const cls = ((anchor.className || '') + ' ' + (anchor.parentElement?.className || '')).toLowerCase();
+  if (/\b(foot|fn|note|ref)\b/.test(cls)) return true;
+
+  // Inspect target element
+  const fragId = rawHref.split('#').pop();
+  if (fragId) {
+    const target = anchor.ownerDocument.getElementById(fragId);
+    if (target) {
+      const tt = (target.getAttribute('epub:type') ||
+        target.getAttributeNS?.('http://www.idpf.org/2007/ops', 'type') || '').toLowerCase();
+      const tr = (target.getAttribute('role') || '').toLowerCase();
+      if (/footnote|endnote/.test(tt) || /doc-footnote|doc-endnote/.test(tr)) return true;
+      if (target.tagName === 'ASIDE') return true;
+    }
+  }
+  return false;
+}
+
+// Inject footnote-link click interception into each epub.js iframe page.
+// Uses capture phase so we intercept before epub.js handles the click.
+function attachIframeFootnotes(contents) {
+  if (!contents?.document) return;
+  const doc = contents.document;
+  doc.addEventListener('click', (e) => {
+    const anchor = e.target.closest('a[href]');
+    if (!anchor) return;
+    const rawHref = anchor.getAttribute('href') || '';
+    if (!rawHref.includes('#')) return;
+    if (!isFootnoteLink(anchor)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const sameDoc = rawHref.startsWith('#');
+    const fragId  = rawHref.split('#').pop();
+    window.parent.postMessage({ type: 'footnote-show', rawHref, fragId, sameDoc }, '*');
+  }, { capture: true });
+}
+
+// Strip epub backlinks and dangerous content from a cloned footnote element.
+// Returns innerHTML string, or null if nothing meaningful remains.
+function _sanitizeFootnoteHtml(el) {
+  const clone = el.cloneNode(true);
+  // Remove semantic backlinks
+  clone.querySelectorAll('[epub\\:type="backlink"], [role="doc-backlink"]').forEach(n => n.remove());
+  // Remove bare back-arrow anchors
+  clone.querySelectorAll('a').forEach(a => {
+    if (/^[↩↑\^⬆←▲🔙]$/.test(a.textContent.trim())) a.remove();
+  });
+  // Remove scripts and on* attributes
+  clone.querySelectorAll('script').forEach(n => n.remove());
+  clone.querySelectorAll('*').forEach(n => {
+    for (const attr of [...n.attributes]) {
+      if (attr.name.startsWith('on')) n.removeAttribute(attr.name);
+    }
+  });
+  const html = clone.innerHTML.trim();
+  return html || null;
+}
+
+async function showFootnotePopup(fragId, crossDocHref) {
+  let targetEl = null;
+  if (!crossDocHref) {
+    const view = rendition?.manager?.views?.first?.();
+    targetEl = view?.document?.getElementById(fragId) ?? null;
+  } else {
+    // spine.get() breaks when href contains '#' (it switches to getById).
+    // Strip fragment, then resolve relative path against current section.
+    const crossPath = crossDocHref.split('#')[0];
+    let spineItem = book?.spine?.get(crossPath);
+    if (!spineItem) {
+      const curHref = rendition?.currentLocation()?.start?.href || '';
+      const base = curHref.substring(0, curHref.lastIndexOf('/') + 1);
+      spineItem = book?.spine?.get(base + crossPath);
+    }
+    if (!spineItem) {
+      const basename = crossPath.split('/').pop();
+      spineItem = book?.spine?.items?.find(item =>
+        item.href === basename || (item.href || '').endsWith('/' + basename)
+      ) ?? null;
+    }
+    if (spineItem) {
+      try {
+        await spineItem.load(book.load.bind(book));
+        targetEl = spineItem.document?.getElementById(fragId) ?? null;
+        spineItem.unload();
+      } catch { targetEl = null; }
+    }
+  }
+  if (!targetEl) return;
+
+  // If the id lands on an inline element (e.g. a backlink <a>), use the nearest block ancestor
+  const BLOCK_TAGS = new Set(['P','DIV','LI','SECTION','ASIDE','BLOCKQUOTE','DD','DT','ARTICLE']);
+  if (!BLOCK_TAGS.has(targetEl.tagName)) {
+    const blockParent = targetEl.closest('p,li,div,section,aside,blockquote,dd,dt,article');
+    if (blockParent) targetEl = blockParent;
+  }
+
+  const html = _sanitizeFootnoteHtml(targetEl);
+  if (!html) return;
+
+  const popup   = document.getElementById('footnote-popup');
+  const content = document.getElementById('footnote-popup-content');
+  if (!popup || !content) return;
+
+  content.innerHTML = html;
+  // Sanitize links in the rendered content
+  content.querySelectorAll('a[href]').forEach(a => {
+    const h = a.getAttribute('href') || '';
+    if (h.startsWith('http://') || h.startsWith('https://')) {
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+    } else {
+      a.replaceWith(document.createTextNode(a.textContent));
+    }
+  });
+  popup.classList.add('open');
+  document.getElementById('footnote-backdrop')?.classList.add('open');
+}
+
+function closeFootnotePopup() {
+  document.getElementById('footnote-popup')?.classList.remove('open');
+  document.getElementById('footnote-backdrop')?.classList.remove('open');
+}
+
+// ── Annotations ───────────────────────────────────────────────────────────────
+
+function attachIframeAnnotation(contents) {
+  if (!contents?.document) return;
+  const doc = contents.document;
+  function onSelectionEnd(e) {
+    if (e?.button !== undefined && e.button !== 0) return; // ignore right/middle clicks
+    const sel = doc.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+    const text = sel.toString().trim();
+    if (text.length < 2) return;
+    let cfiRange;
+    if (prefs.bionicReading) {
+      cfiRange = cfiFromBionicRange(sel.getRangeAt(0), doc, contents);
+    } else {
+      try { cfiRange = contents.cfiFromRange(sel.getRangeAt(0)); } catch { return; }
+    }
+    if (!cfiRange) return;
+    window.parent.postMessage({ type: 'annotation-select', cfiRange, text }, '*');
+  }
+  doc.addEventListener('mouseup', onSelectionEnd);
+  doc.addEventListener('touchend', () => setTimeout(() => onSelectionEnd(), 50));
+}
+
+// Generate a CFI compatible with the non-bionic DOM, even when bionic is currently active.
+// Bionic wraps word prefixes in <span.br-bionic-word> elements, changing the DOM tree but
+// not the text content. We temporarily unwrap those spans to get the "original" node structure,
+// generate the CFI, then restore the block's innerHTML.
+function cfiFromBionicRange(range, doc, contents) {
+  // Walk up to the nearest ancestor that is not itself a bionic span
+  let block = range.commonAncestorContainer;
+  if (block.nodeType !== 1) block = block.parentNode;
+  while (block && block !== doc.body) {
+    if (!block.classList?.contains('br-bionic-word') && !block.classList?.contains('br-bionic-focus')) break;
+    block = block.parentNode;
+  }
+  if (!block || block === doc.documentElement) return null;
+
+  // Compute char offsets within the block — text content is the same in bionic and clean DOM
+  let startChar, endChar;
+  try {
+    const r1 = doc.createRange();
+    r1.setStart(block, 0);
+    r1.setEnd(range.startContainer, range.startOffset);
+    startChar = r1.toString().length;
+    const r2 = doc.createRange();
+    r2.setStart(block, 0);
+    r2.setEnd(range.endContainer, range.endOffset);
+    endChar = r2.toString().length;
+  } catch { return null; }
+
+  // Snapshot HTML before modification (preserves existing annotation <mark>s and bionic spans)
+  const savedHTML = block.innerHTML;
+
+  // Replace every bionic word-span with a plain text node of its text content
+  Array.from(block.querySelectorAll('.br-bionic-word')).forEach(span => {
+    span.parentNode.replaceChild(doc.createTextNode(span.textContent), span);
+  });
+  block.normalize(); // merge adjacent text nodes → reproduces original node structure
+
+  // Rebuild the selection range at the same char offsets in the now-clean block
+  let cfi = null;
+  try {
+    const walker = doc.createTreeWalker(block, 0x4 /* SHOW_TEXT */);
+    let pos = 0, sn = null, so = 0, en = null, eo = 0, node;
+    while ((node = walker.nextNode())) {
+      const len = node.length;
+      if (!sn && pos + len > startChar) { sn = node; so = startChar - pos; }
+      if (sn && pos + len >= endChar)   { en = node; eo = endChar   - pos; break; }
+      pos += len;
+    }
+    if (sn && en) {
+      const cleanRange = doc.createRange();
+      cleanRange.setStart(sn, so);
+      cleanRange.setEnd(en, eo);
+      cfi = contents.cfiFromRange(cleanRange);
+    }
+  } catch { /* ignore */ }
+
+  // Restore original markup (bionic spans + any pre-existing annotation marks)
+  block.innerHTML = savedHTML;
+
+  // innerHTML restore kills event listeners — re-attach click handlers to existing marks
+  block.querySelectorAll('mark[data-annot-id]').forEach(mark => {
+    const id = parseInt(mark.dataset.annotId);
+    if (!id) return;
+    mark.addEventListener('click', (ev) => {
+      ev.preventDefault(); ev.stopPropagation();
+      window.parent.postMessage({ type: 'annotation-click', id }, '*');
+    }, { capture: true });
+  });
+
+  return cfi;
+}
+
+// Find the first occurrence of text in the page by walking text nodes.
+// Used as a CFI fallback when bionic mode causes CFI path mismatches.
+function findTextRangeInPage(doc, text) {
+  if (!text || !doc.body) return null;
+  const bodyText = doc.body.textContent;
+  const idx = bodyText.indexOf(text);
+  if (idx < 0) return null;
+  const end = idx + text.length;
+  const walker = doc.createTreeWalker(doc.body, 0x4 /* SHOW_TEXT */);
+  let pos = 0, sn = null, so = 0, en = null, eo = 0, node;
+  while ((node = walker.nextNode())) {
+    const len = node.length;
+    if (!sn && pos + len > idx)  { sn = node; so = idx - pos; }
+    if (sn && pos + len >= end)  { en = node; eo = end - pos; break; }
+    pos += len;
+  }
+  if (!sn || !en) return null;
+  try {
+    const r = doc.createRange();
+    r.setStart(sn, so);
+    r.setEnd(en, eo);
+    return r;
+  } catch { return null; }
+}
+
+function showAnnotationToolbar(cfiRange, text) {
+  _pendingAnnotation = { cfiRange, text };
+  document.getElementById('annot-toolbar')?.classList.add('open');
+  document.getElementById('annot-backdrop')?.classList.add('open');
+}
+
+function closeAnnotationToolbar() {
+  _pendingAnnotation = null;
+  document.getElementById('annot-toolbar')?.classList.remove('open');
+  document.getElementById('annot-backdrop')?.classList.remove('open');
+}
+
+function showAnnotationNoteEditor(annotationId, existingNote) {
+  _editingAnnotationId = annotationId;
+  const ta = document.getElementById('annot-note-text');
+  if (ta) ta.value = existingNote || '';
+  document.getElementById('annot-note-editor')?.classList.add('open');
+  document.getElementById('annot-backdrop')?.classList.add('open');
+  ta?.focus();
+}
+
+function closeAnnotationNoteEditor() {
+  _editingAnnotationId = null;
+  document.getElementById('annot-note-editor')?.classList.remove('open');
+  document.getElementById('annot-backdrop')?.classList.remove('open');
+}
+
+// Inject <mark> elements for all cached annotations that belong to this contents view.
+// Called from injectIntoContents on every page render.
+function injectAnnotationsIntoContents(contents) {
+  if (!contents?.document || !annotationsCache.length) return;
+  const doc = contents.document;
+  annotationsCache.forEach(a => {
+    if (doc.querySelector(`mark[data-annot-id="${a.id}"]`)) return; // already injected
+    try {
+      // Resolve CFI to a range; verify it matched the expected text to detect bionic mismatch
+      let range = null;
+      try { range = contents.range(a.cfi); } catch { /* not on this page */ }
+      if (range && a.text) {
+        const resolved = range.toString().replace(/\s+/g, ' ').trim();
+        const expected = a.text.replace(/\s+/g, ' ').trim();
+        if (resolved !== expected) range = null; // bionic/non-bionic mode mismatch
+      }
+      // Fall back to text search within the page (handles bionic ↔ non-bionic CFI mismatches)
+      if (!range && a.text) range = findTextRangeInPage(doc, a.text);
+      if (!range) return;
+
+      const mark = doc.createElement('mark');
+      mark.className = 'annot-hl annot-' + a.color + (a.note ? ' has-note' : '');
+      mark.dataset.annotId = String(a.id);
+      mark.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        window.parent.postMessage({ type: 'annotation-click', id: a.id }, '*');
+      }, { capture: true });
+      try {
+        range.surroundContents(mark);
+      } catch {
+        // Selection spans element boundary — use extractContents to preserve nesting
+        const frag = range.extractContents();
+        mark.appendChild(frag);
+        range.insertNode(mark);
+      }
+    } catch { /* annotation not on this page, or CFI parse error — skip silently */ }
+  });
+}
+
+// Re-apply annotation marks into all currently loaded views (e.g. after loadAnnotations)
+function reapplyAnnotations() {
+  try {
+    const contents = rendition?.getContents?.();
+    if (contents?.length) { contents.forEach(injectAnnotationsIntoContents); return; }
+  } catch { /* fall through */ }
+  try {
+    rendition?.manager?.views?.forEach?.(view => {
+      if (view?.contents) injectAnnotationsIntoContents(view.contents);
+    });
+  } catch { /* ignore */ }
+}
+
+// Remove <mark> wrappers for a deleted annotation from all loaded views
+function removeAnnotationFromDom(id) {
+  try {
+    const contents = rendition?.getContents?.() || [];
+    contents.forEach(c => {
+      c.document?.querySelectorAll(`mark[data-annot-id="${id}"]`).forEach(m => {
+        while (m.firstChild) m.parentNode.insertBefore(m.firstChild, m);
+        m.remove();
+      });
+    });
+  } catch { /* ignore */ }
+  try {
+    rendition?.manager?.views?.forEach?.(view => {
+      view?.contents?.document?.querySelectorAll(`mark[data-annot-id="${id}"]`).forEach(m => {
+        while (m.firstChild) m.parentNode.insertBefore(m.firstChild, m);
+        m.remove();
+      });
+    });
+  } catch { /* ignore */ }
+}
+
+function showAnnotationEditSheet(a) {
+  const sheet = document.getElementById('annot-edit-sheet');
+  if (!sheet) return;
+  sheet.dataset.annotId = a.id;
+  // Highlight active color button
+  sheet.querySelectorAll('.annot-edit-color-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.color === a.color);
+  });
+  const noteEl = sheet.querySelector('.annot-edit-note-preview');
+  if (noteEl) noteEl.textContent = a.note || '';
+  sheet.classList.add('open');
+  document.getElementById('annot-backdrop')?.classList.add('open');
+}
+
+function closeAnnotationEditSheet() {
+  document.getElementById('annot-edit-sheet')?.classList.remove('open');
+  document.getElementById('annot-backdrop')?.classList.remove('open');
+}
+
+async function createAnnotation(cfiRange, text, color, note) {
+  if (!currentBook) return;
+  try {
+    const a = await apiFetch(`/annotations/${currentBook.id}`, {
+      method: 'POST',
+      body: JSON.stringify({ cfi: cfiRange, pct: currentPct || 0, color, note: note || '', text }),
+    });
+    annotationsCache.push(a);
+    reapplyAnnotations();
+    renderAnnotationList();
+    toast(t('reader.annotation_added'));
+  } catch {
+    /* silent */
+  }
+}
+
+async function updateAnnotation(id, updates) {
+  if (!currentBook) return;
+  const a = annotationsCache.find(x => x.id === id);
+  if (!a) return;
+  try {
+    await apiFetch(`/annotations/${currentBook.id}/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+    Object.assign(a, updates);
+    // Update mark classes in DOM
+    try {
+      const contents = rendition?.getContents?.() || [];
+      contents.forEach(c => {
+        c.document?.querySelectorAll(`mark[data-annot-id="${id}"]`).forEach(m => {
+          m.className = 'annot-hl annot-' + a.color + (a.note ? ' has-note' : '');
+        });
+      });
+    } catch { /* ignore */ }
+    renderAnnotationList();
+  } catch {
+    /* silent */
+  }
+}
+
+async function deleteAnnotation(id) {
+  if (!currentBook) return;
+  try {
+    await apiFetch(`/annotations/${currentBook.id}/${id}`, { method: 'DELETE' });
+    annotationsCache = annotationsCache.filter(x => x.id !== id);
+    removeAnnotationFromDom(id);
+    renderAnnotationList();
+    toast(t('reader.annotation_deleted'));
+  } catch {
+    /* silent */
+  }
+}
+
+async function loadAnnotations(bookId) {
+  try {
+    annotationsCache = await apiFetch(`/annotations/${bookId}`);
+    reapplyAnnotations();
+    renderAnnotationList();
+  } catch {
+    annotationsCache = [];
+  }
+}
+
+function renderAnnotationList() {
+  const listEl = document.getElementById('annotations-list');
+  if (!listEl) return;
+  if (!annotationsCache.length) {
+    listEl.innerHTML = `<div class="annotations-empty">${t('reader.annotations_empty')}</div>`;
+    return;
+  }
+  listEl.innerHTML = '';
+  [...annotationsCache].sort((a, b) => a.pct - b.pct).forEach(a => {
+    const item = document.createElement('div');
+    item.className = 'annotation-item';
+    const excerpt = a.text || '';
+    const excerptShort = excerpt.slice(0, 80) + (excerpt.length > 80 ? '…' : '');
+    const noteText = a.note || '';
+    const noteShort = noteText.slice(0, 60) + (noteText.length > 60 ? '…' : '');
+    item.innerHTML = `
+      <div class="annotation-item-body">
+        <span class="annotation-color-dot" style="background:var(--annot-dot-${escapeHtml(a.color)})"></span>
+        <div class="annotation-item-text">
+          <div class="annotation-item-excerpt">${escapeHtml(excerptShort)}</div>
+          ${noteText ? `<div class="annotation-item-note">${escapeHtml(noteShort)}</div>` : ''}
+          <div class="annotation-item-pct">${Math.round((a.pct || 0) * 100)}%</div>
+        </div>
+      </div>
+      <button class="annotation-delete-btn btn-icon-sm" title="${t('reader.annotation_delete')}">🗑</button>`;
+    item.querySelector('.annotation-item-body').addEventListener('click', () => {
+      closePanels();
+      rendition?.display(a.cfi).catch(() => {});
+    });
+    item.querySelector('.annotation-delete-btn').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await deleteAnnotation(a.id);
+    });
+    listEl.appendChild(item);
+  });
+}
+
+function openAnnotations() {
+  const sidebar = document.getElementById('annotations-sidebar');
+  if (!sidebar) return;
+  sidebar.classList.add('open');
+  tocSidebar.classList.remove('open');
+  settingsPanel.classList.remove('open');
+  bookmarksSidebar.classList.remove('open');
+  panelBackdrop.classList.add('visible');
+  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
 }
 
 // ── Status bar engine ─────────────────────────────────────────────────────────
@@ -1210,8 +1767,8 @@ function updateStatusBar(location) {
   const cpIconSrc = STAT_ICON['chapterPage'];
   const cpImg     = (cpIconSrc && prefs.statusBar.showIcons['chapterPage'] !== false)
                     ? sbIconHtml(cpIconSrc) + '\u202F' : '';
-  const leftVal   = startPage > 0 ? cpImg + startPage + '/' + totalPages : '';
-  const rightVal  = endPage   > 0 ? cpImg + endPage   + '/' + totalPages : '';
+  const leftVal   = startPage > 0 ? cpImg + startPage + '/' + stableTotal : '';
+  const rightVal  = endPage   > 0 ? cpImg + endPage   + '/' + stableTotal : '';
 
   // ── Top row ──────────────────────────────────────────────────────────────
   if (chapInTop) {
@@ -1448,27 +2005,29 @@ function buildToc(toc, depth = 0) {
         const [hrefBase, anchor] = (item.href || '').split('#');
         // Resolve via spine — findSpineItemForHref handles path-prefix mismatches
         const spineItem = findSpineItemForHref(hrefBase);
-        // Use numeric index to bypass href path-mismatch issues in rendition.display()
-        // For anchor links, fall back to href#anchor (index can't encode anchor)
+        // For chapter-level entries (depth <= 1), use spineItem.href without anchor so
+        // epub.js navigates to the start of the chapter file. display(spineIndex) would
+        // restore the last-cached position (which can be mid-chapter from a previous visit),
+        // while display(href) without a fragment always goes to the beginning.
+        // Sub-section entries (depth > 1) keep their anchors for precise positioning.
         const displayTarget = spineItem?.index != null
-          ? (anchor ? `${spineItem.href}#${anchor}` : spineItem.index)
+          ? (anchor && depth > 1 ? `${spineItem.href}#${anchor}` : spineItem.href)
           : item.href;
-        console.log('[bionic] TOC click: displaying', displayTarget, '(spineIdx:', spineItem?.index, ') bionic:', prefs.bionicReading);
+        console.log(`[nav] TOC | depth=${depth} anchor="${anchor||''}" target=${JSON.stringify(displayTarget)}`);
         try {
           await rendition.display(displayTarget);
           const loc = rendition?.currentLocation?.();
-          console.log('[bionic] TOC click: display succeeded, cfi:', loc?.start?.cfi?.slice(0,80));
+          console.log(`[nav] TOC-landed | page=${loc?.start?.displayed?.page}/${loc?.start?.displayed?.total} href="${loc?.start?.href?.split('/').pop()}"`);
           scheduleBionicPrefetchAround(loc);
         } catch (e) {
-          console.warn('[bionic] TOC click: display FAILED:', e.message);
-          // Last-resort: if we used an index, retry with raw href; if we used href, done
-          if (typeof displayTarget === 'number' && item.href) {
+          // Last-resort: if primary href failed, try raw TOC href
+          if (item.href && displayTarget !== item.href) {
             try {
               await rendition.display(item.href);
               const loc = rendition?.currentLocation?.();
-              console.log('[bionic] TOC click: fallback href display succeeded, cfi:', loc?.start?.cfi?.slice(0,80));
+              console.log(`[nav] TOC-landed | page=${loc?.start?.displayed?.page}/${loc?.start?.displayed?.total} href="${loc?.start?.href?.split('/').pop()}"`);
               scheduleBionicPrefetchAround(loc);
-            } catch (e2) { console.warn('[bionic] TOC click: both display attempts failed:', e2.message); }
+            } catch (e2) {}
           }
         }
       }, 80);
@@ -1559,7 +2118,7 @@ function openBookmarks() {
 }
 function closeJumpPanel() {
   jumpPctPanel.style.display = 'none';
-  // Re-evaluate auto-hide: hide header unless the mouse is still over it
+  // Re-evaluate auto-hide: hide header unless something else is keeping it open
   if (prefs.autoHideHeader && !tocSidebar.classList.contains('open') && !bookmarksSidebar.classList.contains('open') && !isMouseOverHeader) {
     readerLayout.classList.remove('header-peek');
   }
@@ -1571,6 +2130,7 @@ function closePanels() {
   settingsPanel.classList.remove('open');
   searchSidebar.classList.remove('open');
   bookmarksSidebar.classList.remove('open');
+  document.getElementById('annotations-sidebar')?.classList.remove('open');
   panelBackdrop.classList.remove('visible');
   closeJumpPanel();
   if (searchHadFocus && typeof activeEl.blur === 'function') activeEl.blur();
@@ -1581,7 +2141,8 @@ function hasOpenPanel() {
   return tocSidebar.classList.contains('open')
     || searchSidebar.classList.contains('open')
     || settingsPanel.classList.contains('open')
-    || bookmarksSidebar.classList.contains('open');
+    || bookmarksSidebar.classList.contains('open')
+    || document.getElementById('annotations-sidebar')?.classList.contains('open');
 }
 
 async function returnToLibrary() {
@@ -1969,12 +2530,34 @@ function closeDictPopup() {
   document.getElementById('dict-popup')?.setAttribute('aria-hidden', 'true');
 }
 
-// Receive dict lookup from iframe contexts (origin may vary on iOS/blob views).
+// Receive messages from iframe contexts (origin may vary on iOS/blob views).
 window.addEventListener('message', (e) => {
-  if (e.data?.type !== 'dict-lookup') return;
-  const word = String(e.data.word || '').trim();
-  if (!word || word.length > 120) return;
-  showDictPopup(word);
+  if (e.data?.type === 'dict-lookup') {
+    const word = String(e.data.word || '').trim();
+    if (!word || word.length > 120) return;
+    showDictPopup(word);
+  }
+  if (e.data?.type === 'footnote-show') {
+    const { fragId, sameDoc, rawHref } = e.data;
+    if (fragId) showFootnotePopup(fragId, sameDoc ? null : rawHref);
+  }
+  if (e.data?.type === 'annotation-select') {
+    const { cfiRange, text } = e.data;
+    if (cfiRange && text) {
+      closeFootnotePopup();
+      showAnnotationToolbar(cfiRange, text);
+    }
+  }
+  if (e.data?.type === 'annotation-click') {
+    const a = annotationsCache.find(x => x.id === e.data.id);
+    if (a) showAnnotationEditSheet(a);
+  }
+});
+
+document.getElementById('footnote-backdrop')?.addEventListener('click', closeFootnotePopup);
+document.getElementById('footnote-popup-close')?.addEventListener('click', closeFootnotePopup);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeFootnotePopup();
 });
 
 // ── Settings UI ───────────────────────────────────────────────────────────────
@@ -2548,16 +3131,21 @@ function updateProgress(location) {
     currentCfi        = cfi || '';
     currentPct        = pct;
     currentSpineIndex = location?.start?.index ?? currentSpineIndex;
-    console.log('[pos] relocated (ready) cfi:', (cfi||'').slice(0,60));
   } else {
     // Still track spine index even during init for accurate xpointer on first save
     currentSpineIndex = location?.start?.index ?? currentSpineIndex;
-    console.log('[pos] relocated (NOT ready, ignored) cfi:', (cfi||'').slice(0,60));
   }
   const d = Math.round(pct * 100);
   progressFillEl.style.width = d + '%';
   const href = location?.start?.href || '';
   const oldChapterHref = lastChapterHref;
+  console.log(
+    `[nav] relocated | dir=${pendingNavDirection||'—'} ready=${isReady}` +
+    ` | ${href === oldChapterHref ? 'same-chap' : ('CHAP→' + (href||'?').split('/').pop())}` +
+    ` | p=${location?.start?.displayed?.page}/${location?.start?.displayed?.total}` +
+    ` end=${location?.end?.displayed?.page}` +
+    ` | cfi=…${(cfi||'').slice(-25)}`
+  );
   chapterTitleEl.textContent = chapterLabelFromHref(href);
   currentHref = href;
   updateActiveTocItem(href);
@@ -2593,14 +3181,18 @@ function updateProgress(location) {
     isReady &&
     href &&
     oldChapterHref &&
-    href !== oldChapterHref &&
-    location?.start?.displayed?.page > 1
+    href !== oldChapterHref
   ) {
     pendingNavDirection = null;
-    console.log('[fix] correcting forward chapter jump to chapter start', href);
-    setTimeout(() => {
-      rendition.display(href).catch(() => {})
-    }, 0);
+    const landedPage = location?.start?.displayed?.page ?? 1;
+    console.log(
+      `[nav] chap-advance | wasEnd=${pendingWasChapterEnd} landedPage=${landedPage}` +
+      ` | → ${!pendingWasChapterEnd ? 'FIX-GOBACK' : 'OK'}`
+    );
+    if (!pendingWasChapterEnd) {
+      console.log(`[nav] FIX-GOBACK | prev()`);
+      rendition?.prev();
+    }
   } else {
     pendingNavDirection = null;
   }
@@ -2652,34 +3244,26 @@ function scheduleProgressSave() {
 async function seekToPercentage(targetPct) {
   if (!book.locations?.length()) return;
   const jumpCfi = book.locations.cfiFromPercentage(targetPct);
-  console.log('[bionic] seekToPercentage targetPct:', (targetPct*100).toFixed(2)+'%', 'raw jumpCfi:', jumpCfi);
   let safeCfi = jumpCfi;
   if (prefs.bionicReading && jumpCfi) {
     safeCfi = makeBionicSafeCfi(jumpCfi);
-    console.log('[bionic] seekToPercentage safeCfi:', safeCfi);
   }
-  console.log('[bionic] seekToPercentage final safeCfi:', safeCfi);
   if (safeCfi) {
     try {
       await rendition.display(safeCfi);
-      console.log('[bionic] seekToPercentage display(safeCfi) succeeded');
-    } catch (e) {
-      console.warn('[bionic] seekToPercentage display(safeCfi) FAILED:', e.message, '— will try rendition.next() loop only');
-    }
+    } catch (e) { }
   }
   for (let step = 0; step < 20; step++) {
     const loc    = rendition.currentLocation();
     const locCfi = loc?.start?.cfi;
     if (!locCfi) break;
     const curPct = book.locations.percentageFromCfi(locCfi) || 0;
-    console.log('[bionic] seekToPercentage next-loop step', step, 'curPct:', (curPct*100).toFixed(2)+'%', 'target:', (targetPct*100).toFixed(2)+'%');
     if (curPct >= targetPct - 0.005) break;
     await rendition.next();
   }
   const finalLoc = rendition.currentLocation();
   if (finalLoc?.start?.cfi) currentCfi = finalLoc.start.cfi;
   if (finalLoc?.start?.percentage != null) currentPct = finalLoc.start.percentage;
-  console.log('[bionic] seekToPercentage done, final cfi:', currentCfi?.slice(0,80));
   scheduleBionicPrefetchAround(finalLoc || rendition?.currentLocation?.());
 }
 
@@ -2911,6 +3495,8 @@ async function startRendition(displayCfi = null) {
   rendition.hooks.content.register((contents) => {
     attachIframeKeyboard(contents);
     attachIframeDictionary(contents);
+    attachIframeFootnotes(contents);
+    attachIframeAnnotation(contents);
     injectIntoContents(contents);
   });
 
@@ -2923,6 +3509,27 @@ async function startRendition(displayCfi = null) {
       if (view?.contents) injectIntoContents(view.contents);
     }, 0);
     attachIframeTouchNav(view);
+    // epub.js can silently re-paginate after 'relocated' fires (e.g. discovering
+    // blank structural pages at the chapter start), updating currentLocation() without
+    // emitting another 'relocated'. Poll after a short settle window and sync the
+    // status bar if the internal page moved — prevents misleading page-number jumps
+    // on the next user-initiated NEXT press.
+    setTimeout(() => {
+      if (!isReady) return;
+      const loc = rendition?.currentLocation?.();
+      const p = loc?.start?.displayed?.page;
+      if (p && p !== currentChapPage) {
+        console.log(
+          `[nav] repaginate | ${currentChapPage}→${p}/${currentChapTotal}` +
+          ` chap="${currentHref?.split('/').pop()}"`
+        );
+        currentChapPage  = p;
+        currentEndPage   = loc.end?.displayed?.page ?? currentEndPage;
+        currentChapTotal = Math.max(loc.start?.displayed?.total ?? 0, currentChapTotal);
+        if (chapPageCache[currentSpineIndex] < currentChapTotal) chapPageCache[currentSpineIndex] = currentChapTotal;
+        updateStatusBar(loc);
+      }
+    }, 180);
   });
 
   rendition.on('relocated', updateProgress);
@@ -2951,8 +3558,31 @@ async function startRendition(displayCfi = null) {
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
-function goNext() { pendingNavDirection = 'next'; sessionPageCount++; rendition?.next(); }
-function goPrev() { pendingNavDirection = 'prev'; sessionPageCount++; rendition?.prev(); }
+function goNext() {
+  pendingNavDirection = 'next';
+  sessionPageCount++;
+  // Capture whether we are truly at the last page at call-time. The library can
+  // advance the chapter prematurely if a CSS expand shrinks scrollWidth between
+  // this call and when manager.next() actually runs (async via rAF queue).
+  // We use both tracked state and live DOM state; OR avoids false positives from
+  // stale tracked values and from missed repagination poll updates.
+  const _lL = rendition?.currentLocation?.();
+  const _liveEnd   = _lL?.end?.displayed?.page;
+  const _liveTotal = _lL?.start?.displayed?.total;
+  pendingWasChapterEnd =
+    currentEndPage === 0 || currentChapTotal === 0 ||
+    currentEndPage >= currentChapTotal - 1 ||
+    (!!_liveEnd && !!_liveTotal && _liveEnd >= _liveTotal - 1);
+  console.log(
+    `[nav] NEXT | tracked end=${currentEndPage}/${currentChapTotal}` +
+    ` live end=${_liveEnd}/${_liveTotal} wasEnd=${pendingWasChapterEnd}`
+  );
+  rendition?.next();
+}
+function goPrev() {
+  console.log(`[nav] PREV | page=${currentChapPage}/${currentChapTotal}`);
+  pendingNavDirection = 'prev'; sessionPageCount++; rendition?.prev();
+}
 
 // ── Touch / swipe navigation ──────────────────────────────────────────────────
 const SWIPE_THRESHOLD = 24;   // min px horizontal distance
@@ -3332,6 +3962,85 @@ function escapeHtml(str) {
 }
 
 // ── Button wiring ─────────────────────────────────────────────────────────────
+
+// Annotation toolbar
+document.getElementById('annot-backdrop')?.addEventListener('click', () => {
+  closeAnnotationToolbar();
+  closeAnnotationNoteEditor();
+  closeAnnotationEditSheet();
+});
+document.getElementById('annot-btn-cancel')?.addEventListener('click', closeAnnotationToolbar);
+document.querySelectorAll('.annot-color-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const color = btn.dataset.color;
+    if (!color || !_pendingAnnotation) return;
+    const { cfiRange, text } = _pendingAnnotation;
+    closeAnnotationToolbar();
+    await createAnnotation(cfiRange, text, color, '');
+  });
+});
+document.getElementById('annot-btn-note')?.addEventListener('click', () => {
+  if (!_pendingAnnotation) return;
+  const pending = _pendingAnnotation;
+  closeAnnotationToolbar();
+  _pendingAnnotation = pending; // restore after close nulled it
+  showAnnotationNoteEditor(null, '');
+});
+
+// Annotation note editor (creation mode)
+document.getElementById('annot-note-cancel')?.addEventListener('click', closeAnnotationNoteEditor);
+document.getElementById('annot-note-save')?.addEventListener('click', async () => {
+  const note = (document.getElementById('annot-note-text')?.value || '').trim();
+  if (_editingAnnotationId !== null) {
+    // Edit mode
+    await updateAnnotation(_editingAnnotationId, { note });
+    closeAnnotationNoteEditor();
+  } else if (_pendingAnnotation) {
+    // Create mode — color defaults to yellow when opened via Note button directly
+    const { cfiRange, text } = _pendingAnnotation;
+    closeAnnotationNoteEditor();
+    await createAnnotation(cfiRange, text, 'yellow', note);
+  }
+});
+
+// Annotation edit sheet (for existing annotations)
+document.getElementById('annot-edit-close')?.addEventListener('click', closeAnnotationEditSheet);
+document.getElementById('annot-edit-note-btn')?.addEventListener('click', () => {
+  const id = parseInt(document.getElementById('annot-edit-sheet')?.dataset.annotId);
+  const a  = annotationsCache.find(x => x.id === id);
+  if (!a) return;
+  closeAnnotationEditSheet();
+  showAnnotationNoteEditor(id, a.note || '');
+});
+document.getElementById('annot-edit-delete-btn')?.addEventListener('click', async () => {
+  const id = parseInt(document.getElementById('annot-edit-sheet')?.dataset.annotId);
+  closeAnnotationEditSheet();
+  await deleteAnnotation(id);
+});
+document.querySelectorAll('.annot-edit-color-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const color = btn.dataset.color;
+    const sheet = document.getElementById('annot-edit-sheet');
+    const id = parseInt(sheet?.dataset.annotId);
+    if (!color || !id) return;
+    sheet.querySelectorAll('.annot-edit-color-btn').forEach(b => b.classList.toggle('active', b === btn));
+    await updateAnnotation(id, { color });
+  });
+});
+
+// Dictionary button inside annotation toolbar
+document.getElementById('annot-btn-dict')?.addEventListener('click', () => {
+  const text = _pendingAnnotation?.text || '';
+  const word = text.split(/\s+/)[0].replace(/^['’-]+|['’-]+$/g, '').trim();
+  closeAnnotationToolbar();
+  if (word) showDictPopup(word);
+});
+
+// Annotations sidebar
+document.getElementById('btn-annotations')?.addEventListener('click', () =>
+  document.getElementById('annotations-sidebar')?.classList.contains('open') ? closePanels() : openAnnotations());
+document.getElementById('annotations-close')?.addEventListener('click', closePanels);
+
 document.getElementById('btn-back').addEventListener('click', () => { void returnToLibrary(); });
 document.getElementById('btn-toc').addEventListener('click', () =>
   tocSidebar.classList.contains('open') ? closePanels() : openToc());
@@ -3444,12 +4153,12 @@ document.getElementById('btn-prev-chap')?.addEventListener('click', () => {
   if (!target) return;
   const spineItem = findSpineItemForHref((target.href || '').split('#')[0]);
   const displayTarget = spineItem?.index != null ? spineItem.index : target.href;
-  console.log('[bionic] btn-prev-chap: idx', idx, '→ target href:', target?.href, '→ displayTarget:', displayTarget, 'bionic:', prefs.bionicReading);
+  console.log(`[nav] PREV-CHAP | from="${currentHref?.split('/').pop()}" → "${displayTarget}"`);
   rendition?.display(displayTarget).then(() => {
     const loc = rendition?.currentLocation?.();
-    console.log('[bionic] btn-prev-chap: display succeeded, cfi:', loc?.start?.cfi?.slice(0,80));
+    console.log(`[nav] CHAP-landed | page=${loc?.start?.displayed?.page}/${loc?.start?.displayed?.total} href="${loc?.start?.href?.split('/').pop()}"`);
     scheduleBionicPrefetchAround(loc);
-  }).catch(e => console.warn('[bionic] btn-prev-chap display FAILED:', e.message));
+  }).catch(() => {});
 });
 document.getElementById('btn-next-chap')?.addEventListener('click', () => {
   const { tops, idx } = findCurrentTocChapIdx();
@@ -3457,12 +4166,12 @@ document.getElementById('btn-next-chap')?.addEventListener('click', () => {
   const target = tops[idx + 1];
   const spineItem = findSpineItemForHref((target.href || '').split('#')[0]);
   const displayTarget = spineItem?.index != null ? spineItem.index : target.href;
-  console.log('[bionic] btn-next-chap: idx', idx, '→ next href:', target?.href, '→ displayTarget:', displayTarget, 'bionic:', prefs.bionicReading);
+  console.log(`[nav] NEXT-CHAP | from="${currentHref?.split('/').pop()}" → "${displayTarget}"`);
   rendition?.display(displayTarget).then(() => {
     const loc = rendition?.currentLocation?.();
-    console.log('[bionic] btn-next-chap: display succeeded, cfi:', loc?.start?.cfi?.slice(0,80));
+    console.log(`[nav] CHAP-landed | page=${loc?.start?.displayed?.page}/${loc?.start?.displayed?.total} href="${loc?.start?.href?.split('/').pop()}"`);
     scheduleBionicPrefetchAround(loc);
-  }).catch(e => console.warn('[bionic] btn-next-chap display FAILED:', e.message));
+  }).catch(() => {});
 });
 document.querySelector('.nav-zone-prev')?.addEventListener('click', goPrev);
 document.querySelector('.nav-zone-next')?.addEventListener('click', goNext);
@@ -3478,6 +4187,7 @@ document.addEventListener('fullscreenchange', syncFullscreenButton);
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
+  console.log('[reader] v4.2026-05-08.10');
   applyUiTheme();
   applyPageShadow();
   applyAutoHide();
@@ -3713,10 +4423,11 @@ async function init() {
     console.log('[pos] isReady=true, currentCfi:', currentCfi.slice(0,60));
     isReady = true;
     openCfi = currentCfi; // snapshot position-on-open for change detection
-    // Load bookmarks for this book (non-blocking)
+        // Load bookmarks and annotations for this book (non-blocking)
     void loadBookmarks(currentBook.id);
+    void loadAnnotations(currentBook.id);
     // Start a stats session (non-blocking)
-    void startStatsSession(currentBook.id);
+    void startStatsSession(currentBook.id);    
     // Final chapter-name refresh — by now TOC and relocated have both fired
     if (lastChapterHref) {
       chapterTitleEl.textContent = chapterLabelFromHref(lastChapterHref);

@@ -1,7 +1,7 @@
 // Codexa Service Worker
 // Caches app shell for offline use. EPUB files are NOT cached (too large, user-specific).
 
-const CACHE_VERSION = 'br-v34';
+const CACHE_VERSION = 'br-v01';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -24,6 +24,8 @@ const APP_SHELL = [
   '/images/all_library_bw.svg',
   '/images/currently_reading.svg',
   '/images/currently_reading_bw.svg',
+  '/images/dictionary.svg',
+  '/images/dictionary_bw.svg',
   '/images/shelf.svg',
   '/images/shelf_bw.svg',
   '/images/settings.svg',

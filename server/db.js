@@ -124,6 +124,20 @@ function initDb() {
       FOREIGN KEY (book_id) REFERENCES books(id)  ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS annotations (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL,
+      book_id    INTEGER NOT NULL,
+      cfi        TEXT    NOT NULL,
+      pct        REAL    DEFAULT 0,
+      text       TEXT    DEFAULT '',
+      note       TEXT    DEFAULT '',
+      color      TEXT    DEFAULT 'yellow',
+      created_at INTEGER DEFAULT (strftime('%s', 'now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS reading_sessions (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id    INTEGER NOT NULL,

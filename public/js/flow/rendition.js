@@ -707,37 +707,15 @@ class Rendition {
   reportLocation() {
     return this.q.enqueue(
       function reportedLocation() {
-        requestAnimationFrame(
-          function reportedLocationAfterRAF() {
-            var location = this.manager.currentLocation()
-            if (
-              location &&
-              location.then &&
-              typeof location.then === 'function'
-            ) {
-              location.then(
-                function (result) {
-                  let located = this.located(result)
-
-                  if (!located || !located.start || !located.end) {
-                    return
-                  }
-
-                  this.location = located
-
-                  this.emit(EVENTS.RENDITION.LOCATION_CHANGED, {
-                    index: this.location.start.index,
-                    href: this.location.start.href,
-                    start: this.location.start.cfi,
-                    end: this.location.end.cfi,
-                    percentage: this.location.start.percentage,
-                  })
-
-                  this.emit(EVENTS.RENDITION.RELOCATED, this.location)
-                }.bind(this),
-              )
-            } else if (location) {
-              let located = this.located(location)
+        var location = this.manager.currentLocation()
+        if (
+          location &&
+          location.then &&
+          typeof location.then === 'function'
+        ) {
+          location.then(
+            function (result) {
+              let located = this.located(result)
 
               if (!located || !located.start || !located.end) {
                 return
@@ -745,17 +723,6 @@ class Rendition {
 
               this.location = located
 
-              /**
-               * @event locationChanged
-               * @deprecated
-               * @type {object}
-               * @property {number} index
-               * @property {string} href
-               * @property {EpubCFI} start
-               * @property {EpubCFI} end
-               * @property {number} percentage
-               * @memberof Rendition
-               */
               this.emit(EVENTS.RENDITION.LOCATION_CHANGED, {
                 index: this.location.start.index,
                 href: this.location.start.href,
@@ -764,15 +731,44 @@ class Rendition {
                 percentage: this.location.start.percentage,
               })
 
-              /**
-               * @event relocated
-               * @type {displayedLocation}
-               * @memberof Rendition
-               */
               this.emit(EVENTS.RENDITION.RELOCATED, this.location)
-            }
-          }.bind(this),
-        )
+            }.bind(this),
+          )
+        } else if (location) {
+          let located = this.located(location)
+
+          if (!located || !located.start || !located.end) {
+            return
+          }
+
+          this.location = located
+
+          /**
+           * @event locationChanged
+           * @deprecated
+           * @type {object}
+           * @property {number} index
+           * @property {string} href
+           * @property {EpubCFI} start
+           * @property {EpubCFI} end
+           * @property {number} percentage
+           * @memberof Rendition
+           */
+          this.emit(EVENTS.RENDITION.LOCATION_CHANGED, {
+            index: this.location.start.index,
+            href: this.location.start.href,
+            start: this.location.start.cfi,
+            end: this.location.end.cfi,
+            percentage: this.location.start.percentage,
+          })
+
+          /**
+           * @event relocated
+           * @type {displayedLocation}
+           * @memberof Rendition
+           */
+          this.emit(EVENTS.RENDITION.RELOCATED, this.location)
+        }
       }.bind(this),
     )
   }

@@ -95,6 +95,7 @@
     <header class="reader-header">
       <button id="btn-toc"             class="btn-icon" data-i18n-title="reader.btn_toc"           title="Kazalo vsebine"><img src="/images/chapters.svg" class="nav-icon nav-icon-chapters" alt=""></button>
       <button id="btn-bookmarks"       class="btn-icon bookmark-btn-wrap" data-i18n-title="reader.btn_bookmarks" title="Zaznamki"><img src="/images/bookmark.svg" class="nav-icon nav-icon-bookmark" alt=""><span id="bookmarks-badge" class="bookmark-badge hidden"></span></button>
+      <button id="btn-annotations"     class="btn-icon" data-i18n-title="reader.btn_annotations" title="Označbe"><img src="/images/highlight.svg" class="nav-icon nav-icon-highlight" alt=""></button>
       <button id="btn-bookmark-back"   class="btn-icon" style="display:none" data-i18n-title="reader.btn_search_back"   title="Nazaj na prejšnji položaj">↩</button>
       <button id="btn-bookmark-accept" class="btn-icon" style="display:none" data-i18n-title="reader.btn_search_accept" title="Sprejmi položaj">✓</button>
 
@@ -177,6 +178,15 @@
       <button id="toc-close" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri kazalo">×</button>
     </div>
     <div id="toc-list"></div>
+  </aside>
+
+  <!-- Annotations sidebar -->
+  <aside id="annotations-sidebar" aria-label="Označbe">
+    <div class="annotations-sidebar-header">
+      <h2 data-i18n="reader.annotations_title">Označbe</h2>
+      <button id="annotations-close" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri označbe">×</button>
+    </div>
+    <div id="annotations-list"></div>
   </aside>
 
   <!-- Bookmarks sidebar -->
@@ -666,6 +676,65 @@
 
     </div><!-- /.settings-body -->
   </div><!-- /#settings-panel -->
+
+  <!-- Footnote popup (slides up from bottom) -->
+  <div id="footnote-backdrop" class="footnote-backdrop"></div>
+  <div id="footnote-popup" role="dialog" aria-modal="false" aria-labelledby="footnote-popup-title">
+    <div class="footnote-popup-header">
+      <span id="footnote-popup-title" class="footnote-popup-label" data-i18n="footnote.popup_title">Opomba</span>
+      <button id="footnote-popup-close" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri">&#x2715;</button>
+    </div>
+    <div id="footnote-popup-content" class="footnote-popup-content"></div>
+  </div>
+
+  <!-- Annotation backdrop (shared by toolbar, note editor, edit sheet) -->
+  <div id="annot-backdrop" class="annot-backdrop"></div>
+
+  <!-- Annotation toolbar — slides up when text is selected -->
+  <div id="annot-toolbar" role="toolbar" aria-label="Označi besedilo">
+    <div class="annot-toolbar-colors">
+      <button class="annot-color-btn" data-color="yellow" data-i18n-title="reader.annotation_color_yellow" aria-label="Rumena"></button>
+      <button class="annot-color-btn" data-color="green"  data-i18n-title="reader.annotation_color_green"  aria-label="Zelena"></button>
+      <button class="annot-color-btn" data-color="blue"   data-i18n-title="reader.annotation_color_blue"   aria-label="Modra"></button>
+      <button class="annot-color-btn" data-color="pink"   data-i18n-title="reader.annotation_color_pink"   aria-label="Roza"></button>
+    </div>
+    <button id="annot-btn-note"   class="btn-icon-sm" data-i18n-title="reader.annotation_add_note" title="Dodaj opombo">✎</button>
+    <button id="annot-btn-dict"   class="btn-icon-sm annot-btn-dict" data-i18n-title="reader.annotation_dict_lookup" title="Slovar"><img src="/images/dictionary.svg" class="nav-icon annot-dict-icon" alt=""></button>
+    <button id="annot-btn-cancel" class="btn-icon-sm" data-i18n-aria-label="common.close" aria-label="Prekliči">✕</button>
+  </div>
+
+  <!-- Annotation note editor — for writing/editing a note -->
+  <div id="annot-note-editor" role="dialog" aria-modal="true" aria-labelledby="annot-note-title">
+    <div class="annot-note-header">
+      <span id="annot-note-title" class="annot-note-label" data-i18n="reader.annotation_note_title">Opomba</span>
+      <button id="annot-note-cancel" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri">&#x2715;</button>
+    </div>
+    <textarea id="annot-note-text" rows="4"
+      data-i18n-placeholder="reader.annotation_note_placeholder"
+      placeholder="Napiši opombo…" maxlength="1000"></textarea>
+    <div class="annot-note-footer">
+      <button id="annot-note-save" class="btn btn-primary" data-i18n="reader.annotation_note_save">Shrani</button>
+    </div>
+  </div>
+
+  <!-- Annotation edit sheet — shown when tapping an existing highlight -->
+  <div id="annot-edit-sheet" role="dialog" aria-modal="true" aria-label="Uredi označbo">
+    <div class="annot-edit-header">
+      <span class="annot-note-label" data-i18n="reader.annotation_edit_title">Označba</span>
+      <button id="annot-edit-close" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri">&#x2715;</button>
+    </div>
+    <div class="annot-edit-note-preview"></div>
+    <div class="annot-edit-colors">
+      <button class="annot-edit-color-btn" data-color="yellow" aria-label="Rumena"></button>
+      <button class="annot-edit-color-btn" data-color="green"  aria-label="Zelena"></button>
+      <button class="annot-edit-color-btn" data-color="blue"   aria-label="Modra"></button>
+      <button class="annot-edit-color-btn" data-color="pink"   aria-label="Roza"></button>
+    </div>
+    <div class="annot-edit-actions">
+      <button id="annot-edit-note-btn"   class="btn btn-secondary" data-i18n="reader.annotation_edit_note">Uredi opombo</button>
+      <button id="annot-edit-delete-btn" class="btn btn-danger"    data-i18n="reader.annotation_delete">Izbriši</button>
+    </div>
+  </div>
 
   <!-- Backdrop -->
   <div id="panel-backdrop"></div>

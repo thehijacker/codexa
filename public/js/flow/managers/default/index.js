@@ -292,9 +292,14 @@ class DefaultViewManager {
       }
 
       if (target) {
-        let offset = visible.locationOf(target)
-        let width = visible.width()
-        this.moveTo(offset, width)
+        // defer moveTo until after expand() has recalculated dimensions
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            let offset = visible.locationOf(target)
+            let width = visible.width()
+            this.moveTo(offset, width)
+          })
+        })
       }
 
       displaying.resolve()
@@ -334,6 +339,9 @@ class DefaultViewManager {
       )
       .then(
         function () {
+          if (!target) {
+            this.scrollTo(0, 0, true)
+          }
           this.views.show()
 
           displaying.resolve()
@@ -428,9 +436,11 @@ class DefaultViewManager {
   prepend(section, forceRight) {
     var view = this.createView(section, forceRight)
 
-    view.on(EVENTS.VIEWS.RESIZED, (bounds) => {
-      this.counter(bounds)
-    })
+    if (!this.isPaginated) {
+      view.on(EVENTS.VIEWS.RESIZED, (bounds) => {
+        this.counter(bounds)
+      })
+    }
 
     this.views.prepend(view)
 
@@ -562,6 +572,8 @@ class DefaultViewManager {
               this.settings.rtlScrollType === 'default'
             ) {
               this.scrollTo(this.container.scrollWidth, 0, true)
+            } else if (this.isPaginated) {
+              this.scrollTo(0, 0, true)
             }
             this.views.show()
           }.bind(this),
@@ -665,26 +677,33 @@ class DefaultViewManager {
         )
         .then(
           function () {
+            this.views.show()
             if (this.isPaginated && this.settings.axis === 'horizontal') {
-              if (this.settings.direction === 'rtl') {
-                if (this.settings.rtlScrollType === 'default') {
-                  this.scrollTo(0, 0, true)
-                } else {
-                  this.scrollTo(
-                    this.container.scrollWidth * -1 + this.layout.delta,
-                    0,
-                    true,
-                  )
+              const view = this.views.first()
+              if (!this.settings.direction || this.settings.direction === 'ltr') {
+                const scrollToLast = () => {
+                  this.scrollTo(this.container.scrollWidth - this.layout.delta, 0, true)
                 }
+                scrollToLast()
+                // Two expand cycles fire per chapter load (double CSS injection). Chain two
+                // once() listeners so both are handled and scroll lands at the true last page.
+                if (view) view.once(EVENTS.VIEWS.RESIZED, () => {
+                  scrollToLast()
+                  view.once(EVENTS.VIEWS.RESIZED, scrollToLast)
+                })
+              } else if (this.settings.rtlScrollType === 'default') {
+                this.scrollTo(0, 0, true)
               } else {
-                this.scrollTo(
-                  this.container.scrollWidth - this.layout.delta,
-                  0,
-                  true,
-                )
+                const scrollToLast = () => {
+                  this.scrollTo(this.container.scrollWidth * -1 + this.layout.delta, 0, true)
+                }
+                scrollToLast()
+                if (view) view.once(EVENTS.VIEWS.RESIZED, () => {
+                  scrollToLast()
+                  view.once(EVENTS.VIEWS.RESIZED, scrollToLast)
+                })
               }
             }
-            this.views.show()
           }.bind(this),
         )
     }

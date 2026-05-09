@@ -14,8 +14,9 @@ const { kosyncRouter, proxyRouter } = require('./routes/kosync');
 const opdsRoutes       = require('./routes/opds');
 const dictionaryRoutes = require('./routes/dictionary');
 const shelvesRoutes    = require('./routes/shelves');
-const bookmarksRoutes  = require('./routes/bookmarks');
-const statsRoutes      = require('./routes/stats');
+const bookmarksRoutes    = require('./routes/bookmarks');
+const annotationsRoutes  = require('./routes/annotations');
+const statsRoutes        = require('./routes/stats');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -97,8 +98,9 @@ app.use('/api/fonts',    fontsRoutes);
 app.use('/api/kosync',     proxyRouter);   // JWT-protected proxy to external server
 app.use('/api/opds',       opdsRoutes);
 app.use('/api/dictionary', dictionaryRoutes);
-app.use('/api/bookmarks',  bookmarksRoutes);
-app.use('/api/stats',      statsRoutes);
+app.use('/api/bookmarks',    bookmarksRoutes);
+app.use('/api/annotations',  annotationsRoutes);
+app.use('/api/stats',        statsRoutes);
 
 // KOReader kosync protocol — must be AFTER /api routes to avoid shadowing
 // KOReader devices point their sync settings to this server's base URL.
