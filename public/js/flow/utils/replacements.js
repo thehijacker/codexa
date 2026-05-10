@@ -84,15 +84,32 @@ export function replaceLinks(contents, fn) {
   var replaceLink = function (link) {
     var href = link.getAttribute('href')
 
-    if (href.indexOf('mailto:') === 0) {
-      return
+    // Preserve original target but remove href so browsers don't show URL on hover.
+    link.dataset.brLinkHref = href
+    link.removeAttribute('href')
+    if (!link.hasAttribute('tabindex')) {
+      link.setAttribute('tabindex', '0')
     }
+    link.style.cursor = 'pointer'
 
-    var absolute = href.indexOf('://') > -1
+    var activate = function (event) {
+      if (event) {
+        event.preventDefault()
+        event.stopPropagation()
+      }
 
-    if (absolute) {
-      link.setAttribute('target', '_blank')
-    } else {
+      if (href.indexOf('mailto:') === 0) {
+        window.location.href = href
+        return false
+      }
+
+      var absolute = href.indexOf('://') > -1
+
+      if (absolute) {
+        window.open(href, '_blank', 'noopener,noreferrer')
+        return false
+      }
+
       var linkUrl
       try {
         linkUrl = new Url(href, location)
@@ -100,16 +117,21 @@ export function replaceLinks(contents, fn) {
         // NOOP
       }
 
-      link.onclick = function () {
-        if (linkUrl && linkUrl.hash) {
-          fn(linkUrl.Path.path + linkUrl.hash)
-        } else if (linkUrl) {
-          fn(linkUrl.Path.path)
-        } else {
-          fn(href)
-        }
+      if (linkUrl && linkUrl.hash) {
+        fn(linkUrl.Path.path + linkUrl.hash)
+      } else if (linkUrl) {
+        fn(linkUrl.Path.path)
+      } else {
+        fn(href)
+      }
 
-        return false
+      return false
+    }
+
+    link.onclick = activate
+    link.onkeydown = function (event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        return activate(event)
       }
     }
   }.bind(this)

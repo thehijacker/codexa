@@ -1386,8 +1386,8 @@ input:focus, select:focus, textarea:focus {
 .nav-tile:hover .nav-tile-sync-btn { opacity: 1; }
 
 /* ── Sidebar responsive ──────────────────────────────────────────────────────── */
-@media (max-width: 768px) {
-  .app-sidebar {
+@media (max-width: 640px) {
+    .app-sidebar {
     position: fixed;
     left: 0; top: 0; bottom: 0;
     height: 100%;
@@ -1395,7 +1395,7 @@ input:focus, select:focus, textarea:focus {
     transition: transform .25s ease;
     width: var(--sidebar-width) !important; /* always full width on mobile */
     z-index: 300;
-  }
+}
   .app-sidebar.open { transform: translateX(0); }
   .app-body-header  { display: flex; }
   .sidebar-collapse-btn { display: none; }
@@ -1409,6 +1409,7 @@ input:focus, select:focus, textarea:focus {
     overflow-y: auto;
     scrollbar-width: none;
     max-height: calc(100vh - 2rem);
+    padding-top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
   }
   .info-modal::-webkit-scrollbar { display: none; }
   .info-modal-body {
@@ -1428,7 +1429,8 @@ input:focus, select:focus, textarea:focus {
     border-radius: 50%;
     width: 2rem; height: 2rem;
     display: flex; align-items: center; justify-content: center;
-    top: .6rem; right: .6rem;
+    top: calc(env(safe-area-inset-top, 0px) + 0.6rem);
+    right: .6rem;
     z-index: 1;
   }
 }

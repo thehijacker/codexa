@@ -39,7 +39,7 @@
         var r = document.documentElement;
         r.style.setProperty('--sat', sat + 'px');
         // Always set --sab: corrects the CSS default (34px) for devices that don't need it
-        if (sab > 0 || isFinal) r.style.setProperty('--sab', sab + 'px');
+        r.style.setProperty('--sab', sab + 'px');
         if (isPwa) r.style.setProperty('--layout-h', window.innerHeight + 'px');
         return { sat: sat, sab: sab, isPwa: isPwa };
       }
@@ -174,7 +174,10 @@
   <!-- TOC sidebar -->
   <aside id="toc-sidebar" aria-label="Kazalo vsebine">
     <div class="toc-sidebar-header">
-      <h2 data-i18n="reader.toc_title">Kazalo vsebine</h2>
+      <div class="panel-title">
+        <img src="/images/chapters.svg" class="nav-icon nav-icon-chapters dialog-title-icon" alt="">
+        <h2 data-i18n="reader.toc_title">Kazalo vsebine</h2>
+      </div>
       <button id="toc-close" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri kazalo">×</button>
     </div>
     <div id="toc-list"></div>
@@ -183,7 +186,10 @@
   <!-- Annotations sidebar -->
   <aside id="annotations-sidebar" aria-label="Označbe">
     <div class="annotations-sidebar-header">
-      <h2 data-i18n="reader.annotations_title">Označbe</h2>
+      <div class="panel-title">
+        <img src="/images/highlight.svg" class="nav-icon nav-icon-highlight dialog-title-icon" alt="">
+        <h2 data-i18n="reader.annotations_title">Označbe</h2>
+      </div>
       <button id="annotations-close" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri označbe">×</button>
     </div>
     <div id="annotations-list"></div>
@@ -192,7 +198,10 @@
   <!-- Bookmarks sidebar -->
   <aside id="bookmarks-sidebar" aria-label="Zaznamki">
     <div class="bookmarks-sidebar-header">
-      <h2 data-i18n="reader.bookmarks_title">Zaznamki</h2>
+      <div class="panel-title">
+        <img src="/images/bookmark.svg" class="nav-icon nav-icon-bookmark dialog-title-icon" alt="">
+        <h2 data-i18n="reader.bookmarks_title">Zaznamki</h2>
+      </div>
       <button id="btn-add-bookmark" class="btn-icon-sm" data-i18n-title="reader.btn_add_bookmark" title="Dodaj zaznamek">+</button>
       <button id="bookmarks-close" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri zaznamke">×</button>
     </div>
@@ -202,7 +211,10 @@
   <!-- Search sidebar -->
   <aside id="search-sidebar" aria-label="Iskanje v knjigi">
     <div class="search-sidebar-header">
-      <h2 data-i18n="reader.search_title">Iskanje</h2>
+      <div class="panel-title">
+        <img src="/images/find.svg" class="nav-icon nav-icon-find dialog-title-icon" alt="">
+        <h2 data-i18n="reader.search_title">Iskanje</h2>
+      </div>
       <button id="search-close" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri iskanje">×</button>
     </div>
     <div class="search-input-row">
@@ -216,11 +228,14 @@
   <!-- Settings panel -->
   <div id="settings-panel" role="complementary" aria-label="Nastavitve branja">
     <div class="settings-panel-header">
-      <h2 data-i18n="reader.settings_title">Nastavitve branja</h2>
-      <button id="btn-reset-book-prefs" class="btn btn-secondary btn-sm hidden" style="margin-left:auto;font-size:.75rem" data-i18n-title="reader.btn_reset_book" title="Odstrani nastavitve specifične za to knjigo in uporabi globalne privzete" data-i18n="reader.btn_reset_book">
-        Ponastavi za to knjigo
-      </button>
-      <button id="settings-close" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri nastavitve">×</button>
+      <div class="settings-panel-header-row">
+        <div class="panel-title">
+          <img src="/images/settings.svg" class="nav-icon nav-icon-settings dialog-title-icon" alt="">
+          <h2 data-i18n="reader.settings_title">Nastavitve branja</h2>
+        </div>
+        <button id="settings-close" class="modal-close" data-i18n-aria-label="common.close" aria-label="Zapri nastavitve">×</button>
+      </div>
+      <button id="btn-reset-book-prefs" class="btn btn-secondary btn-sm hidden settings-reset-btn" data-i18n-title="reader.btn_reset_book" title="Odstrani nastavitve specifične za to knjigo in uporabi globalne privzete" data-i18n="reader.btn_reset_book">Ponastavi za to knjigo</button>
     </div>
     <div class="settings-body">
 
@@ -699,7 +714,7 @@
       <button class="annot-color-btn" data-color="pink"   data-i18n-title="reader.annotation_color_pink"   aria-label="Roza"></button>
     </div>
     <button id="annot-btn-note"   class="btn-icon-sm" data-i18n-title="reader.annotation_add_note" title="Dodaj opombo">✎</button>
-    <button id="annot-btn-dict"   class="btn-icon-sm annot-btn-dict" data-i18n-title="reader.annotation_dict_lookup" title="Slovar"><img src="/images/dictionary.svg" class="nav-icon annot-dict-icon" alt=""></button>
+    <button id="annot-btn-dict"   class="btn-icon-sm annot-btn-dict" data-i18n-title="reader.annotation_dict_lookup" title="Slovar">🔍</button>
     <button id="annot-btn-cancel" class="btn-icon-sm" data-i18n-aria-label="common.close" aria-label="Prekliči">✕</button>
   </div>
 

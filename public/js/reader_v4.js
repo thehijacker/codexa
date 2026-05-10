@@ -241,7 +241,7 @@ let speedSamples     = [];    // up to 25 recent samples
 
 // Space reserved at the bottom of the rendition so the status bar never overlaps text.
 // Must match the value used in book.renderTo() — kept here so all resize calls share it.
-const RENDITION_BOTTOM_RESERVE = 28;
+const RENDITION_BOTTOM_RESERVE = 18;
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const readerLayout   = document.querySelector('.reader-layout');
@@ -966,6 +966,8 @@ function applyUiTheme() {
     epubViewer.style.background = theme.bg;
   }
   applyPageShadow();
+  // Tag body with current theme name so CSS can target per-theme overrides.
+  document.body.dataset.readerTheme = prefs.theme;
   // SVGs loaded as <img> can't use currentColor — drive icon appearance via filter.
   // Dark themes need icons inverted (dark SVG → light); light/sepia themes need none.
   const needsIconInvert = ['dark', 'midnight', 'nord'].includes(prefs.theme);
@@ -1153,7 +1155,7 @@ function attachIframeDictionary(contents) {
 // Detect whether an <a> element inside the epub iframe is a footnote/endnote reference.
 // Pure function — runs in the iframe context, no epub.js API needed.
 function isFootnoteLink(anchor) {
-  const rawHref = anchor.getAttribute('href') || '';
+  const rawHref = anchor.dataset?.footnoteHref || anchor.dataset?.brLinkHref || anchor.getAttribute('href') || '';
   if (!rawHref.includes('#')) return false;
 
   // EPUB3 explicit attributes
@@ -1192,17 +1194,42 @@ function isFootnoteLink(anchor) {
 function attachIframeFootnotes(contents) {
   if (!contents?.document) return;
   const doc = contents.document;
-  doc.addEventListener('click', (e) => {
-    const anchor = e.target.closest('a[href]');
-    if (!anchor) return;
-    const rawHref = anchor.getAttribute('href') || '';
-    if (!rawHref.includes('#')) return;
+
+  // Remove href from footnote links so desktop browsers don't show URLs on hover.
+  // Keep original target in data-footnote-href and preserve keyboard focusability.
+  doc.querySelectorAll('a').forEach((anchor) => {
     if (!isFootnoteLink(anchor)) return;
+    const rawHref = anchor.dataset?.brLinkHref || anchor.getAttribute('href') || '';
+    if (!rawHref) return;
+    anchor.dataset.footnoteHref = rawHref;
+    anchor.removeAttribute('href');
+    anchor.setAttribute('role', 'button');
+    anchor.setAttribute('tabindex', '0');
+    anchor.style.cursor = 'pointer';
+  });
+
+  const openFootnote = (anchor, e) => {
+    const rawHref = anchor.dataset.footnoteHref || anchor.dataset.brLinkHref || anchor.getAttribute('href') || '';
+    if (!rawHref.includes('#')) return;
     e.preventDefault();
     e.stopPropagation();
     const sameDoc = rawHref.startsWith('#');
     const fragId  = rawHref.split('#').pop();
     window.parent.postMessage({ type: 'footnote-show', rawHref, fragId, sameDoc }, '*');
+  };
+
+  doc.addEventListener('click', (e) => {
+    const anchor = e.target.closest('a[data-footnote-href], a[href]');
+    if (!anchor) return;
+    if (!anchor.dataset.footnoteHref && !isFootnoteLink(anchor)) return;
+    openFootnote(anchor, e);
+  }, { capture: true });
+
+  doc.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const anchor = e.target?.closest?.('a[data-footnote-href]');
+    if (!anchor) return;
+    openFootnote(anchor, e);
   }, { capture: true });
 }
 
@@ -2007,7 +2034,7 @@ document.querySelector('.reader-header').addEventListener('mouseleave', () => {
 });
 
 // ── TOC ───────────────────────────────────────────────────────────────────────
-function buildToc(toc, depth = 0) {
+function buildTocRecursive(toc, depth, fragment) {
   toc.forEach(item => {
     const btn = document.createElement('button');
     btn.className   = `toc-item toc-depth-${depth}`;
@@ -2049,9 +2076,24 @@ function buildToc(toc, depth = 0) {
       }, 80);
     });
 
-    tocListEl.appendChild(btn);
+    fragment.appendChild(btn);
     tocFlatItems.push({ label: item.label, href: item.href, depth, button: btn });
-    if (item.subitems?.length) buildToc(item.subitems, depth + 1);
+    if (item.subitems?.length) buildTocRecursive(item.subitems, depth + 1, fragment);
+  });
+}
+
+function buildToc(toc) {
+  tocFlatItems = [];
+  tocListEl.classList.add('is-building');
+  tocListEl.innerHTML = '';
+
+  const fragment = document.createDocumentFragment();
+  buildTocRecursive(toc, 0, fragment);
+  tocListEl.appendChild(fragment);
+
+  // Reveal only after full list is in DOM to avoid visible style churn.
+  requestAnimationFrame(() => {
+    tocListEl.classList.remove('is-building');
   });
 }
 
@@ -2102,19 +2144,26 @@ function chapterLabelFromHref(href) {
 
 // ── Panels ────────────────────────────────────────────────────────────────────
 function openToc() {
+  const centerActiveTocItem = () => {
+    const active = tocListEl.querySelector('.toc-item.active');
+    if (!active) return false;
+    const itemTop = active.offsetTop;
+    const itemHeight = active.offsetHeight;
+    const listHeight = tocListEl.clientHeight;
+    tocListEl.scrollTop = itemTop - (listHeight / 2) + (itemHeight / 2);
+    return true;
+  };
+
+  // Pre-position the list before the sidebar becomes visible to avoid a visible jump.
+  centerActiveTocItem();
+
   tocSidebar.classList.add('open');
   settingsPanel.classList.remove('open');
   panelBackdrop.classList.add('visible');
   if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
-  // Scroll active item to center of #toc-list after the slide-in transition (250ms)
+  // Fallback recenter after slide-in in case TOC updates while opening.
   setTimeout(() => {
-    const active = tocListEl.querySelector('.toc-item.active');
-    if (!active) return;
-    // offsetTop is relative to tocListEl because it's the offset parent (position:relative via flex)
-    const itemTop    = active.offsetTop;
-    const itemHeight = active.offsetHeight;
-    const listHeight = tocListEl.clientHeight;
-    tocListEl.scrollTop = itemTop - (listHeight / 2) + (itemHeight / 2);
+    centerActiveTocItem();
   }, 280);
 }
 function openSettings() {
@@ -3606,6 +3655,7 @@ const SWIPE_MAX_VERT  = 130;  // max vertical drift allowed
 const TAP_MAX_DRIFT   = 20;   // max px movement still counted as a tap
 const TOP_REVEAL_ZONE = 92;   // px from top where tap reveals header
 const SWIPE_DOWN_OPEN = 42;   // px downward swipe to reveal header
+const SWIPE_UP_CLOSE  = 30;   // px upward swipe to hide header when open
 // iOS detection (Chrome/Safari on iPhone/iPad use WebKit with different iframe touch behaviour)
 const isIOS = /iP(hone|od|ad)/.test(navigator.userAgent) ||
               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -3626,6 +3676,11 @@ function handleTouchEnd(e) {
   const y     = e.changedTouches[0].clientY;
   if (prefs.autoHideHeader && dy > SWIPE_DOWN_OPEN && absDx < 70) {
     if (!readerLayout.classList.toggle('header-peek')) closeJumpPanel();
+    return;
+  }
+  if (prefs.autoHideHeader && dy < -SWIPE_UP_CLOSE && absDx < 70 && readerLayout.classList.contains('header-peek')) {
+    readerLayout.classList.remove('header-peek');
+    closeJumpPanel();
     return;
   }
   if (absDx < TAP_MAX_DRIFT && absDy < TAP_MAX_DRIFT) {
@@ -3686,6 +3741,12 @@ function attachIframeTouchNav(view) {
     if (prefs.autoHideHeader && dy > SWIPE_DOWN_OPEN && absDx < 70) {
       if (e.cancelable) e.preventDefault();
       if (!readerLayout.classList.toggle('header-peek')) closeJumpPanel();
+      return;
+    }
+    if (prefs.autoHideHeader && dy < -SWIPE_UP_CLOSE && absDx < 70 && readerLayout.classList.contains('header-peek')) {
+      if (e.cancelable) e.preventDefault();
+      readerLayout.classList.remove('header-peek');
+      closeJumpPanel();
       return;
     }
     if (absDx < TAP_MAX_DRIFT && absDy < TAP_MAX_DRIFT) {
@@ -3775,13 +3836,17 @@ epubViewer.addEventListener('wheel', (e) => { handleWheel(e.deltaY); }, { passiv
 document.addEventListener('br-wheel', (e) => { handleWheel(e.detail.deltaY); });
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
-window.addEventListener('resize', debounce(async () => {
+async function resizeRenditionToViewer() {
   if (!rendition) return;
   const pctBeforeResize = currentPct;
   rendition.resize(epubViewer.clientWidth, Math.max(200, epubViewer.clientHeight - RENDITION_BOTTOM_RESERVE));
   if (isReady && pctBeforeResize > 0 && book.locations?.length() > 0) {
     await seekToPercentage(pctBeforeResize);
   }
+}
+
+window.addEventListener('resize', debounce(() => {
+  void resizeRenditionToViewer();
 }, 300));
 
 // ── Reading statistics ────────────────────────────────────────────────────────
@@ -4199,7 +4264,16 @@ window.addEventListener('beforeunload', () => {
   if (!prefs.skipSaveOnClose) saveProgressBackground();
   endStatsSessionBackground();
 });
-document.addEventListener('fullscreenchange', syncFullscreenButton);
+document.addEventListener('fullscreenchange', async () => {
+  syncFullscreenButton();
+
+  // Keep layout height in sync on desktop after fullscreen toggle.
+  document.documentElement.style.setProperty('--layout-h', window.innerHeight + 'px');
+
+  // Wait two frames so flex layout + CSS vars settle before measuring epubViewer.
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  await resizeRenditionToViewer();
+});
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
