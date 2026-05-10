@@ -38,7 +38,7 @@ const THEME_UI = {
     textMuted:  '#6b6b6b',
     accent:     '#c73652',
     accentDark: '#a82843',
-    shadow:     '0 4px 24px rgba(20,20,20,.12)',
+    shadow:     '0 2px 8px rgba(20,20,20,.08), 0 4px 24px rgba(20,20,20,.12), 0 8px 40px rgba(20,20,20,.08)',
   },
   sepia: {
     bg:         '#f4ecd8',
@@ -49,7 +49,7 @@ const THEME_UI = {
     textMuted:  '#7a5e40',
     accent:     '#8b4513',
     accentDark: '#6e360e',
-    shadow:     '0 4px 24px rgba(60,40,20,.12)',
+    shadow:     '0 2px 8px rgba(60,40,20,.08), 0 4px 24px rgba(60,40,20,.12), 0 8px 40px rgba(60,40,20,.08)',
   },
   dark: {
     bg:         '#111111',
@@ -60,7 +60,7 @@ const THEME_UI = {
     textMuted:  '#909090',
     accent:     '#e94560',
     accentDark: '#c73652',
-    shadow:     '0 4px 24px rgba(0,0,0,.5)',
+    shadow:     '0 2px 8px rgba(0,0,0,.3), 0 4px 24px rgba(0,0,0,.4), 0 8px 40px rgba(0,0,0,.25)',
   },
   sepiaDark: {
     bg:         '#c4b090',
@@ -71,7 +71,7 @@ const THEME_UI = {
     textMuted:  '#6a5040',
     accent:     '#7a3a10',
     accentDark: '#5e2c0a',
-    shadow:     '0 4px 24px rgba(40,24,8,.18)',
+    shadow:     '0 2px 8px rgba(40,24,8,.12), 0 4px 24px rgba(40,24,8,.16), 0 8px 40px rgba(40,24,8,.10)',
   },
   midnight: {
     bg:         '#0f172a',
@@ -82,7 +82,7 @@ const THEME_UI = {
     textMuted:  '#94a3b8',
     accent:     '#38bdf8',
     accentDark: '#0ea5e9',
-    shadow:     '0 4px 24px rgba(0,0,0,.6)',
+    shadow:     '0 2px 8px rgba(0,0,0,.4), 0 4px 24px rgba(0,0,0,.5), 0 8px 40px rgba(0,0,0,.35)',
   },
   nord: {
     bg:         '#2e3440',
@@ -93,7 +93,7 @@ const THEME_UI = {
     textMuted:  '#9099ab',
     accent:     '#88c0d0',
     accentDark: '#5e81ac',
-    shadow:     '0 4px 24px rgba(0,0,0,.45)',
+    shadow:     '0 2px 8px rgba(0,0,0,.25), 0 4px 24px rgba(0,0,0,.35), 0 8px 40px rgba(0,0,0,.22)',
   },
 };
 
@@ -951,7 +951,8 @@ function applyUiTheme() {
     document.documentElement.style.setProperty('--color-text-muted',  ui.textMuted);
     document.documentElement.style.setProperty('--color-accent',      ui.accent);
     document.documentElement.style.setProperty('--color-accent-dark', ui.accentDark);
-    document.documentElement.style.setProperty('--shadow',            ui.shadow);
+    // document.documentElement.style.setProperty('--shadow',            ui.shadow);
+    // --shadow is controlled by applyPageShadow() to respect the spine-shadow toggle
     // Header: translucent glass tinted to the page colour
     const headerBg    = hexToRgba(theme.bg,   0.6);
     const headerBdr   = hexToRgba(theme.text, 0.12);
@@ -964,14 +965,29 @@ function applyUiTheme() {
     if (safeAreaFill) safeAreaFill.style.background = theme.bg;
     epubViewer.style.background = theme.bg;
   }
+  applyPageShadow();
   // SVGs loaded as <img> can't use currentColor — drive icon appearance via filter.
   // Dark themes need icons inverted (dark SVG → light); light/sepia themes need none.
   const needsIconInvert = ['dark', 'midnight', 'nord'].includes(prefs.theme);
   document.documentElement.style.setProperty('--nav-icon-filter', needsIconInvert ? 'brightness(0) invert(1)' : 'none');
 }
 
+/*
 function applyPageShadow() {
   document.getElementById('page-edge-shadow')?.classList.toggle('active', !!prefs.pageGapShadow);
+}*/
+
+function applyPageShadow() {
+  const on = !!prefs.pageGapShadow;
+  document.body.classList.toggle('page-gap-shadow-on', on);
+  const ui = THEME_UI[prefs.theme] || THEME_UI.dark;
+  // Keep --shadow deterministic (avoid falling back to :root defaults from main.css).
+  // But disable shadows entirely in e-ink mode.
+  if (prefs.eink) {
+    document.documentElement.style.setProperty('--shadow', 'none');
+  } else {
+    document.documentElement.style.setProperty('--shadow', ui.shadow);
+  }
 }
 
 // ── FIX: Forward iframe keydown events to host ────────────────────────────────

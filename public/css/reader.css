@@ -224,7 +224,6 @@ html, body {
   background: var(--color-surface);
   border-top: 1px solid var(--color-border);
   border-radius: 14px 14px 0 0;
-  box-shadow: 0 -4px 24px rgba(0,0,0,.22);
   transform: translateY(100%); transition: transform .22s ease;
 }
 #annot-toolbar.open { transform: translateY(0); }
@@ -248,7 +247,6 @@ html, body {
   background: var(--color-surface);
   border-top: 1px solid var(--color-border);
   border-radius: 14px 14px 0 0;
-  box-shadow: 0 -4px 24px rgba(0,0,0,.22);
   display: flex; flex-direction: column;
   transform: translateY(100%); transition: transform .22s ease;
 }
@@ -276,7 +274,6 @@ html, body {
   background: var(--color-surface);
   border-top: 1px solid var(--color-border);
   border-radius: 14px 14px 0 0;
-  box-shadow: 0 -4px 24px rgba(0,0,0,.22);
   transform: translateY(100%); transition: transform .22s ease;
 }
 #annot-edit-sheet.open { transform: translateY(0); }
@@ -330,7 +327,6 @@ html, body {
   background: var(--color-surface);
   border-top: 1px solid var(--color-border);
   border-radius: 14px 14px 0 0;
-  box-shadow: 0 -4px 24px rgba(0,0,0,.22);
   display: flex;
   flex-direction: column;
   transform: translateY(100%);
@@ -392,24 +388,45 @@ html, body {
 #epub-viewer iframe {
   background: var(--reader-page-bg, #1a1a2e) !important;
 }
-/* Book-edge shadow overlay: sits above the epub.js iframes as a reader-main sibling */
-#page-edge-shadow {
-  display: none;
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 6;
-  background-image:
-    linear-gradient(to right, rgba(0,0,0,.45), rgba(0,0,0,0)),
-    linear-gradient(to left, rgba(0,0,0,.45), rgba(0,0,0,0));
-  background-position: left top, right top;
-  background-repeat: no-repeat;
-  background-size: 32px 100%, 32px 100%;
-  background-origin: border-box;
-  background-clip: border-box;
+
+
+/* Panel/popup shadow policy:
+   - global ON  (body.page-gap-shadow-on): shadow always enabled
+   - global OFF (default): shadow only while element is open */
+#annot-toolbar,
+#annot-note-editor,
+#annot-edit-sheet,
+#footnote-popup,
+#toc-sidebar,
+#search-sidebar,
+#bookmarks-sidebar,
+#settings-panel,
+.dict-popup {
+  box-shadow: none;
 }
-#page-edge-shadow.active {
-  display: block;
+
+body.page-gap-shadow-on #annot-toolbar,
+body.page-gap-shadow-on #annot-note-editor,
+body.page-gap-shadow-on #annot-edit-sheet,
+body.page-gap-shadow-on #footnote-popup,
+body.page-gap-shadow-on #toc-sidebar,
+body.page-gap-shadow-on #search-sidebar,
+body.page-gap-shadow-on #bookmarks-sidebar,
+body.page-gap-shadow-on #settings-panel,
+body.page-gap-shadow-on .dict-popup {
+  box-shadow: var(--shadow);
+}
+
+#annot-toolbar.open,
+#annot-note-editor.open,
+#annot-edit-sheet.open,
+#footnote-popup.open,
+#toc-sidebar.open,
+#search-sidebar.open,
+#bookmarks-sidebar.open,
+#settings-panel.open,
+.dict-popup.open {
+  box-shadow: var(--shadow);
 }
 
 /* ── Navigation zones ────────────────────────────────────────────────────────── */
@@ -502,7 +519,6 @@ html, body {
   transition: transform .25s ease;
   display: flex;
   flex-direction: column;
-  box-shadow: var(--shadow);
 }
 #toc-sidebar.open { transform: translateX(0); }
 .toc-sidebar-header {
@@ -579,7 +595,6 @@ html, body {
   transition: transform .25s ease;
   display: flex;
   flex-direction: column;
-  box-shadow: var(--shadow);
 }
 #search-sidebar.open { transform: translateX(0); }
 
@@ -689,7 +704,6 @@ html, body {
   transition: transform .25s ease;
   display: flex;
   flex-direction: column;
-  box-shadow: var(--shadow);
 }
 #bookmarks-sidebar.open { transform: translateX(0); }
 
@@ -803,7 +817,6 @@ html, body {
   transition: transform .25s ease;
   display: flex;
   flex-direction: column;
-  box-shadow: var(--shadow);
 }
 #settings-panel.open { transform: translateX(0); }
 .settings-panel-header {
@@ -1202,7 +1215,6 @@ input[type="range"]::-moz-range-thumb {
   border: 1px solid var(--color-border);
   border-bottom: none;
   border-radius: 16px 16px 0 0;
-  box-shadow: 0 -4px 32px rgba(0,0,0,.5);
   z-index: 10001;
   display: flex;
   flex-direction: column;
