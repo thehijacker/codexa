@@ -185,7 +185,8 @@ const DEFAULT_PREFS = {
   hyphenLang:     '',           // empty = keep book's own lang attr; else override e.g. 'en'
   bionicReading:  false,        // emphasize word prefixes for easier scanning
   pageGapShadow:  false,        // show epub.js center-spine box-shadow in two-page mode
-  dictionaries:   [],           // ordered list of dict basenames; empty = use all
+  dictionaries:   [],           // enabled dict IDs in priority order; null = all disabled; empty = use all
+  dictionaryOrder: [],          // all dict IDs in user's display order (including disabled ones)
   edgePadding:    { top: 0, bottom: 0, left: 0, right: 0 },   // px inset for curved screens
   statusBar:      null,         // deep-merged in loadPrefs()
 };
@@ -289,7 +290,7 @@ const bookmarkAcceptBtn = document.getElementById('btn-bookmark-accept');
 
 // ── Prefs ─────────────────────────────────────────────────────────────────────
 // Keys that are stored per-book (content appearance).  All others are global.
-const PER_BOOK_KEYS = ['fontSize','fontFamily','lineHeight','letterSpacing','margin','theme','overrideStyles','paraIndent','paraIndentSize','paraSpacing','dictionaries','bionicReading','skipOpenProgressCheck','skipSaveOnClose'];
+const PER_BOOK_KEYS = ['fontSize','fontFamily','lineHeight','letterSpacing','margin','theme','overrideStyles','paraIndent','paraIndentSize','paraSpacing','dictionaries','dictionaryOrder','bionicReading','skipOpenProgressCheck','skipSaveOnClose'];
 
 function loadPrefs() {
   try {
@@ -1441,6 +1442,7 @@ function findTextRangeInPage(doc, text) {
 
 function showAnnotationToolbar(cfiRange, text) {
   _pendingAnnotation = { cfiRange, text };
+  updateDictButtonVisibility();
   document.getElementById('annot-toolbar')?.classList.add('open');
   document.getElementById('annot-backdrop')?.classList.add('open');
 }
@@ -2439,6 +2441,24 @@ async function loadAvailableDicts() {
   return availableDicts;
 }
 
+/** Returns true if there is at least one usable dictionary given current prefs.
+ *  Semantics for prefs.dictionaries:
+ *    []   (empty array) — never configured; use all available dicts
+ *    null               — user explicitly disabled all dicts
+ *    [...ids]           — use only these IDs, in this order
+ */
+function hasDictsEnabled() {
+  if (availableDicts === null) return true;  // not loaded yet — show optimistically
+  if (availableDicts.length === 0) return false; // no dicts installed
+  if (prefs.dictionaries === null) return false; // user explicitly disabled all
+  if (!Array.isArray(prefs.dictionaries) || prefs.dictionaries.length === 0) return true; // use all
+  return prefs.dictionaries.some(id => availableDicts.some(d => d.id === id));
+}
+
+function updateDictButtonVisibility() {
+  document.getElementById('annot-btn-dict')?.classList.toggle('hidden', !hasDictsEnabled());
+}
+
 async function renderDictSettings() {
   const container = document.getElementById('dict-settings-list');
   if (!container) return;
@@ -2450,18 +2470,26 @@ async function renderDictSettings() {
   }
 
   // Build ordered list: saved order first, then any new dicts appended at end.
-  const saved   = Array.isArray(prefs.dictionaries) && prefs.dictionaries.length ? prefs.dictionaries : [];
-  const allIds  = dicts.map(d => d.id);
-  const ordered = [...saved.filter(id => allIds.includes(id)), ...allIds.filter(id => !saved.includes(id))];
-  // enabled set: if nothing saved yet, enable all
-  const enabled = new Set(saved.length ? saved : allIds);
+  // dictionaryOrder = all dict IDs in user's preferred display order (including disabled)
+  // dictionaries    = enabled IDs only (null = all disabled; [] = all enabled/default)
+  const savedList   = Array.isArray(prefs.dictionaries) && prefs.dictionaries.length ? prefs.dictionaries : [];
+  const savedOrder  = Array.isArray(prefs.dictionaryOrder) && prefs.dictionaryOrder.length ? prefs.dictionaryOrder : savedList;
+  const allIds      = dicts.map(d => d.id);
+  const ordered     = [...savedOrder.filter(id => allIds.includes(id)), ...allIds.filter(id => !savedOrder.includes(id))];
+  // enabled set: null = none; [] = all; [...] = explicit list
+  const enabled = new Set(prefs.dictionaries === null ? [] : savedList.length ? savedList : allIds);
 
   function saveOrder() {
     const items = container.querySelectorAll('.dict-settings-item');
-    prefs.dictionaries = Array.from(items)
+    const allOrdered = Array.from(items).map(el => el.querySelector('input[type="checkbox"]').value);
+    const enabledIds = Array.from(items)
       .filter(el => el.querySelector('input[type="checkbox"]').checked)
       .map(el => el.querySelector('input[type="checkbox"]').value);
+    prefs.dictionaryOrder = allOrdered;
+    // null = explicitly disabled all; non-empty array = explicit enabled list
+    prefs.dictionaries = enabledIds.length === 0 ? null : enabledIds;
     persistPrefs();
+    updateDictButtonVisibility();
   }
 
   function buildRow(id) {
@@ -2514,6 +2542,7 @@ async function renderDictSettings() {
 
 async function showDictPopup(word) {
   if (!word) return;
+  if (!hasDictsEnabled()) return;
   const popup     = document.getElementById('dict-popup');
   const backdrop  = document.getElementById('dict-backdrop');
   const wordEl    = document.getElementById('dict-popup-word');
@@ -2539,9 +2568,11 @@ async function showDictPopup(word) {
   popup.setAttribute('aria-hidden', 'false');
 
   const dicts   = await loadAvailableDicts();
-  const enabled = Array.isArray(prefs.dictionaries) && prefs.dictionaries.length
-    ? prefs.dictionaries
-    : dicts.map(d => d.id);
+  // null = explicitly disabled; [] = use all; [...] = explicit list
+  const enabled = prefs.dictionaries === null ? [] :
+    Array.isArray(prefs.dictionaries) && prefs.dictionaries.length
+      ? prefs.dictionaries
+      : dicts.map(d => d.id);
 
   if (!enabled.length) {
     resultsEl.innerHTML = '<div class="dict-empty">' + t('reader.dict_no_dicts_short') + '</div>';
@@ -2600,6 +2631,7 @@ window.addEventListener('message', (e) => {
   if (e.data?.type === 'dict-lookup') {
     const word = String(e.data.word || '').trim();
     if (!word || word.length > 120) return;
+    if (!hasDictsEnabled()) return;
     showDictPopup(word);
   }
   if (e.data?.type === 'footnote-show') {
@@ -4403,6 +4435,7 @@ async function init() {
       console.log('[pos] after startRendition currentCfi:', currentCfi.slice(0,60));
     }
     book.ready.then(() => initLocations()).catch(() => {});
+    loadAvailableDicts().then(updateDictButtonVisibility).catch(() => {});
     loadingOverlay.classList.add('hidden');
 
     // epub.js display(cfi) with char-offset CFIs snaps to wrong page — seek forward by pct.

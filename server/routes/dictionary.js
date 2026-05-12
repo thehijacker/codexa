@@ -87,8 +87,10 @@ router.get('/lookup', authenticateToken, (req, res) => {
   for (const id of requested) {
     try {
       const d    = loadDict(id);
-      const hit  = d.lookupFuzzy(word);
-      if (hit) results.push({ dict: id, dictName: d.name, word: hit.word, matchedForm: hit.matchedForm, definition: hit.definition, type: hit.type });
+      const hits = d.lookupFuzzy(word);
+      for (const hit of hits) {
+        results.push({ dict: id, dictName: d.name, word: hit.word, matchedForm: hit.matchedForm, definition: hit.definition, type: hit.type });
+      }
     } catch { /* skip missing/broken dicts */ }
   }
   res.json({ word, results });

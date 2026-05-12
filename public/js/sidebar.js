@@ -14,6 +14,7 @@ let shelves         = [];
 let _activePage     = 'library';
 let _onShelfSelect  = null;
 let _activeShelfId  = 'all';
+let _readingCount   = 0;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -131,9 +132,17 @@ async function loadNavCounts() {
     const books = await apiFetch('/books');
     const allEl     = document.getElementById('nav-all-count');
     const readingEl = document.getElementById('nav-reading-count');
-    if (allEl)     allEl.textContent     = books.length;
-    if (readingEl) readingEl.textContent = books.filter(b => (b.percentage || 0) > 0).length;
+    if (allEl) allEl.textContent = books.length;
+    _readingCount = books.filter(b => (b.percentage || 0) > 0).length;
+    if (readingEl) readingEl.textContent = _readingCount;
+    applyCurrentlyReadingVisibility();
   } catch { /* non-critical */ }
+}
+
+function applyCurrentlyReadingVisibility() {
+  const navEl = document.getElementById('nav-currently-reading');
+  if (!navEl) return;
+  navEl.style.display = _readingCount > 0 ? '' : 'none';
 }
 
 export async function reloadShelves() {
@@ -277,6 +286,7 @@ document.addEventListener('langchange', () => {
     setActive(_activeShelfId);
   }
   renderShelves();
+  applyCurrentlyReadingVisibility();
   if (_activePage !== 'library') loadNavCounts();
   // Re-attach event listeners (sidebar HTML was replaced)
   sidebar.querySelector('#sidebar-collapse-btn')?.addEventListener('click', () => {
