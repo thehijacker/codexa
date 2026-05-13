@@ -60,6 +60,9 @@
       window.addEventListener('resize', function () {
         setTimeout(function () { applyInsets(true); }, 200);
       });
+
+      // Expose globally so reader JS can re-probe after Android immersive mode activates
+      window.__applyInsets = applyInsets;
     })();
   </script>
   <!-- <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no" /> -->

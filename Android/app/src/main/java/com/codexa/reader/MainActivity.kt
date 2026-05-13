@@ -4,6 +4,10 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -105,6 +109,56 @@ class MainActivity : AppCompatActivity() {
             webView.loadUrl(savedUrl)
         } else {
             openServerSelect(cancellable = false)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        registerNetworkCallback()
+        // Trigger sync in case device was offline while sleeping and is now connected
+        if (isOnReader()) triggerNetworkRestoreSync()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        unregisterNetworkCallback()
+    }
+
+    // -------------------------------------------------------------------------
+    // Network callback — triggers KOSync when connectivity is restored
+    // -------------------------------------------------------------------------
+
+    private var connectivityManager: ConnectivityManager? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    private fun registerNetworkCallback() {
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                // Small delay to let the network fully settle before making API calls
+                webView.postDelayed({ if (isOnReader()) triggerNetworkRestoreSync() }, 2000)
+            }
+        }
+        connectivityManager?.registerNetworkCallback(request, networkCallback!!)
+    }
+
+    private fun unregisterNetworkCallback() {
+        networkCallback?.let { connectivityManager?.unregisterNetworkCallback(it) }
+        networkCallback = null
+    }
+
+    private fun isOnReader(): Boolean =
+        webView.url?.contains("/readerv4.html", ignoreCase = true) == true
+
+    private fun triggerNetworkRestoreSync() {
+        runOnUiThread {
+            webView.evaluateJavascript(
+                "if(typeof window.__codexaNetworkRestore==='function') window.__codexaNetworkRestore();",
+                null
+            )
         }
     }
 
@@ -214,9 +268,9 @@ class MainActivity : AppCompatActivity() {
         if (enable) {
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            controller.hide(WindowInsetsCompat.Type.navigationBars())
+            controller.hide(WindowInsetsCompat.Type.systemBars())
         } else {
-            controller.show(WindowInsetsCompat.Type.navigationBars())
+            controller.show(WindowInsetsCompat.Type.systemBars())
         }
     }
 

@@ -3591,7 +3591,44 @@ async function syncOnOpen(localProgress) {
   return null;
 }
 
-// ── Rendition ─────────────────────────────────────────────────────────────────
+// Called by the Android app when the network becomes available (wake from standby /
+// reconnect). Re-runs the same sync-on-open flow so the reader can jump to a position
+// advanced on another device while this one was offline / sleeping.
+async function networkRestoreSync() {
+  if (!currentBook || !isReady) return;
+  try {
+    const localProgress = await apiFetch(`/progress/${currentBook.file_hash}`).catch(() => null);
+    const syncTarget = await syncOnOpen(localProgress);
+    if (!syncTarget?.percentage != null && !syncTarget?.progress) return;
+    // Reuse the same navigation logic used at book-open time
+    const dfMatch = syncTarget.progress?.match(/^\/body\/DocFragment\[(\d+)\]/);
+    if (dfMatch) {
+      const spineIdx  = parseInt(dfMatch[1]) - 1;
+      const spineItem = book.spine.get(spineIdx);
+      if (spineItem?.href) {
+        const paraMatch = !prefs.bionicReading && syncTarget.progress.match(/\/p\[(\d+)\]/);
+        let navigated = false;
+        if (paraMatch) {
+          const guessCfi = `epubcfi(/6/${(spineIdx + 1) * 2}!/4/${parseInt(paraMatch[1]) * 2})`;
+          try { await rendition.display(guessCfi); navigated = true; } catch { navigated = false; }
+        }
+        if (!navigated) {
+          await rendition.display(spineItem.href);
+          if (prefs.bionicReading && book.locations.length() > 0)
+            await seekToPercentage(syncTarget.percentage);
+        }
+      } else if (book.locations.length() > 0) {
+        await seekToPercentage(syncTarget.percentage);
+      }
+    } else if (syncTarget?.percentage != null) {
+      if (book.locations.length() > 0)
+        await seekToPercentage(syncTarget.percentage);
+    }
+  } catch (e) { console.warn('[kosync] networkRestoreSync failed:', e.message); }
+}
+window.__codexaNetworkRestore = networkRestoreSync;
+
+
 function isMobileScreen() { return window.innerWidth < 640; }
 
 async function startRendition(displayCfi = null) {
@@ -3925,6 +3962,14 @@ async function resizeRenditionToViewer() {
 }
 
 window.addEventListener('resize', debounce(() => {
+  // When running inside the Android app, system bars are always hidden in reader.
+  // Update layout vars here since this resize fires right after bars hide/show.
+  if (isAndroidApp()) {
+    const r = document.documentElement;
+    r.style.setProperty('--sat', '0px');
+    r.style.setProperty('--sab', '0px');
+    r.style.setProperty('--layout-h', window.innerHeight + 'px');
+  }
   void resizeRenditionToViewer();
 }, 300));
 
@@ -4372,6 +4417,15 @@ async function init() {
   applyVolumeKeyMode(prefs.volumeKeysEnabled);
   if (isAndroidApp() && window.AndroidCodexa?.setReaderMode) {
     window.AndroidCodexa.setReaderMode(true);
+    // Fallback: force vars in case the resize event doesn't fire (already correct height).
+    // Use 600ms so the debounced resize handler (300ms) fires and settles first.
+    setTimeout(() => {
+      const r = document.documentElement;
+      r.style.setProperty('--sat', '0px');
+      r.style.setProperty('--sab', '0px');
+      r.style.setProperty('--layout-h', window.innerHeight + 'px');
+      if (rendition) resizeRenditionToViewer();
+    }, 600);
   }
   acquireWakeLock();
 
