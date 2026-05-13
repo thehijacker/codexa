@@ -27,12 +27,10 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.6'
 
       - name: Build debug APK
         working-directory: Android
-        run: gradle assembleDebug
+        run: ./gradlew assembleDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -83,7 +81,7 @@ jobs:
 
       - name: Build release APK
         working-directory: Android
-        run: gradle assembleRelease
+        run: ./gradlew assembleRelease
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
