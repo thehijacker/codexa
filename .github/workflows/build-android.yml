@@ -6,6 +6,8 @@ on:
     paths:
       - 'Android/**'
       - '.github/workflows/build-android.yml'
+    tags:
+      - 'v*'
   pull_request:
     paths:
       - 'Android/**'
@@ -94,3 +96,11 @@ jobs:
           name: codexa-reader-release
           path: Android/app/build/outputs/apk/release/*.apk
           retention-days: 90
+
+      - name: Attach APKs to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            Android/app/build/outputs/apk/debug/*.apk
+            Android/app/build/outputs/apk/release/*.apk
