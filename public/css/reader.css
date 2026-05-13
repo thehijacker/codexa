@@ -1168,8 +1168,12 @@ input[type="range"]::-moz-range-thumb {
   .nav-arrow { display: none; }
   /* Larger tap targets for small screens */
   .nav-btn { min-width: 44px; min-height: 44px; }
-  /* Overlays slightly smaller on phone — honour user font-size setting, just reduce padding */
-  .sb-bar { padding: 1px 6px; }
+  /* Overlays slightly smaller on phone — honour user font-size setting, just reduce vertical padding */
+  .sb-bar { padding: 1px 1.2rem; }
+  .sb-separator {
+    left:  calc(1.2rem + var(--edge-pad-left,   0px));
+    right: calc(1.2rem + var(--edge-pad-right,  0px));
+  }
 }
 
 /* ── Status bar settings UI ──────────────────────────────────────────────────── */

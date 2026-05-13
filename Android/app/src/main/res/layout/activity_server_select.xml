@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/color_bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:padding="24dp"
+        android:paddingTop="64dp"
+        android:paddingBottom="64dp">
+
+        <!-- Logo block -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <ImageView
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@mipmap/ic_launcher"
+                android:contentDescription="@null" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Codexa"
+                android:textSize="28sp"
+                android:textStyle="bold"
+                android:textColor="@color/color_accent"
+                android:letterSpacing="0.05"
+                android:layout_marginStart="10dp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tv_subtitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/server_select_subtitle"
+            android:textColor="@color/color_text_muted"
+            android:textSize="14sp"
+            android:layout_marginBottom="32dp" />
+
+        <!-- Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxWidth="400dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_card"
+            android:padding="24dp">
+
+            <TextView
+                android:id="@+id/tv_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/server_select_label"
+                android:textColor="@color/color_text"
+                android:textSize="14sp"
+                android:layout_marginBottom="6dp" />
+
+            <EditText
+                android:id="@+id/et_url"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="@string/dialog_hint"
+                android:inputType="textUri"
+                android:imeOptions="actionGo"
+                android:singleLine="true"
+                android:textColor="@color/color_text"
+                android:textColorHint="@color/color_text_muted"
+                android:background="@drawable/bg_input"
+                android:padding="12dp"
+                android:layout_marginBottom="16dp" />
+
+            <Button
+                android:id="@+id/btn_connect"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/dialog_ok"
+                android:textColor="#ffffff"
+                android:backgroundTint="@color/color_accent"
+                android:padding="14dp"
+                android:stateListAnimator="@null" />
+
+            <Button
+                android:id="@+id/btn_cancel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/dialog_cancel"
+                android:textColor="@color/color_text_muted"
+                android:backgroundTint="@android:color/transparent"
+                android:padding="14dp"
+                android:layout_marginTop="4dp"
+                android:stateListAnimator="@null"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tv_error"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="#e94560"
+                android:textSize="13sp"
+                android:visibility="gone"
+                android:layout_marginTop="10dp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

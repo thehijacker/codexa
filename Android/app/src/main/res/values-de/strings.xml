@@ -1,3 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="app_name">Codexa Reader</string>
+    <string name="server_select_subtitle">Ihre digitale Bibliothek</string>
+    <string name="server_select_label">Server-URL</string>
+    <string name="dialog_hint">https://ihr-codexa-server.com</string>
+    <string name="dialog_ok">Verbinden</string>
+    <string name="dialog_cancel">Abbrechen</string>
+    <string name="error_invalid_url">Bitte geben Sie eine gültige URL ein, die mit http:// oder https:// beginnt</string>
+    <string name="back_press_hint">Zweimal zurück drücken, um die Server-URL zu ändern.</string>
 </resources>

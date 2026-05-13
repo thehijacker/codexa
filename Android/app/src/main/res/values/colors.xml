@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Default (light mode) colours matching Codexa web light theme -->
+<resources>
+    <color name="color_bg">#f0f2f8</color>
+    <color name="color_surface">#ffffff</color>
+    <color name="color_accent">#e94560</color>
+    <color name="color_text">#1a1a2e</color>
+    <color name="color_text_muted">#555577</color>
+    <color name="color_border">#d0d4e8</color>
+</resources>

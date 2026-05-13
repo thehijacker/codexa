@@ -454,6 +454,38 @@
         </div>
       </div>
 
+      <!-- Android app: volume key navigation (hidden on non-Android builds) -->
+      <div id="android-settings-section" style="display:none">
+        <div class="setting-row">
+          <div class="setting-row-inline">
+            <div>
+              <div class="setting-label" data-i18n="reader.android_volume_keys">Volume key navigation</div>
+              <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.android_volume_keys_hint">
+                Use hardware volume keys to turn pages
+              </div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="volume-keys-toggle" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-row-inline">
+            <div>
+              <div class="setting-label" data-i18n="reader.android_volume_swap">Swap volume key direction</div>
+              <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.android_volume_swap_hint">
+                Volume up goes forward, volume down goes back
+              </div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="volume-keys-swap-toggle" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
       <div class="setting-row">
         <div class="setting-row-inline">
           <div>

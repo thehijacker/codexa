@@ -1,3 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="app_name">Codexa Reader</string>
+    <string name="server_select_subtitle">Vaša digitalna knjižnica</string>
+    <string name="server_select_label">URL naslov strežnika</string>
+    <string name="dialog_hint">https://vas-codexa-streznik.si</string>
+    <string name="dialog_ok">Poveži</string>
+    <string name="dialog_cancel">Prekliči</string>
+    <string name="error_invalid_url">Prosim vnesite veljaven URL naslov, ki se začne s http:// ali https://</string>
+    <string name="back_press_hint">Dvakrat pritisnite nazaj za spremembo URL-ja strežnika.</string>
 </resources>

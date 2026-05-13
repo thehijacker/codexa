@@ -177,6 +177,8 @@ const DEFAULT_PREFS = {
   paraIndentSize: 15,           // indent size when paraIndent=true (em × 10, so 15 = 1.5em)
   paraSpacing:    0,            // extra bottom margin between paragraphs (em × 10, so 0–30)
   mouseWheelNav:  false,        // navigate pages with mouse wheel
+  volumeKeysEnabled: false,    // navigate pages with hardware volume keys (Android app only)
+  volumeKeysSwapped: false,    // swap volume-up/down direction
   skipOpenProgressCheck: false, // if true, do not restore/sync progress on open
   skipSaveOnClose: false,       // if true, do not auto-save when leaving/closing
   chapHeadSpacing: true,        // override book heading margins to compact spacing
@@ -242,7 +244,7 @@ let speedSamples     = [];    // up to 25 recent samples
 
 // Space reserved at the bottom of the rendition so the status bar never overlaps text.
 // Must match the value used in book.renderTo() — kept here so all resize calls share it.
-const RENDITION_BOTTOM_RESERVE = 18;
+const RENDITION_BOTTOM_RESERVE = 32;
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const readerLayout   = document.querySelector('.reader-layout');
@@ -777,7 +779,7 @@ body {
   color:          ${theme.text} !important;
   padding-left:   ${prefs.margin}px !important;
   padding-right:  ${prefs.margin}px !important;
-  padding-top:    max(1.5rem, 28px) !important;
+  padding-top:    max(2rem, 36px) !important;
   padding-bottom: 0px !important;
   margin:         0 !important;
   max-width:      100% !important;
@@ -2213,12 +2215,19 @@ function hasOpenPanel() {
 }
 
 async function returnToLibrary() {
+  // Show closing overlay immediately so the user sees feedback during async save
+  loadingMsg.textContent = t('reader.closing');
+  loadingOverlay.classList.remove('hidden');
+
   clearInterruptedSession();
   if (!prefs.skipSaveOnClose) {
     await saveProgress(); // await so updated_at is committed before library reloads
   }
   await endStatsSession();
   isReady = false;          // block beforeunload from double-saving
+  if (isAndroidApp() && window.AndroidCodexa?.setReaderMode) {
+    window.AndroidCodexa.setReaderMode(false);
+  }
   window.location.href = '/';
 }
 
@@ -2729,6 +2738,10 @@ function syncSettingsUi() {
   if (djEl) djEl.checked = prefs.disableJustify;
   const mwEl = document.getElementById('mouse-wheel-nav-toggle');
   if (mwEl) mwEl.checked = prefs.mouseWheelNav;
+  const vkEl = document.getElementById('volume-keys-toggle');
+  if (vkEl) vkEl.checked = prefs.volumeKeysEnabled;
+  const vkSwapEl = document.getElementById('volume-keys-swap-toggle');
+  if (vkSwapEl) vkSwapEl.checked = prefs.volumeKeysSwapped;
   const hypEl  = document.getElementById('hyphenation-toggle');
   if (hypEl) hypEl.checked = prefs.hyphenation;
   const hypLangEl = document.getElementById('hyphen-lang-select');
@@ -3143,6 +3156,18 @@ function initSettingsUi() {
     prefs.mouseWheelNav = e.target.checked;
     persistPrefs();
   });
+  document.getElementById('volume-keys-toggle')?.addEventListener('change', (e) => {
+    prefs.volumeKeysEnabled = e.target.checked;
+    applyVolumeKeyMode(prefs.volumeKeysEnabled);
+    persistPrefs();
+  });
+  document.getElementById('volume-keys-swap-toggle')?.addEventListener('change', (e) => {
+    prefs.volumeKeysSwapped = e.target.checked;
+    persistPrefs();
+  });
+  // Show the Android-only section only when running inside the Codexa app
+  const androidSection = document.getElementById('android-settings-section');
+  if (androidSection) androidSection.style.display = isAndroidApp() ? '' : 'none';
   document.getElementById('skip-open-progress-toggle')?.addEventListener('change', (e) => {
     prefs.skipOpenProgressCheck = e.target.checked;
     persistPrefs();
@@ -3855,6 +3880,28 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// ── Android app detection ─────────────────────────────────────────────────────
+function isAndroidApp() {
+  return navigator.userAgent.includes('CodexaApp');
+}
+
+// Enable/disable hardware volume-key page navigation via the Android JS bridge.
+function applyVolumeKeyMode(enabled) {
+  if (enabled) {
+    window.__codexaVolumeKey = function(dir) {
+      if (!isReady) return;
+      const swap = prefs.volumeKeysSwapped;
+      if ((dir === 'down' && !swap) || (dir === 'up' && swap)) goNext();
+      else goPrev();
+    };
+  } else {
+    delete window.__codexaVolumeKey;
+  }
+  if (window.AndroidCodexa?.setVolumeKeyMode) {
+    window.AndroidCodexa.setVolumeKeyMode(enabled);
+  }
+}
+
 // ── Mouse wheel navigation ────────────────────────────────────────────────────
 let wheelCooldown = false;
 function handleWheel(deltaY) {
@@ -4322,6 +4369,10 @@ async function init() {
     if (localStorage.getItem('br_library_theme') === 'eink') prefs.eink = true;
   }
   initSettingsUi();
+  applyVolumeKeyMode(prefs.volumeKeysEnabled);
+  if (isAndroidApp() && window.AndroidCodexa?.setReaderMode) {
+    window.AndroidCodexa.setReaderMode(true);
+  }
   acquireWakeLock();
 
   try {

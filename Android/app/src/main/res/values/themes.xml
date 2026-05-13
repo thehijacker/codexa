@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Follows system light/dark preference; hides the action bar -->
+    <style name="Theme.CodexaReader" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowContentOverlay">@null</item>
+    </style>
+</resources>

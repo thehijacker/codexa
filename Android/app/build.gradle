@@ -1,0 +1,85 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+// Load local keystore.properties if present (git-ignored, used for local release builds)
+def keystorePropsFile = rootProject.file("keystore.properties")
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystoreProps.load(new FileInputStream(keystorePropsFile))
+}
+
+android {
+    namespace 'com.codexa.reader'
+    compileSdk 34
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    defaultConfig {
+        applicationId "com.codexa.reader"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    signingConfigs {
+        release {
+            if (System.getenv("KEYSTORE_FILE")) {
+                // CI: Google Play / production keystore passed via env (base64-decoded path)
+                storeFile     file(System.getenv("KEYSTORE_FILE"))
+                storePassword System.getenv("KEYSTORE_PASSWORD")
+                keyAlias      System.getenv("KEY_ALIAS")
+                keyPassword   System.getenv("KEY_PASSWORD")
+            } else if (System.getenv("DEV_KEYSTORE_FILE")) {
+                // CI: dev/release keystore generated from secrets
+                storeFile     file(System.getenv("DEV_KEYSTORE_FILE"))
+                storePassword System.getenv("DEV_KEYSTORE_PASSWORD")
+                keyAlias      System.getenv("DEV_KEY_ALIAS")
+                keyPassword   System.getenv("DEV_KEY_PASSWORD")
+            } else if (keystorePropsFile.exists()) {
+                // Local build: use keystore.properties (path relative to project root)
+                storeFile     rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias      keystoreProps['keyAlias']
+                keyPassword   keystoreProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix ".debug"
+            versionNameSuffix   "-debug"
+        }
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+}
+
+android.applicationVariants.all { variant ->
+    variant.outputs.all { output ->
+        def newName = "${variant.applicationId}-${variant.versionName}.apk"
+        outputFileName = newName
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.activity:activity-ktx:1.9.0'
+}

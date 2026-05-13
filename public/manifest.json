@@ -4,6 +4,7 @@
   "description": "Spletni bralnik e-knjig z OPDS in KOReader sinhronizacijo",
   "start_url": "/",
   "display": "fullscreen",
+  "display_override": ["window-controls-overlay"],
   "background_color": "#1a1a2e",
   "theme_color": "#1a1a2e",
   "orientation": "any",
