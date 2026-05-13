@@ -65,7 +65,10 @@ jobs:
           elif [ -n "$DEV_KEYSTORE_FILE_B64" ]; then
             echo "Using dev keystore from DEV_KEYSTORE_FILE secret"
             echo "$DEV_KEYSTORE_FILE_B64" | tr -d '\r\n ' | grep -v '^-' | base64 -d > /tmp/release.jks
-            echo "DEV_KEYSTORE_FILE=/tmp/release.jks"          >> $GITHUB_ENV
+            echo "DEV_KEYSTORE_FILE=/tmp/release.jks"                  >> $GITHUB_ENV
+            echo "DEV_KEYSTORE_PASSWORD=$DEV_KEYSTORE_PASSWORD"        >> $GITHUB_ENV
+            echo "DEV_KEY_ALIAS=$DEV_KEY_ALIAS"                        >> $GITHUB_ENV
+            echo "DEV_KEY_PASSWORD=$DEV_KEY_PASSWORD"                  >> $GITHUB_ENV
           else
             echo "No keystore secrets found — generating throwaway keystore"
             keytool -genkeypair \
