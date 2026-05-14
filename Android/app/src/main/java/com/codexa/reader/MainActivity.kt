@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -77,6 +78,17 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun setReaderMode(active: Boolean) {
             runOnUiThread { setImmersiveMode(active) }
+        }
+
+        /** Lock or unlock the screen orientation to portrait. */
+        @JavascriptInterface
+        fun setPortraitLock(lock: Boolean) {
+            runOnUiThread {
+                requestedOrientation = if (lock)
+                    ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                else
+                    ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
         }
     }
 

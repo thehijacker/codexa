@@ -173,6 +173,8 @@
   "reader.android_volume_keys_hint": "Uporabi fizične tipke za glasnost za obračanje strani",
   "reader.android_volume_swap": "Zamenjaj smer tipk za glasnost",
   "reader.android_volume_swap_hint": "Glasnost gor = naprej, glasnost dol = nazaj",
+  "reader.portrait_lock": "Vedno pokončni način",
+  "reader.portrait_lock_hint": "Zakleni bralnik v pokončno usmerjenost pri obračanju naprave",
   "reader.sb_skip_open": "Ne preveri napredek ob odprtju knjige",
   "reader.sb_skip_open_hint": "Če je vključeno, knjiga se vedno odpre na začetku brez preverjanja shranjenega/sinhroniziranega položaja",
   "reader.sb_skip_close": "Ne shrani ob zaprtju knjige",

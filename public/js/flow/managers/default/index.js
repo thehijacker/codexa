@@ -491,15 +491,19 @@ class DefaultViewManager {
     ) {
       this.scrollLeft = this.container.scrollLeft
 
-      left =
-        this.container.scrollLeft +
-        this.container.offsetWidth +
-        this.layout.delta
-
-      if (left <= this.container.scrollWidth) {
-        this.scrollBy(this.layout.delta, 0, true)
-      } else {
-        next = this.views.last().section.next()
+      // Check if the right edge of the current view is still before the end of
+      // the chapter content. Mirrors the symmetric tolerance used in prev().
+      // The original check (scrollLeft + offsetWidth + delta) required room for
+      // two extra page-widths, causing premature chapter advance from the
+      // second-to-last page on single-column (mobile) layouts.
+      left = this.container.scrollLeft + this.container.offsetWidth
+      {
+        const tolerance = Math.min(12, Math.max(2, Math.round(this.layout.delta * 0.04)))
+        if (left < this.container.scrollWidth - tolerance) {
+          this.scrollBy(this.layout.delta, 0, true)
+        } else {
+          next = this.views.last().section.next()
+        }
       }
     } else if (
       this.isPaginated &&

@@ -173,6 +173,8 @@
   "reader.android_volume_keys_hint": "Use hardware volume keys to turn pages",
   "reader.android_volume_swap": "Swap volume key direction",
   "reader.android_volume_swap_hint": "Volume up goes forward, volume down goes back",
+  "reader.portrait_lock": "Always portrait mode",
+  "reader.portrait_lock_hint": "Lock the reader to portrait orientation when you rotate the device",
   "reader.sb_skip_open": "Do not check progress on open",
   "reader.sb_skip_open_hint": "If enabled, book always opens from the beginning without checking saved/synced position",
   "reader.sb_skip_close": "Do not save on close",

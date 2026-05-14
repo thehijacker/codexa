@@ -172,6 +172,8 @@
   "reader.android_volume_keys_hint": "Usa i tasti del volume hardware per sfogliare",
   "reader.android_volume_swap": "Inverti direzione tasti volume",
   "reader.android_volume_swap_hint": "Volume su = avanti, Volume giù = indietro",
+  "reader.portrait_lock": "Sempre in modalità ritratto",
+  "reader.portrait_lock_hint": "Blocca il lettore in orientamento ritratto quando si ruota il dispositivo",
   "reader.sb_skip_open": "Non controllare progresso all'apertura",
   "reader.sb_skip_open_hint": "Se attivo, il libro si aprirà sempre dall'inizio ignorando la posizione sincronizzata",
   "reader.sb_skip_close": "Non salvare alla chiusura",

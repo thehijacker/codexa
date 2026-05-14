@@ -457,6 +457,24 @@
         </div>
       </div>
 
+      <!-- Mobile / PWA: portrait lock (hidden on desktop browsers) -->
+      <div id="portrait-lock-section" style="display:none">
+        <div class="setting-row">
+          <div class="setting-row-inline">
+            <div>
+              <div class="setting-label" data-i18n="reader.portrait_lock">Always portrait mode</div>
+              <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.portrait_lock_hint">
+                Lock the reader to portrait orientation when you rotate the device
+              </div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="portrait-lock-toggle" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
       <!-- Android app: volume key navigation (hidden on non-Android builds) -->
       <div id="android-settings-section" style="display:none">
         <div class="setting-row">

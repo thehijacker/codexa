@@ -173,6 +173,8 @@
   "reader.android_volume_keys_hint": "Usar as teclas de volume para virar páginas",
   "reader.android_volume_swap": "Inverter direção das teclas de volume",
   "reader.android_volume_swap_hint": "Volume para cima = avançar, Volume para baixo = recuar",
+  "reader.portrait_lock": "Sempre modo retrato",
+  "reader.portrait_lock_hint": "Bloquear o leitor na orientação retrato ao girar o dispositivo",
   "reader.sb_skip_open": "Não verificar progresso ao abrir",
   "reader.sb_skip_open_hint": "Se ativado, abre sempre no início",
   "reader.sb_skip_close": "Não guardar ao fechar",

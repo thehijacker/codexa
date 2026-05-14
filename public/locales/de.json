@@ -173,6 +173,8 @@
   "reader.android_volume_keys_hint": "Hardware-Lautstärketasten zum Blättern verwenden",
   "reader.android_volume_swap": "Lautstärketasten-Richtung umkehren",
   "reader.android_volume_swap_hint": "Lauter = vorwärts, Leiser = rückwärts",
+  "reader.portrait_lock": "Immer Hochformat",
+  "reader.portrait_lock_hint": "Leser beim Drehen des Geräts im Hochformat fixieren",
   "reader.sb_skip_open": "Fortschritt beim Öffnen nicht prüfen",
   "reader.sb_skip_open_hint": "Falls aktiviert, öffnet das Buch immer am Anfang ohne Prüfung der synchronisierten Position",
   "reader.sb_skip_close": "Beim Schließen nicht speichern",

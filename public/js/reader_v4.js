@@ -179,6 +179,7 @@ const DEFAULT_PREFS = {
   mouseWheelNav:  false,        // navigate pages with mouse wheel
   volumeKeysEnabled: false,    // navigate pages with hardware volume keys (Android app only)
   volumeKeysSwapped: false,    // swap volume-up/down direction
+  lockPortrait:      false,    // lock orientation to portrait (PWA + Android app)
   skipOpenProgressCheck: false, // if true, do not restore/sync progress on open
   skipSaveOnClose: false,       // if true, do not auto-save when leaving/closing
   chapHeadSpacing: true,        // override book heading margins to compact spacing
@@ -206,6 +207,7 @@ let lastSentChapterHref = null; // last chapter for which remote progress was pu
 let availableDicts  = null;  // cached GET /api/dictionary response
 let pendingNavDirection = null; // 'next' or 'prev' tracking for chapter jump corrections
 let pendingWasChapterEnd = true;  // whether goNext() was called from the last page
+let deferredNextPending  = false; // true while a mid-repagination NEXT is deferred
 let isReady = false;          // true only after initial position is fully displayed
 let openCfi = '';             // CFI at the moment the book was first ready — used to skip no-op kosync pushes
 let tocFlatItems = [];
@@ -813,6 +815,7 @@ ${prefs.chapHeadSpacing ? `h1,h2,h3,h4,h5,h6 { margin: 0.2em 0 !important; paddi
 [class*="heading"],[class*="chapter-head"],[class*="chapterHead"],[class*="chapHead"],[class*="title-block"],[class*="titleBlock"] { height:auto !important; min-height:0 !important; padding-top:0 !important; padding-bottom:0 !important; margin-top:0 !important; margin-bottom:0 !important; }
 div:has(>h1),div:has(>h2),div:has(>h3),div:has(>h4) { height:auto !important; min-height:0 !important; padding-top:0 !important; padding-bottom:0 !important; margin-top:0 !important; margin-bottom:0 !important; }` : ''}
 ${prefs.hyphenation ? 'html, body, p, li { hyphens: auto !important; }' : 'html, body, p, li { hyphens: none !important; }'}
+p, li, blockquote { orphans: 1 !important; widows: 1 !important; }
 /* annotation highlights — rendered as <mark> in the epub DOM */
 mark.annot-hl { cursor: pointer; border-radius: 2px; color: inherit; padding: 0; }
 mark.annot-yellow { background: rgba(255,204,0,.45); }
@@ -2228,6 +2231,8 @@ async function returnToLibrary() {
   if (isAndroidApp() && window.AndroidCodexa?.setReaderMode) {
     window.AndroidCodexa.setReaderMode(false);
   }
+  // Unlock orientation when leaving reader
+  if (prefs.lockPortrait) void applyPortraitLock(false);
   window.location.href = '/';
 }
 
@@ -2742,6 +2747,8 @@ function syncSettingsUi() {
   if (vkEl) vkEl.checked = prefs.volumeKeysEnabled;
   const vkSwapEl = document.getElementById('volume-keys-swap-toggle');
   if (vkSwapEl) vkSwapEl.checked = prefs.volumeKeysSwapped;
+  const plEl = document.getElementById('portrait-lock-toggle');
+  if (plEl) plEl.checked = prefs.lockPortrait;
   const hypEl  = document.getElementById('hyphenation-toggle');
   if (hypEl) hypEl.checked = prefs.hyphenation;
   const hypLangEl = document.getElementById('hyphen-lang-select');
@@ -3168,6 +3175,17 @@ function initSettingsUi() {
   // Show the Android-only section only when running inside the Codexa app
   const androidSection = document.getElementById('android-settings-section');
   if (androidSection) androidSection.style.display = isAndroidApp() ? '' : 'none';
+  // Show portrait lock section on mobile/PWA/Android (any touch device or installed PWA)
+  const portraitSection = document.getElementById('portrait-lock-section');
+  if (portraitSection) {
+    const showPortrait = isAndroidApp() || navigator.maxTouchPoints > 0 || window.matchMedia('(pointer: coarse)').matches;
+    portraitSection.style.display = showPortrait ? '' : 'none';
+  }
+  document.getElementById('portrait-lock-toggle')?.addEventListener('change', (e) => {
+    prefs.lockPortrait = e.target.checked;
+    void applyPortraitLock(prefs.lockPortrait);
+    persistPrefs();
+  });
   document.getElementById('skip-open-progress-toggle')?.addEventListener('change', (e) => {
     prefs.skipOpenProgressCheck = e.target.checked;
     persistPrefs();
@@ -3718,6 +3736,29 @@ async function startRendition(displayCfi = null) {
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 function goNext() {
+  if (deferredNextPending) return;
+
+  const _lL        = rendition?.currentLocation?.();
+  const _liveEnd   = _lL?.end?.displayed?.page;
+  const _liveTotal = _lL?.start?.displayed?.total;
+
+  // If tracked page (from last 'relocated') and live DOM page differ by more than
+  // 1, epub.js has rendered a chapter but its layout hasn't settled yet — the
+  // repaginate poll fires at 180ms to correct currentEndPage. Allowing the advance
+  // now lets the live check produce a false wasEnd=true (e.g. live=25 with total=26
+  // triggers 25>=25 even though tracked says page 23). Defer 200ms so repaginate
+  // can correct the tracked state first, then retry.
+  if (!!_liveEnd && !!currentEndPage && Math.abs(_liveEnd - currentEndPage) > 1) {
+    const hrefAtDefer = currentHref;
+    deferredNextPending = true;
+    console.log(`[nav] NEXT deferred | mid-repagination tracked=${currentEndPage} live=${_liveEnd}`);
+    setTimeout(() => {
+      deferredNextPending = false;
+      if (currentHref === hrefAtDefer) goNext();
+    }, 200);
+    return;
+  }
+
   pendingNavDirection = 'next';
   sessionPageCount++;
   // Capture whether we are truly at the last page at call-time. The library can
@@ -3725,9 +3766,6 @@ function goNext() {
   // this call and when manager.next() actually runs (async via rAF queue).
   // We use both tracked state and live DOM state; OR avoids false positives from
   // stale tracked values and from missed repagination poll updates.
-  const _lL = rendition?.currentLocation?.();
-  const _liveEnd   = _lL?.end?.displayed?.page;
-  const _liveTotal = _lL?.start?.displayed?.total;
   pendingWasChapterEnd =
     currentEndPage === 0 || currentChapTotal === 0 ||
     currentEndPage >= currentChapTotal - 1 ||
@@ -3739,6 +3777,7 @@ function goNext() {
   rendition?.next();
 }
 function goPrev() {
+  deferredNextPending = false;
   console.log(`[nav] PREV | page=${currentChapPage}/${currentChapTotal}`);
   pendingNavDirection = 'prev'; sessionPageCount++; rendition?.prev();
 }
@@ -3937,6 +3976,22 @@ function applyVolumeKeyMode(enabled) {
   if (window.AndroidCodexa?.setVolumeKeyMode) {
     window.AndroidCodexa.setVolumeKeyMode(enabled);
   }
+}
+
+// Lock/unlock device orientation to portrait.
+// Works on Android app (via JS bridge) and PWA (via Screen Orientation API).
+async function applyPortraitLock(enabled) {
+  if (isAndroidApp() && window.AndroidCodexa?.setPortraitLock) {
+    window.AndroidCodexa.setPortraitLock(enabled);
+    return;
+  }
+  try {
+    if (enabled) {
+      await screen.orientation?.lock?.('portrait');
+    } else {
+      screen.orientation?.unlock?.();
+    }
+  } catch { /* Not available in regular browser or not in fullscreen */ }
 }
 
 // ── Mouse wheel navigation ────────────────────────────────────────────────────
@@ -4415,6 +4470,7 @@ async function init() {
   }
   initSettingsUi();
   applyVolumeKeyMode(prefs.volumeKeysEnabled);
+  if (prefs.lockPortrait) void applyPortraitLock(true);
   if (isAndroidApp() && window.AndroidCodexa?.setReaderMode) {
     window.AndroidCodexa.setReaderMode(true);
     // Fallback: force vars in case the resize event doesn't fire (already correct height).

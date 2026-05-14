@@ -173,6 +173,8 @@
   "reader.android_volume_keys_hint": "Usar las teclas de volumen para pasar páginas",
   "reader.android_volume_swap": "Intercambiar dirección de las teclas de volumen",
   "reader.android_volume_swap_hint": "Subir volumen = siguiente, Bajar volumen = anterior",
+  "reader.portrait_lock": "Siempre modo vertical",
+  "reader.portrait_lock_hint": "Bloquear el lector en orientación vertical al rotar el dispositivo",
   "reader.sb_skip_open": "No comprobar progreso al abrir",
   "reader.sb_skip_open_hint": "Si se activa, el libro siempre abre al inicio sin comprobar la posición guardada",
   "reader.sb_skip_close": "No guardar al cerrar",
