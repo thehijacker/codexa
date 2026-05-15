@@ -166,6 +166,8 @@
   "reader.sb_para_spacing": "Absatzabstand",
   "reader.sb_chap_head_spacing": "Kapiteltitel-Abstände reduzieren",
   "reader.sb_chap_head_spacing_hint": "Überschreibt die Abstände der Überschriften im Buch",
+  "reader.sb_compact_blank_lines": "Leerzeilen ausblenden",
+  "reader.sb_compact_blank_lines_hint": "Blendet Leerabsätze aus, die das Buch als Abstandshalter verwendet",
   "reader.sb_disable_justify": "Linksbündig (Blocksatz deaktivieren)",
   "reader.sb_mouse_wheel": "Mausrad-Navigation",
   "reader.sb_mouse_wheel_hint": "Mausrad blättert zwischen den Seiten",

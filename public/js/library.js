@@ -178,8 +178,8 @@ function renderGrid(list) {
       </label>
       <div class="book-card-actions">
         ${book.cover_path ? `<button class="btn-icon cover-preview-btn" title="${t('library.btn_cover_preview')}" data-id="${book.id}">👁</button>` : ''}
-        <button class="btn-icon info-btn"   title="${t('library.btn_cover_info')}" data-id="${book.id}">ℹ</button>
-        <button class="btn-icon delete-btn" title="${t('library.btn_cover_delete')}"     data-id="${book.id}">🗑</button>
+        <button class="btn-icon info-btn"  title="${t('library.btn_cover_info')}" data-id="${book.id}">ℹ</button>
+        <button class="btn-icon read-btn"  title="${t('library.btn_read')}" data-id="${book.id}"><img src="/images/read.svg" class="nav-icon nav-icon-read" alt=""></button>
       </div>
       <div class="book-info">
         <div class="book-title">${escHtml(book.title)}</div>
@@ -199,7 +199,7 @@ function renderGrid(list) {
     });
 
     card.addEventListener('click', e => {
-      if (e.target.closest('.delete-btn') || e.target.closest('.info-btn') ||
+      if (e.target.closest('.read-btn') || e.target.closest('.info-btn') ||
           e.target.closest('.cover-preview-btn') || e.target.closest('.book-card-checkbox-wrap')) return;
       if (editMode) {
         const newChecked = !checkbox.checked;
@@ -218,12 +218,11 @@ function renderGrid(list) {
       sessionStorage.setItem('br_last_search', document.getElementById('search-input')?.value || '');
     });
 
-    card.querySelector('.delete-btn').addEventListener('click', e => {
+    card.querySelector('.read-btn').addEventListener('click', e => {
       e.stopPropagation();
-      confirmDialog(
-        `${t('library.confirm_del_book', { title: escHtml(book.title) })}`,
-        () => deleteBook(book.id)
-      );
+      sessionStorage.setItem('br_last_shelf', String(currentShelfId));
+      sessionStorage.setItem('br_last_search', document.getElementById('search-input')?.value || '');
+      window.location.href = `/readerv4.html?id=${book.id}`;
     });
 
     card.querySelector('.info-btn').addEventListener('click', e => {

@@ -166,6 +166,8 @@
   "reader.sb_para_spacing": "Espaciado entre párrafos",
   "reader.sb_chap_head_spacing": "Reducir espacio entre título y párrafo",
   "reader.sb_chap_head_spacing_hint": "Anula los márgenes de encabezados definidos en el libro",
+  "reader.sb_compact_blank_lines": "Ocultar líneas en blanco",
+  "reader.sb_compact_blank_lines_hint": "Oculta los párrafos vacíos que el libro usa como espaciado",
   "reader.sb_disable_justify": "Alinear a la izquierda (sin justificación)",
   "reader.sb_mouse_wheel": "Navegación con rueda del ratón",
   "reader.sb_mouse_wheel_hint": "La rueda del ratón cambia de página",

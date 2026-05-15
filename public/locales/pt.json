@@ -166,6 +166,8 @@
   "reader.sb_para_spacing": "Espaçamento entre parágrafos",
   "reader.sb_chap_head_spacing": "Reduzir espaçamento dos títulos de capítulo",
   "reader.sb_chap_head_spacing_hint": "Substitui as margens dos títulos definidas no livro",
+  "reader.sb_compact_blank_lines": "Ocultar linhas em branco",
+  "reader.sb_compact_blank_lines_hint": "Oculta os parágrafos vazios usados como espaçamento no livro",
   "reader.sb_disable_justify": "Alinhar à esquerda (desativar justificação)",
   "reader.sb_mouse_wheel": "Navegação com roda do rato",
   "reader.sb_mouse_wheel_hint": "Roda do rato vira as páginas",

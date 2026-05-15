@@ -166,6 +166,8 @@
   "reader.sb_para_spacing": "Paragraph spacing",
   "reader.sb_chap_head_spacing": "Compact chapter heading spacing",
   "reader.sb_chap_head_spacing_hint": "Override book heading margins for a tighter look",
+  "reader.sb_compact_blank_lines": "Hide empty lines",
+  "reader.sb_compact_blank_lines_hint": "Hide whitespace-only paragraphs used as spacing in the book",
   "reader.sb_disable_justify": "Left-align text (disable justification)",
   "reader.sb_mouse_wheel": "Mouse wheel navigation",
   "reader.sb_mouse_wheel_hint": "Mouse wheel scrolls between pages",

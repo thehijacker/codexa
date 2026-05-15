@@ -943,6 +943,38 @@ input[type="range"]::-moz-range-thumb {
   border: 2px solid var(--color-surface);
 }
 
+/* Slider +/- button row */
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  min-width: 0;
+}
+.slider-row input[type="range"] {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+.slider-btn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface2);
+  color: var(--color-text);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+  padding: 0;
+}
+.slider-btn:active { background: var(--color-accent); color: #fff; }
+
 /* Toggle switch */
 .toggle {
   position: relative;
@@ -1014,6 +1046,52 @@ input[type="range"]::-moz-range-thumb {
 .theme-btn.theme-midnight  { background: #0f172a; color: #e2e8f0; }
 .theme-btn.theme-nord      { background: #2e3440; color: #d8dee9; }
 .spread-btn { background: var(--color-surface2); color: var(--color-text); }
+
+/* E-ink reader: spread button high-contrast */
+[data-reader-eink] .spread-btn {
+  background: #fff;
+  color: #000;
+  border-color: #000;
+}
+[data-reader-eink] .spread-btn.active {
+  background: #000;
+  color: #fff;
+  border-color: #000;
+}
+
+/* E-ink reader: settings dialog contrast fixes */
+[data-reader-eink] .btn-secondary {
+  background: #fff;
+  color: #000;
+  border-color: #000;
+}
+[data-reader-eink] .sb-item-row {
+  background: #fff;
+  border-color: #000;
+}
+[data-reader-eink] .sb-item-pos {
+  background: #fff;
+  color: #000;
+  border-color: #000;
+}
+[data-reader-eink] .slider-btn {
+  background: #fff;
+  color: #000;
+  border-color: #000;
+}
+[data-reader-eink] .slider-btn:active {
+  background: #000;
+  color: #fff;
+}
+[data-reader-eink] .dict-order-btn {
+  background: #fff;
+  color: #000;
+  border-color: #000;
+}
+[data-reader-eink] .dict-order-btn:hover:not(:disabled) {
+  background: #000;
+  color: #fff;
+}
 
 /* ── Status bar overlays ─────────────────────────────────────────────────────── */
 .sb-bar {

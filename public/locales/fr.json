@@ -166,6 +166,8 @@
   "reader.sb_para_spacing": "Espacement des paragraphes",
   "reader.sb_chap_head_spacing": "Réduire l'espacement des titres de chapitre",
   "reader.sb_chap_head_spacing_hint": "Remplace les marges des titres définies dans le livre",
+  "reader.sb_compact_blank_lines": "Masquer les lignes vides",
+  "reader.sb_compact_blank_lines_hint": "Masque les paragraphes vides utilisés comme espacement dans le livre",
   "reader.sb_disable_justify": "Aligner à gauche (désactiver la justification)",
   "reader.sb_mouse_wheel": "Navigation à la molette",
   "reader.sb_mouse_wheel_hint": "Utiliser la molette de la souris pour tourner les pages",

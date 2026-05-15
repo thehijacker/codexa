@@ -183,6 +183,7 @@ const DEFAULT_PREFS = {
   skipOpenProgressCheck: false, // if true, do not restore/sync progress on open
   skipSaveOnClose: false,       // if true, do not auto-save when leaving/closing
   chapHeadSpacing: true,        // override book heading margins to compact spacing
+  compactBlankLines: false,     // hide whitespace-only <p> elements
   disableJustify:  false,        // left-align text instead of justified
   hyphenation:    false,         // CSS hyphens: auto inside epub iframe
   hyphenLang:     '',           // empty = keep book's own lang attr; else override e.g. 'en'
@@ -814,6 +815,7 @@ ${prefs.disableJustify
 ${prefs.chapHeadSpacing ? `h1,h2,h3,h4,h5,h6 { margin: 0.2em 0 !important; padding: 0 !important; }
 [class*="heading"],[class*="chapter-head"],[class*="chapterHead"],[class*="chapHead"],[class*="title-block"],[class*="titleBlock"] { height:auto !important; min-height:0 !important; padding-top:0 !important; padding-bottom:0 !important; margin-top:0 !important; margin-bottom:0 !important; }
 div:has(>h1),div:has(>h2),div:has(>h3),div:has(>h4) { height:auto !important; min-height:0 !important; padding-top:0 !important; padding-bottom:0 !important; margin-top:0 !important; margin-bottom:0 !important; }` : ''}
+${prefs.compactBlankLines ? `p:empty, p[data-br-blank] { display: none !important; margin: 0 !important; padding: 0 !important; }` : ''}
 ${prefs.hyphenation ? 'html, body, p, li { hyphens: auto !important; }' : 'html, body, p, li { hyphens: none !important; }'}
 p, li, blockquote { orphans: 1 !important; widows: 1 !important; }
 /* annotation highlights — rendered as <mark> in the epub DOM */
@@ -823,12 +825,29 @@ mark.annot-green  { background: rgba(0,210,110,.40); }
 mark.annot-blue   { background: rgba(30,160,255,.40); }
 mark.annot-pink   { background: rgba(255,80,130,.40); }
 mark.annot-hl.has-note { text-decoration: underline; text-decoration-style: solid; text-decoration-thickness: 2px; }
+${prefs.eink ? `
+mark.annot-yellow { background: rgba(0,0,0,.13) !important; text-decoration: underline solid !important; text-decoration-thickness: 1.5px !important; }
+mark.annot-green  { background: rgba(0,0,0,.22) !important; text-decoration: underline solid !important; text-decoration-thickness: 1.5px !important; }
+mark.annot-blue   { background: rgba(0,0,0,.30) !important; text-decoration: underline solid !important; text-decoration-thickness: 1.5px !important; }
+mark.annot-pink   { background: rgba(0,0,0,.19) !important; text-decoration: underline solid !important; text-decoration-thickness: 1.5px !important; }
+mark.annot-hl.has-note { text-decoration-thickness: 3px !important; }
+mark.br-press-hl  { background: rgba(0,0,0,.20) !important; }
+` : ''}
 /* search highlights — background only, zero layout impact */
 mark.br-hl {
   background: rgba(255,200,0,.5) !important;
   color: inherit !important;
   padding: 0 !important; margin: 0 !important;
   border: none !important; border-radius: 0 !important;
+  font: inherit !important; line-height: inherit !important;
+  display: inline !important;
+}
+/* temporary press highlight — shown while annotation toolbar or dict popup is open */
+mark.br-press-hl {
+  background: rgba(100,160,255,.45) !important;
+  color: inherit !important;
+  padding: 0 !important; margin: 0 !important;
+  border: none !important; border-radius: 2px !important;
   font: inherit !important; line-height: inherit !important;
   display: inline !important;
 }
@@ -878,7 +897,16 @@ function injectIntoContents(contents) {
     markBionicPageCached(contents.location?.start ? { start: contents.location.start } : rendition?.currentLocation?.());
   }
   // No injected touch relay script needed. Touch handling is done by attachIframeDictionary and attachIframeTouchNav.
+  collapseBlankParagraphs(doc);
   injectAnnotationsIntoContents(contents);
+}
+
+function collapseBlankParagraphs(doc) {
+  doc.querySelectorAll('p').forEach(p => {
+    if (p.textContent.trim() === '' && !p.querySelector('img, svg, video, audio')) {
+      p.dataset.brBlank = '1';
+    }
+  });
 }
 
 function reapplyStyles() {
@@ -1113,6 +1141,12 @@ function attachIframeDictionary(contents) {
       } else {
         try { cfiRange = contents.cfiFromRange(range); } catch {}
       }
+      // Highlight the pressed word — CFI already captured, safe to modify DOM now
+      try {
+        const hl = doc.createElement('mark');
+        hl.className = 'br-press-hl';
+        range.surroundContents(hl);
+      } catch { /* range spans element boundary, skip visual highlight */ }
       if (cfiRange) {
         window.parent.postMessage({ type: 'annotation-select', cfiRange, text: word }, '*');
       } else {
@@ -1452,10 +1486,32 @@ function showAnnotationToolbar(cfiRange, text) {
   document.getElementById('annot-backdrop')?.classList.add('open');
 }
 
-function closeAnnotationToolbar() {
+function clearPressHighlight() {
+  const clean = (c) => {
+    try {
+      c.document?.querySelectorAll('mark.br-press-hl').forEach(m => {
+        while (m.firstChild) m.parentNode.insertBefore(m.firstChild, m);
+        m.remove();
+      });
+    } catch { /* ignore */ }
+    try { c.window?.getSelection?.()?.removeAllRanges?.(); } catch { /* ignore */ }
+  };
+  try {
+    const contents = rendition?.getContents?.();
+    if (contents?.length) { contents.forEach(clean); return; }
+  } catch { /* ignore */ }
+  // Fallback: walk views directly (getContents() can return [] before layout settles)
+  try {
+    const views = rendition?.manager?.views?.asArray?.() || rendition?.manager?.views || [];
+    (Array.isArray(views) ? views : [views?.get?.(0)]).forEach(v => { if (v?.contents) clean(v.contents); });
+  } catch { /* ignore */ }
+}
+
+function closeAnnotationToolbar(keepHighlight = false) {
   _pendingAnnotation = null;
   document.getElementById('annot-toolbar')?.classList.remove('open');
   document.getElementById('annot-backdrop')?.classList.remove('open');
+  if (!keepHighlight) clearPressHighlight();
 }
 
 function showAnnotationNoteEditor(annotationId, existingNote) {
@@ -1471,6 +1527,7 @@ function closeAnnotationNoteEditor() {
   _editingAnnotationId = null;
   document.getElementById('annot-note-editor')?.classList.remove('open');
   document.getElementById('annot-backdrop')?.classList.remove('open');
+  clearPressHighlight();
 }
 
 // Inject <mark> elements for all cached annotations that belong to this contents view.
@@ -2628,6 +2685,7 @@ async function showDictPopup(word) {
 }
 
 function closeDictPopup() {
+  clearPressHighlight();
   // Clear text selection so highlighted word is removed after dictionary closes.
   try { window.getSelection?.()?.removeAllRanges?.(); } catch { /* ignore */ }
   try {
@@ -2635,9 +2693,11 @@ function closeDictPopup() {
       try { c.window?.getSelection?.()?.removeAllRanges?.(); } catch { /* ignore */ }
     });
   } catch { /* ignore */ }
-  document.getElementById('dict-popup')?.classList.remove('open');
+  const dictPopup = document.getElementById('dict-popup');
+  if (dictPopup?.contains(document.activeElement)) document.activeElement.blur();
+  dictPopup?.classList.remove('open');
   document.getElementById('dict-backdrop')?.classList.remove('open');
-  document.getElementById('dict-popup')?.setAttribute('aria-hidden', 'true');
+  dictPopup?.setAttribute('aria-hidden', 'true');
 }
 
 // Receive messages from iframe contexts (origin may vary on iOS/blob views).
@@ -2739,6 +2799,8 @@ function syncSettingsUi() {
   if (lsVl) lsVl.textContent = (prefs.letterSpacing / 10).toFixed(1) + 'px';
   const chEl = document.getElementById('chap-head-spacing-toggle');
   if (chEl) chEl.checked = prefs.chapHeadSpacing;
+  const cblEl = document.getElementById('compact-blank-lines-toggle');
+  if (cblEl) cblEl.checked = prefs.compactBlankLines;
   const djEl = document.getElementById('disable-justify-toggle');
   if (djEl) djEl.checked = prefs.disableJustify;
   const mwEl = document.getElementById('mouse-wheel-nav-toggle');
@@ -3034,6 +3096,58 @@ function initStatusBarSettings() {
   });
 }
 
+function initSliderButtons() {
+  const panel = document.getElementById('settings-panel');
+  if (!panel) return;
+  panel.querySelectorAll('input[type="range"]').forEach(input => {
+    const inlineFlex = input.style.flex === '1';
+    const minWidth   = input.style.minWidth || '';
+
+    const row = document.createElement('div');
+    row.className = 'slider-row';
+    if (inlineFlex) {
+      row.style.flex = '1';
+      if (minWidth) row.style.minWidth = minWidth;
+      input.style.removeProperty('flex');
+      input.style.removeProperty('min-width');
+    }
+
+    const minus = document.createElement('button');
+    minus.type = 'button';
+    minus.className = 'slider-btn';
+    minus.textContent = '−';
+    minus.setAttribute('aria-label', '−');
+
+    const plus = document.createElement('button');
+    plus.type = 'button';
+    plus.className = 'slider-btn';
+    plus.textContent = '+';
+    plus.setAttribute('aria-label', '+');
+
+    const step     = parseFloat(input.step) || 1;
+    const minVal   = parseFloat(input.min);
+    const maxVal   = parseFloat(input.max);
+    const decimals = (String(step).split('.')[1] || '').length;
+
+    function nudge(dir) {
+      const next = Math.min(maxVal, Math.max(minVal,
+        parseFloat((parseFloat(input.value) + dir * step).toFixed(decimals))
+      ));
+      if (next === parseFloat(input.value)) return;
+      input.value = next;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    minus.addEventListener('click', () => nudge(-1));
+    plus.addEventListener('click',  () => nudge(+1));
+
+    input.parentNode.insertBefore(row, input);
+    row.appendChild(minus);
+    row.appendChild(input);
+    row.appendChild(plus);
+  });
+}
+
 function initSettingsUi() {
   populateFontSelect();
   populateSbFontSelect();
@@ -3123,6 +3237,10 @@ function initSettingsUi() {
   });
   document.getElementById('chap-head-spacing-toggle')?.addEventListener('change', (e) => {
     prefs.chapHeadSpacing = e.target.checked;
+    reapplyStyles(); persistPrefs();
+  });
+  document.getElementById('compact-blank-lines-toggle')?.addEventListener('change', (e) => {
+    prefs.compactBlankLines = e.target.checked;
     reapplyStyles(); persistPrefs();
   });
   document.getElementById('disable-justify-toggle')?.addEventListener('change', (e) => {
@@ -3252,6 +3370,7 @@ function initSettingsUi() {
   applyStatusBarStyles();
   applyEdgePadding();
   applyPageShadow();
+  initSliderButtons();
 }
 
 // ── Progress ──────────────────────────────────────────────────────────────────
@@ -4229,7 +4348,7 @@ document.getElementById('annot-backdrop')?.addEventListener('click', () => {
   closeAnnotationNoteEditor();
   closeAnnotationEditSheet();
 });
-document.getElementById('annot-btn-cancel')?.addEventListener('click', closeAnnotationToolbar);
+document.getElementById('annot-btn-cancel')?.addEventListener('click', () => closeAnnotationToolbar());
 document.querySelectorAll('.annot-color-btn').forEach(btn => {
   btn.addEventListener('click', async () => {
     const color = btn.dataset.color;
@@ -4242,7 +4361,7 @@ document.querySelectorAll('.annot-color-btn').forEach(btn => {
 document.getElementById('annot-btn-note')?.addEventListener('click', () => {
   if (!_pendingAnnotation) return;
   const pending = _pendingAnnotation;
-  closeAnnotationToolbar();
+  closeAnnotationToolbar(true); // keep press highlight visible while note editor is open
   _pendingAnnotation = pending; // restore after close nulled it
   showAnnotationNoteEditor(null, '');
 });
@@ -4291,8 +4410,8 @@ document.querySelectorAll('.annot-edit-color-btn').forEach(btn => {
 // Dictionary button inside annotation toolbar
 document.getElementById('annot-btn-dict')?.addEventListener('click', () => {
   const text = _pendingAnnotation?.text || '';
-  const word = text.split(/\s+/)[0].replace(/^['’-]+|['’-]+$/g, '').trim();
-  closeAnnotationToolbar();
+  const word = text.split(/\s+/)[0].replace(/^[''-]+|[''-]+$/g, '').trim();
+  closeAnnotationToolbar(true); // keep press highlight visible while dict popup is open
   if (word) showDictPopup(word);
 });
 

@@ -184,6 +184,9 @@ html[data-lib-theme="eink"] .nav-icon-search            { content: url('/images/
 html[data-lib-theme="eink"] .nav-icon-edit              { content: url('/images/edit_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-book-upload       { content: url('/images/book_upload_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-statistics        { content: url('/images/statistics_bw.svg'); }
+html[data-lib-theme="eink"] .book-cover,
+html[data-lib-theme="eink"] .stats-book-cover,
+html[data-lib-theme="eink"] .info-modal-cover { filter: grayscale(100%); }
 
 /* ── Utility ────────────────────────────────────────────────────────────────── */
 .sr-only {
@@ -515,6 +518,23 @@ input:focus, select:focus, textarea:focus {
 }
 /* Mobile: show actions when card is tapped (JS toggles this class) */
 .book-card.tapped .book-card-actions { display: flex; }
+/* Read button: invert SVG icon to white on the dark overlay background */
+.book-card-actions .read-btn .nav-icon { filter: brightness(0) invert(1); }
+/* E-ink: light button bg so black read_bw.svg is visible; undo the invert */
+html[data-lib-theme="eink"] .book-card-actions .btn-icon,
+.sidebar-layout[data-lib-theme="eink"] .book-card-actions .btn-icon {
+  background: rgba(255, 255, 255, 0.92);
+  color: #111;
+  border-color: rgba(0, 0, 0, 0.55);
+}
+html[data-lib-theme="eink"] .book-card-actions .btn-icon:hover,
+.sidebar-layout[data-lib-theme="eink"] .book-card-actions .btn-icon:hover {
+  background: #111;
+  color: #fff;
+  border-color: #111;
+}
+html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
+.sidebar-layout[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon { filter: none; }
 
 /* ── Empty state ────────────────────────────────────────────────────────────── */
 .empty-state {
@@ -1787,3 +1807,128 @@ input:focus, select:focus, textarea:focus {
 @media (max-width: 640px) {
   .kosync-actions { grid-template-columns: 1fr; }
 }
+
+/* ── Toggle switch ────────────────────────────────────────────────────────── */
+.toggle {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--color-border);
+  border-radius: 24px;
+  cursor: pointer;
+  transition: background .2s;
+}
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform .2s;
+}
+.toggle input:checked + .toggle-slider { background: var(--color-accent); }
+.toggle input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+/* ── E-ink: additional overrides ─────────────────────────────────────────── */
+/* Sort / filter dropdown */
+html[data-lib-theme="eink"] .sort-select,
+.sidebar-layout[data-lib-theme="eink"] .sort-select {
+  background: #fff;
+  color: #111;
+  border-color: #111;
+}
+html[data-lib-theme="eink"] .sort-menu-btn,
+.sidebar-layout[data-lib-theme="eink"] .sort-menu-btn {
+  background: #fff;
+  color: #111;
+  border-color: #111;
+  box-shadow: none;
+}
+html[data-lib-theme="eink"] .sort-menu-btn:hover,
+.sidebar-layout[data-lib-theme="eink"] .sort-menu-btn:hover { border-color: #111; }
+html[data-lib-theme="eink"] .sort-menu-list,
+.sidebar-layout[data-lib-theme="eink"] .sort-menu-list {
+  background: #fff;
+  border-color: #111;
+  box-shadow: 0 4px 16px rgba(0,0,0,.15);
+}
+html[data-lib-theme="eink"] .sort-menu-option:hover,
+html[data-lib-theme="eink"] .sort-menu-option:focus-visible,
+.sidebar-layout[data-lib-theme="eink"] .sort-menu-option:hover,
+.sidebar-layout[data-lib-theme="eink"] .sort-menu-option:focus-visible { background: #f0f0f0; }
+
+/* Language dropdown */
+html[data-lib-theme="eink"] .lang-menu-btn,
+.sidebar-layout[data-lib-theme="eink"] .lang-menu-btn {
+  background: #fff;
+  color: #111;
+  border-color: #111;
+  box-shadow: none;
+}
+html[data-lib-theme="eink"] .lang-menu-btn:hover,
+.sidebar-layout[data-lib-theme="eink"] .lang-menu-btn:hover { border-color: #111; }
+html[data-lib-theme="eink"] .lang-menu-list,
+.sidebar-layout[data-lib-theme="eink"] .lang-menu-list {
+  background: #fff;
+  border-color: #111;
+  box-shadow: 0 4px 16px rgba(0,0,0,.15);
+}
+html[data-lib-theme="eink"] .lang-menu-option:hover,
+html[data-lib-theme="eink"] .lang-menu-option:focus-visible,
+.sidebar-layout[data-lib-theme="eink"] .lang-menu-option:hover,
+.sidebar-layout[data-lib-theme="eink"] .lang-menu-option:focus-visible { background: #f0f0f0; }
+
+/* Edit mode button (btn-secondary → white/black) */
+html[data-lib-theme="eink"] #edit-mode-btn,
+.sidebar-layout[data-lib-theme="eink"] #edit-mode-btn {
+  background: #fff;
+  color: #111;
+  border-color: #111;
+}
+
+/* Edit action buttons: select-all, assign → black like delete */
+html[data-lib-theme="eink"] #edit-select-all-btn,
+html[data-lib-theme="eink"] #edit-assign-btn,
+html[data-lib-theme="eink"] #edit-remove-btn,
+.sidebar-layout[data-lib-theme="eink"] #edit-select-all-btn,
+.sidebar-layout[data-lib-theme="eink"] #edit-assign-btn,
+.sidebar-layout[data-lib-theme="eink"] #edit-remove-btn {
+  background: #111;
+  color: #fff;
+  border-color: #111;
+}
+
+/* Online library book cover thumbnails */
+html[data-lib-theme="eink"] .book-row-thumb,
+.sidebar-layout[data-lib-theme="eink"] .book-row-thumb { filter: grayscale(100%); }
+
+/* Book info: genre tags */
+html[data-lib-theme="eink"] .genre-pill,
+.sidebar-layout[data-lib-theme="eink"] .genre-pill {
+  background: #f0f0f0;
+  color: #111;
+  border-color: #aaa;
+}
+
+/* Book info: read button */
+html[data-lib-theme="eink"] .btn-read,
+.sidebar-layout[data-lib-theme="eink"] .btn-read {
+  background: #111;
+  color: #fff;
+}
+
+/* Book info / edit mode: native checkboxes */
+html[data-lib-theme="eink"] .info-modal-shelf-row input[type="checkbox"],
+html[data-lib-theme="eink"] .book-card-checkbox,
+.sidebar-layout[data-lib-theme="eink"] .info-modal-shelf-row input[type="checkbox"],
+.sidebar-layout[data-lib-theme="eink"] .book-card-checkbox { accent-color: #111; }

@@ -166,6 +166,8 @@
   "reader.sb_para_spacing": "Razmik med odstavki",
   "reader.sb_chap_head_spacing": "Zmanjšaj razmake naslovov poglavij",
   "reader.sb_chap_head_spacing_hint": "Prepiše razmike iz knjige za naslove poglavij",
+  "reader.sb_compact_blank_lines": "Skrij prazne vrstice",
+  "reader.sb_compact_blank_lines_hint": "Skrije prazne odstavke, ki jih knjiga uporablja za razmik",
   "reader.sb_disable_justify": "Poravnava levo (brez justifikacije)",
   "reader.sb_mouse_wheel": "Pomikanje z miško",
   "reader.sb_mouse_wheel_hint": "Kolo miške pomika med stranmi",
