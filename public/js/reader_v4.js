@@ -2,6 +2,7 @@ import { apiFetch, requireAuth, getToken } from './api.js';
 import { toast } from './ui.js';
 import { t, initI18n, applyTranslations, getCurrentLang } from './i18n.js';
 import ePub from './flow/index.js';
+import { isBookDownloaded, downloadBook, getBookMeta } from './offline.js';
 
 await initI18n();
 
@@ -4421,6 +4422,106 @@ document.getElementById('btn-annotations')?.addEventListener('click', () =>
 document.getElementById('annotations-close')?.addEventListener('click', closePanels);
 
 document.getElementById('btn-back').addEventListener('click', () => { void returnToLibrary(); });
+
+// ── KOSync hot zones ──────────────────────────────────────────────────────────
+function kosyncConfirm(action) {
+  return new Promise(resolve => {
+    const msg   = action === 'pull' ? t('reader.kosync_confirm_pull') : t('reader.kosync_confirm_push');
+    const label = t('common.confirm');
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" style="max-width:340px">
+        <p style="margin-bottom:1.5rem">${msg}</p>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="kc-cancel">${t('common.cancel')}</button>
+          <button class="btn btn-primary"   id="kc-confirm">${label}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(backdrop);
+    const close = ok => { backdrop.remove(); resolve(ok); };
+    backdrop.querySelector('#kc-cancel').addEventListener('click',  () => close(false));
+    backdrop.querySelector('#kc-confirm').addEventListener('click', () => close(true));
+    backdrop.addEventListener('click', e => { if (e.target === backdrop) close(false); });
+  });
+}
+
+document.getElementById('kosync-zone-bl')?.addEventListener('click', async () => {
+  if (!currentBook) return;
+  if (!await kosyncConfirm('pull')) return;
+
+  const docKey = externalDocKey();
+  const [extResult, intResult] = await Promise.allSettled([
+    apiFetch(`/kosync/remote/${encodeURIComponent(docKey)}`),
+    apiFetch(`/kosync/internal/${encodeURIComponent(docKey)}`),
+  ]);
+
+  if (extResult.status === 'rejected' && intResult.status === 'rejected') {
+    toast.error(t('reader.kosync_fetch_error'));
+    return;
+  }
+
+  const ext = extResult.status === 'fulfilled' ? extResult.value : null;
+  const int = intResult.status === 'fulfilled' ? intResult.value : null;
+  let best = null;
+  if (ext?.progress) best = ext;
+  if (int?.progress && (!best || (int.timestamp || 0) > (best.timestamp || 0))) best = int;
+
+  if (!best?.progress) { toast.info(t('reader.kosync_no_progress')); return; }
+
+  if (Math.abs((best.percentage || 0) - currentPct) <= 0.01) {
+    toast.info(t('reader.kosync_same_position'));
+    return;
+  }
+
+  const doSync = await showSyncDialog(best, currentPct, null);
+  if (!doSync) return;
+
+  const dfMatch = best.progress.match(/^\/body\/DocFragment\[(\d+)\]/);
+  if (dfMatch) {
+    const spineIdx  = parseInt(dfMatch[1], 10) - 1;
+    const spineItem = book.spine.get(spineIdx);
+    if (spineItem?.href) {
+      const paraMatch = !prefs.bionicReading && best.progress.match(/\/p\[(\d+)\]/);
+      let navigated = false;
+      if (paraMatch) {
+        const guessCfi = `epubcfi(/6/${(spineIdx + 1) * 2}!/4/${parseInt(paraMatch[1]) * 2})`;
+        try { await rendition.display(guessCfi); navigated = true; } catch { navigated = false; }
+      }
+      if (!navigated) await rendition.display(spineItem.href);
+      if (prefs.bionicReading && book.locations.length() > 0)
+        await seekToPercentage(best.percentage);
+    } else if (book.locations.length() > 0 && best.percentage != null) {
+      await seekToPercentage(best.percentage);
+    }
+  } else if (best.percentage != null && book.locations.length() > 0) {
+    await seekToPercentage(best.percentage);
+  }
+});
+
+document.getElementById('kosync-zone-br')?.addEventListener('click', async () => {
+  if (!currentBook || !isReady) return;
+  if (!await kosyncConfirm('push')) return;
+
+  const docKey   = externalDocKey();
+  const xpointer = koReaderXPointer();
+  const [remResult, intResult] = await Promise.allSettled([
+    apiFetch(`/kosync/remote/${encodeURIComponent(docKey)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ document: docKey, progress: xpointer, percentage: currentPct, device: 'web', device_id: 'codexa-web' }),
+    }),
+    apiFetch(`/kosync/internal/${encodeURIComponent(docKey)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ progress: xpointer, percentage: currentPct, device: 'web', device_id: 'codexa-web' }),
+    }),
+  ]);
+
+  if (remResult.status === 'rejected' && intResult.status === 'rejected') {
+    toast.error(t('reader.kosync_push_error'));
+  } else {
+    toast.success(t('reader.kosync_push_done', { pct: Math.round(currentPct * 100) }));
+  }
+});
 document.getElementById('btn-toc').addEventListener('click', () =>
   tocSidebar.classList.contains('open') ? closePanels() : openToc());
 document.getElementById('btn-bookmarks').addEventListener('click', () =>
@@ -4575,7 +4676,7 @@ document.addEventListener('fullscreenchange', async () => {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
-  console.log('[reader] v4.2026-05-08.10');
+  console.log('[reader] v4.2026-05-15.01');
   applyUiTheme();
   applyPageShadow();
   applyAutoHide();
@@ -4606,7 +4707,13 @@ async function init() {
 
   try {
     loadingMsg.textContent = t('reader.loading_book');
-    currentBook = await apiFetch(`/books/${bookId}`);
+    if (navigator.onLine) {
+      currentBook = await apiFetch(`/books/${bookId}`);
+    } else {
+      const meta = await getBookMeta(Number(bookId));
+      if (!meta) throw new Error(t('reader.err_no_book'));
+      currentBook = meta;
+    }
     bookTitleEl.textContent = currentBook.title;
     document.title = `${currentBook.title} — Codexa`;
     loadBookPrefs(currentBook.id);
@@ -4626,9 +4733,18 @@ async function init() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     arrayBuffer = await res.arrayBuffer();
   } catch (err) {
-    loadingMsg.textContent = t('reader.err_download');
+    loadingMsg.textContent = !navigator.onLine
+      ? t('reader.err_offline_not_cached')
+      : t('reader.err_download');
     toast.error(err.message);
     return;
+  }
+
+  // Auto-download to offline cache in background after successful file load
+  if (navigator.onLine && currentBook) {
+    isBookDownloaded(Number(bookId)).then(cached => {
+      if (!cached) downloadBook(currentBook, getToken()).catch(() => {});
+    }).catch(() => {});
   }
 
   try {
@@ -4678,7 +4794,9 @@ async function init() {
       }
     } catch { /* ignore */ }
     try {
-      localProgress = await apiFetch(`/progress/${currentBook.file_hash}`).catch(() => null);
+      localProgress = navigator.onLine
+        ? await apiFetch(`/progress/${currentBook.file_hash}`).catch(() => null)
+        : null;
       console.log('[reader] localProgress:', localProgress?.cfi_position?.slice(0, 60), 'pct:', localProgress?.percentage);
       if (!startCfi && localProgress?.cfi_position) startCfi = localProgress.cfi_position;
       // Pre-load locations from cache so seekToPercentage works immediately after startRendition

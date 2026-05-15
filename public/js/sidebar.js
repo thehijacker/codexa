@@ -10,11 +10,12 @@ import { showPanel, getCurrentPanel } from './router.js';
 const LIB_THEME_KEY = 'br_library_theme';
 const LIB_THEMES = new Set(['system', 'day', 'night', 'eink']);
 
-let shelves         = [];
-let _activePage     = 'library';
-let _onShelfSelect  = null;
-let _activeShelfId  = 'all';
-let _readingCount   = 0;
+let shelves           = [];
+let _activePage       = 'library';
+let _onShelfSelect    = null;
+let _activeShelfId    = 'all';
+let _readingCount     = 0;
+let _downloadedCount  = 0;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,12 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
     navigate('reading');
   });
 
+  // Nav: Downloaded
+  sidebar.querySelector('#nav-downloaded').addEventListener('click', e => {
+    e.preventDefault();
+    navigate('downloaded');
+  });
+
   // Nav: Vsa knjižnica
   sidebar.querySelector('#nav-all-books').addEventListener('click', e => {
     e.preventDefault();
@@ -109,11 +116,11 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
   document.addEventListener('panelchange', e => {
     _activePage = e.detail.panel;
     if (_activePage === 'settings') {
-      document.querySelectorAll('#nav-all-books, #nav-currently-reading, .sidebar-shelf-item, #nav-opds')
+      document.querySelectorAll('#nav-all-books, #nav-currently-reading, #nav-downloaded, .sidebar-shelf-item, #nav-opds')
         .forEach(el => el.classList.remove('sidebar-item-active'));
       document.getElementById('nav-settings')?.classList.add('sidebar-item-active');
     } else if (_activePage === 'opds') {
-      document.querySelectorAll('#nav-all-books, #nav-currently-reading, .sidebar-shelf-item, #nav-settings')
+      document.querySelectorAll('#nav-all-books, #nav-currently-reading, #nav-downloaded, .sidebar-shelf-item, #nav-settings')
         .forEach(el => el.classList.remove('sidebar-item-active'));
       document.getElementById('nav-opds')?.classList.add('sidebar-item-active');
     } else {
@@ -156,17 +163,27 @@ export function getShelves() { return shelves; }
 
 export function setActive(shelfId) {
   _activeShelfId = shelfId;
-  document.querySelectorAll('#nav-all-books, #nav-currently-reading, .sidebar-shelf-item, #nav-settings, #nav-opds')
+  document.querySelectorAll('#nav-all-books, #nav-currently-reading, #nav-downloaded, .sidebar-shelf-item, #nav-settings, #nav-opds')
     .forEach(el => el.classList.remove('sidebar-item-active'));
 
   if (shelfId === 'all') {
     document.getElementById('nav-all-books')?.classList.add('sidebar-item-active');
   } else if (shelfId === 'reading') {
     document.getElementById('nav-currently-reading')?.classList.add('sidebar-item-active');
+  } else if (shelfId === 'downloaded') {
+    document.getElementById('nav-downloaded')?.classList.add('sidebar-item-active');
   } else {
     document.querySelector(`.sidebar-shelf-item[data-id="${shelfId}"]`)
       ?.classList.add('sidebar-item-active');
   }
+}
+
+export function updateDownloadedCount(n) {
+  _downloadedCount = n;
+  const el      = document.getElementById('nav-downloaded');
+  const countEl = document.getElementById('nav-downloaded-count');
+  if (el)      el.style.display = n > 0 ? '' : 'none';
+  if (countEl) countEl.textContent = n > 0 ? String(n) : '';
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
@@ -193,6 +210,11 @@ function buildSidebarHtml() {
         <span class="sidebar-item-icon"><img src="/images/currently_reading.svg" class="nav-icon nav-icon-currently-reading" alt=""></span>
         <span class="sidebar-item-label">${t('sidebar.currently_reading')}</span>
         <span class="shelf-count" id="nav-reading-count"></span>
+      </a>
+      <a href="/" class="sidebar-item" id="nav-downloaded" style="${_downloadedCount > 0 ? '' : 'display:none'}">
+        <span class="sidebar-item-icon"><img src="/images/download.svg" class="nav-icon nav-icon-download" alt=""></span>
+        <span class="sidebar-item-label">${t('sidebar.downloaded')}</span>
+        <span class="shelf-count" id="nav-downloaded-count">${_downloadedCount > 0 ? _downloadedCount : ''}</span>
       </a>
       <a href="/" class="sidebar-item" id="nav-all-books">
         <span class="sidebar-item-icon"><img src="/images/all_library.svg" class="nav-icon nav-icon-all-library" alt=""></span>
@@ -302,6 +324,9 @@ document.addEventListener('langchange', () => {
   });
   sidebar.querySelector('#nav-currently-reading')?.addEventListener('click', e => {
     e.preventDefault(); navigate('reading');
+  });
+  sidebar.querySelector('#nav-downloaded')?.addEventListener('click', e => {
+    e.preventDefault(); navigate('downloaded');
   });
   sidebar.querySelector('#nav-all-books')?.addEventListener('click', e => {
     e.preventDefault(); navigate('all');

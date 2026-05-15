@@ -165,11 +165,13 @@ router.get('/sync-sse', async (req, res) => {
             const fileSize   = fs.statSync(destPath).size;
             const ins = db.prepare(`
               INSERT INTO books (user_id, title, author, series_name, series_number, description,
-                                 file_hash, file_hash_md5, filename, cover_path, file_size)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 file_hash, file_hash_md5, filename, cover_path, file_size,
+                                 publisher, language, isbn, genres, pages)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(user.id, bookTitle, bookAuthor,
                    meta.series_name || '', meta.series_number || '', meta.description || entry.summary || '',
-                   fileHash, fileHashMd5, filename, meta.cover_path, fileSize);
+                   fileHash, fileHashMd5, filename, meta.cover_path, fileSize,
+                   meta.publisher || '', meta.language || '', meta.isbn || '', meta.genres || '', meta.pages || null);
             book = { id: ins.lastInsertRowid };
             added++;
           } else {
@@ -719,11 +721,13 @@ router.post('/sync', async (req, res) => {
             const fileSize   = fs.statSync(destPath).size;
 
             const ins = db.prepare(`
-              INSERT INTO books (user_id, title, author, series_name, series_number, description, file_hash, file_hash_md5, filename, cover_path, file_size)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              INSERT INTO books (user_id, title, author, series_name, series_number, description, file_hash, file_hash_md5, filename, cover_path, file_size,
+                                 publisher, language, isbn, genres, pages)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(req.user.id, bookTitle, bookAuthor,
                    meta.series_name || '', meta.series_number || '', meta.description || entry.summary || '',
-                   fileHash, fileHashMd5, filename, meta.cover_path, fileSize);
+                   fileHash, fileHashMd5, filename, meta.cover_path, fileSize,
+                   meta.publisher || '', meta.language || '', meta.isbn || '', meta.genres || '', meta.pages || null);
             book = { id: ins.lastInsertRowid };
             added++;
           } else {
@@ -821,9 +825,12 @@ router.post('/download/:id', async (req, res) => {
       const fileSize   = fs.statSync(destPath).size;
 
       const result = db.prepare(`
-        INSERT INTO books (user_id, title, author, series_name, series_number, description, file_hash, file_hash_md5, filename, cover_path, file_size)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(req.user.id, bookTitle, bookAuthor, meta.series_name || '', meta.series_number || '', meta.description || '', fileHash, fileHashMd5, filename, meta.cover_path, fileSize);
+        INSERT INTO books (user_id, title, author, series_name, series_number, description, file_hash, file_hash_md5, filename, cover_path, file_size,
+                           publisher, language, isbn, genres, pages)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(req.user.id, bookTitle, bookAuthor, meta.series_name || '', meta.series_number || '', meta.description || '',
+             fileHash, fileHashMd5, filename, meta.cover_path, fileSize,
+             meta.publisher || '', meta.language || '', meta.isbn || '', meta.genres || '', meta.pages || null);
 
       res.status(201).json({ id: result.lastInsertRowid, title: bookTitle, author: bookAuthor, file_hash: fileHash });
     } catch (err) {

@@ -157,6 +157,10 @@
         <span id="sb-bc" class="sb-slot"></span>
         <span id="sb-br" class="sb-slot"></span>
       </div>
+      <!-- KOSync tap hot zones (bottom corners) -->
+      <div id="kosync-zone-bl" class="kosync-hotzone kosync-hotzone-bl" aria-hidden="true"></div>
+      <div id="kosync-zone-br" class="kosync-hotzone kosync-hotzone-br" aria-hidden="true"></div>
+
       <!-- Chapter progress bar (overlaid on reading area) -->
       <div id="sb-chap-prog" class="sb-prog-bar" style="display:none">
         <div id="sb-chap-prog-fill" class="sb-prog-fill"></div>
@@ -846,7 +850,7 @@
   <script type="module" src="/js/reader_v4.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/js/sw.js').catch(() => {});
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
     }
   </script>
 </body>

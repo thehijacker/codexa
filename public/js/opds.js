@@ -526,7 +526,17 @@ function openStaleDialog(staleBooks, shelfId, syncSummary) {
   const close = () => { backdrop.remove(); toast.success(syncSummary); };
 
   backdrop.querySelector('#stale-close').addEventListener('click', close);
-  backdrop.querySelector('#stale-skip').addEventListener('click', close);
+  backdrop.querySelector('#stale-skip').addEventListener('click', async () => {
+    for (const bookId of otherCounts.keys()) {
+      try {
+        await apiFetch(`/shelves/${shelfId}/books/${bookId}`, { method: 'DELETE' });
+      } catch { /* ignore */ }
+    }
+    backdrop.remove();
+    reloadShelves();
+    reloadLibrary();
+    toast.success(syncSummary);
+  });
   backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
 
   backdrop.querySelector('#stale-delete').addEventListener('click', async () => {

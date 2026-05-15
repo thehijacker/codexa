@@ -20,10 +20,11 @@ export function showToast(message, type = 'info', duration = 3500) {
   toast.className = `toast toast-${type}`;
   toast.textContent = message;
   container.appendChild(toast);
+  const eink = document.documentElement.hasAttribute('data-reader-eink');
   setTimeout(() => {
     toast.style.opacity = '0';
-    toast.style.transition = 'opacity .3s';
-    setTimeout(() => toast.remove(), 320);
+    if (!eink) toast.style.transition = 'opacity .3s';
+    setTimeout(() => toast.remove(), eink ? 0 : 320);
   }, duration);
 }
 

@@ -1,8 +1,16 @@
 import { apiFetch } from './api.js';
 import { toast, confirmDialog, setButtonLoading, showProgressToast } from './ui.js';
-import { reloadShelves, getShelves, setActive } from './sidebar.js';
+import { reloadShelves, getShelves, setActive, updateDownloadedCount } from './sidebar.js';
 import { t } from './i18n.js';
 import { showPanel } from './router.js';
+import {
+  isOfflineSupported,
+  getAllBooks as getOfflineBooks,
+  isBookDownloaded,
+  downloadBook,
+  deleteDownload,
+  autoDownloadCurrentlyReading,
+} from './offline.js';
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let books               = [];
@@ -13,6 +21,12 @@ let editMode            = false;
 let selectedBooks       = new Set();
 let seriesFilter        = null; // active series name filter
 let sortBeforeSeriesFilter = null; // sort value saved before auto-switching to series_asc
+
+// ── Offline state ─────────────────────────────────────────────────────────────
+let isOfflineMode   = false;
+let offlineBooks    = [];        // IDB snapshot used when server is unreachable
+let downloadedIds   = new Set(); // bookIds currently stored offline
+let downloadingIds  = new Set(); // bookIds with an active download in progress
 
 // ── URL-based shelf navigation (from settings / opds pages) ───────────────────
 const urlParams    = new URLSearchParams(location.search);
@@ -166,6 +180,19 @@ function renderGrid(list) {
       ? `<img class="book-cover" src="/covers/${book.cover_path}" alt="" loading="lazy" />`
       : `<div class="book-cover-placeholder">📖</div>`;
 
+    const isDownloaded  = downloadedIds.has(book.id);
+    const isDownloading = downloadingIds.has(book.id);
+    let offlineBtn = '';
+    if (isOfflineSupported && !isOfflineMode) {
+      if (isDownloading) {
+        offlineBtn = `<button class="btn-icon offline-btn downloading" disabled title="${t('library.downloading')}" data-id="${book.id}"><span class="spinner spinner-sm"></span></button>`;
+      } else if (isDownloaded) {
+        offlineBtn = `<button class="btn-icon offline-btn offline-btn-delete" title="${t('library.btn_delete_offline')}" data-id="${book.id}"><img src="/images/delete.svg" class="nav-icon" alt=""></button>`;
+      } else {
+        offlineBtn = `<button class="btn-icon offline-btn offline-btn-download" title="${t('library.btn_download_offline')}" data-id="${book.id}"><img src="/images/download.svg" class="nav-icon" alt=""></button>`;
+      }
+    }
+
     const card = document.createElement('div');
     card.className  = 'book-card';
     card.dataset.id = book.id;
@@ -173,12 +200,14 @@ function renderGrid(list) {
 
     card.innerHTML = `
       ${cover}
+      ${isDownloaded ? '<div class="book-offline-badge" title="Offline available">✓</div>' : ''}
       <label class="book-card-checkbox-wrap" title="${t('library.btn_cover_select')}">
         <input type="checkbox" class="book-card-checkbox" ${selectedBooks.has(book.id) ? 'checked' : ''} />
       </label>
       <div class="book-card-actions">
         ${book.cover_path ? `<button class="btn-icon cover-preview-btn" title="${t('library.btn_cover_preview')}" data-id="${book.id}">👁</button>` : ''}
         <button class="btn-icon info-btn"  title="${t('library.btn_cover_info')}" data-id="${book.id}">ℹ</button>
+        ${offlineBtn}
         <button class="btn-icon read-btn"  title="${t('library.btn_read')}" data-id="${book.id}"><img src="/images/read.svg" class="nav-icon nav-icon-read" alt=""></button>
       </div>
       <div class="book-info">
@@ -233,6 +262,40 @@ function renderGrid(list) {
     card.querySelector('.cover-preview-btn')?.addEventListener('click', e => {
       e.stopPropagation();
       openCoverPreview(book);
+    });
+
+    card.querySelector('.offline-btn-download')?.addEventListener('click', async e => {
+      e.stopPropagation();
+      downloadingIds.add(book.id);
+      applyFilter();
+      try {
+        await downloadBook(book, getToken());
+        downloadedIds.add(book.id);
+        toast.success(t('library.toast_downloaded'));
+        updateDownloadedCount(downloadedIds.size);
+      } catch (err) {
+        console.error('[offline] download failed:', err.message);
+        toast.error(t('library.toast_download_err'));
+      } finally {
+        downloadingIds.delete(book.id);
+        applyFilter();
+      }
+    });
+
+    card.querySelector('.offline-btn-delete')?.addEventListener('click', e => {
+      e.stopPropagation();
+      confirmDialog(
+        t('library.btn_delete_offline'),
+        async () => {
+          await deleteDownload(book.id);
+          downloadedIds.delete(book.id);
+          toast.success(t('library.toast_deleted_offline'));
+          updateDownloadedCount(downloadedIds.size);
+          applyFilter();
+        },
+        t('library.btn_delete_offline'),
+        true
+      );
     });
 
     grid.appendChild(card);
@@ -574,6 +637,9 @@ export async function selectShelf(shelfId) {
   } else if (shelfId === 'reading') {
     titleEl.innerHTML = `<img src="/images/currently_reading.svg" class="nav-icon nav-icon-currently-reading" alt=""> ${t('sidebar.currently_reading')}`;
     currentShelfBookIds = null;
+  } else if (shelfId === 'downloaded') {
+    titleEl.innerHTML = `<img src="/images/download.svg" class="nav-icon nav-icon-download" alt=""> ${t('sidebar.downloaded')}`;
+    currentShelfBookIds = null;
   } else {
     const shelf = getShelves().find(s => s.id === shelfId);
     titleEl.innerHTML = `<img src="/images/shelf.svg" class="nav-icon nav-icon-shelf" alt=""> ${escHtml(shelf ? shelf.name : 'Polica')}`;
@@ -635,14 +701,17 @@ function updateSeriesFilterBar() {
 function applyFilter() {
   const allCountEl = document.getElementById('nav-all-count');
   const readingCountEl = document.getElementById('nav-reading-count');
-  if (allCountEl)     allCountEl.textContent     = books.length;
-  if (readingCountEl) readingCountEl.textContent = books.filter(b => { const p = b.percentage || 0; return p > 0 && p < 1; }).length;
+  const sourceBooks = isOfflineMode ? offlineBooks : books;
+  if (allCountEl)     allCountEl.textContent     = sourceBooks.length;
+  if (readingCountEl) readingCountEl.textContent = sourceBooks.filter(b => { const p = b.percentage || 0; return p > 0 && p < 1; }).length;
 
   const q = (document.getElementById('search-input')?.value || '').trim().toLowerCase();
-  let list = books;
+  let list = sourceBooks;
 
   if (currentShelfId === 'reading') {
     list = list.filter(b => { const p = b.percentage || 0; return p > 0 && p < 1; });
+  } else if (currentShelfId === 'downloaded') {
+    list = isOfflineMode ? offlineBooks : list.filter(b => downloadedIds.has(b.id));
   } else if (currentShelfBookIds !== null) {
     list = list.filter(b => currentShelfBookIds.has(b.id));
   }
@@ -899,6 +968,31 @@ function openShelfEditModal(shelf) {
   });
 }
 
+// ── Offline helpers ───────────────────────────────────────────────────────────
+function getToken() {
+  return localStorage.getItem('br_token') || '';
+}
+
+async function refreshDownloadedIds() {
+  if (!isOfflineSupported) return;
+  try {
+    const stored = await getOfflineBooks();
+    downloadedIds = new Set(stored.filter(b => b.downloadStatus === 'complete').map(b => b.id));
+    updateDownloadedCount(downloadedIds.size);
+  } catch { /* non-critical */ }
+}
+
+function showOfflineBanner() {
+  if (document.getElementById('offline-mode-banner')) return;
+  const grid = document.getElementById('book-grid');
+  if (!grid?.parentElement) return;
+  const banner = document.createElement('div');
+  banner.id = 'offline-mode-banner';
+  banner.className = 'offline-banner';
+  banner.innerHTML = `<span>${t('library.offline_mode_banner')}</span>`;
+  grid.parentElement.insertBefore(banner, grid);
+}
+
 // ── Load books ────────────────────────────────────────────────────────────────
 async function loadBooks() {
   try {
@@ -910,8 +1004,24 @@ async function loadBooks() {
         .sort((a, b) => b.progress_updated_at - a.progress_updated_at)[0];
       if (lastRead) { sessionStorage.setItem('br_last_shelf', String(currentShelfId)); window.location.href = `/readerv4.html?id=${lastRead.id}`; return; }
     }
+    // Refresh offline state, then auto-download currently-reading books silently
+    await refreshDownloadedIds();
+    autoDownloadCurrentlyReading(books, getToken()).catch(() => {});
     applyFilter();
   } catch (err) {
+    // Server unreachable — try loading from IndexedDB
+    try {
+      offlineBooks = await getOfflineBooks();
+      if (offlineBooks.length > 0) {
+        isOfflineMode = true;
+        booksLoaded = true;
+        downloadedIds = new Set(offlineBooks.filter(b => b.downloadStatus === 'complete').map(b => b.id));
+        updateDownloadedCount(downloadedIds.size);
+        showOfflineBanner();
+        applyFilter();
+        return;
+      }
+    } catch { /* IDB also unavailable */ }
     toast.error(err.message);
   }
 }
@@ -1035,6 +1145,22 @@ function checkInterruptedSession() {
 export async function initLibrary() {
   if (_initialized) return;
   _initialized = true;
+
+  // SW download progress messages
+  if (isOfflineSupported) {
+    navigator.serviceWorker?.addEventListener('message', e => {
+      const { type, bookId } = e.data || {};
+      if (type === 'CACHE_BOOK_DONE') {
+        downloadingIds.delete(bookId);
+        downloadedIds.add(bookId);
+        updateDownloadedCount(downloadedIds.size);
+        applyFilter();
+      } else if (type === 'CACHE_BOOK_ERROR') {
+        downloadingIds.delete(bookId);
+        applyFilter();
+      }
+    });
+  }
 
   // DOM refs
   dropZone     = document.getElementById('drop-zone');
@@ -1186,9 +1312,10 @@ export async function initLibrary() {
 
   // Initial shelf
   if (initialShelf !== 'all') {
-    await selectShelf(
-      initialShelf === 'reading' ? 'reading' : Number(initialShelf)
-    );
+    const resolvedShelf = (initialShelf === 'reading' || initialShelf === 'downloaded')
+      ? initialShelf
+      : Number(initialShelf);
+    await selectShelf(resolvedShelf);
   } else {
     const titleEl = document.getElementById('page-title');
     if (titleEl) titleEl.innerHTML = `<img src="/images/all_library.svg" class="nav-icon nav-icon-all-library" alt=""> ${t('sidebar.all_library')}`;
@@ -1226,6 +1353,7 @@ document.addEventListener('langchange', () => {
   if (titleEl) {
     if (currentShelfId === 'all') titleEl.innerHTML = `<img src="/images/all_library.svg" class="nav-icon nav-icon-all-library" alt=""> ${t('sidebar.all_library')}`;
     else if (currentShelfId === 'reading') titleEl.innerHTML = `<img src="/images/currently_reading.svg" class="nav-icon nav-icon-currently-reading" alt=""> ${t('sidebar.currently_reading')}`;
+    else if (currentShelfId === 'downloaded') titleEl.innerHTML = `<img src="/images/download.svg" class="nav-icon nav-icon-download" alt=""> ${t('sidebar.downloaded')}`;
   }
   if (editMode) {
     updateEditToolbar();

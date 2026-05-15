@@ -471,6 +471,18 @@ body.page-gap-shadow-on .dict-popup {
 }
 .nav-zone-prev { left:  0; justify-content: flex-start; padding-left: .5rem; }
 .nav-zone-next { right: 0; justify-content: flex-end;   padding-right: .5rem; }
+
+/* KOSync tap hot zones */
+.kosync-hotzone {
+  position: absolute;
+  bottom: 0;
+  width: 56px;
+  height: 40px;
+  z-index: 6;
+  cursor: pointer;
+}
+.kosync-hotzone-bl { left:  0; }
+.kosync-hotzone-br { right: 0; }
 /* Only the arrow button itself captures events and shows on hover */
 .nav-arrow {
   background: rgba(0, 0, 0, .35);
