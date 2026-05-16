@@ -4,7 +4,23 @@ import { t, initI18n, applyTranslations, getCurrentLang } from './i18n.js';
 import ePub from './flow/index.js';
 import { isBookDownloaded, downloadBook, getBookMeta } from './offline.js';
 
-await initI18n();
+const _i18nReady = initI18n();
+
+function onTap(el, handler) {
+  if (!el) return;
+  el.addEventListener('click', handler);
+  el.addEventListener('touchend', (e) => { e.preventDefault(); handler(e); });
+}
+
+// Polyfills for Chrome <76
+if (!Promise.allSettled) {
+  Promise.allSettled = ps => Promise.all(ps.map(p =>
+    Promise.resolve(p).then(
+      value  => ({ status: 'fulfilled', value }),
+      reason => ({ status: 'rejected', reason })
+    )
+  ));
+}
 
 if (!requireAuth()) throw new Error('not authenticated');
 const params = new URLSearchParams(window.location.search);
@@ -231,6 +247,8 @@ let preBookmarkCfi = null;            // position before a bookmark jump (for ba
 let annotationsCache = [];            // loaded annotations for current book
 let _pendingAnnotation = null;        // {cfiRange, text} waiting for color/note pick
 let _editingAnnotationId = null;      // id of annotation being edited in note editor
+const WORD_HIGHLIGHT_LINGER_MS = 500; // how long the press-highlight lingers after a dialog closes
+let _clearHlTimer = null;
 // Reading statistics tracking
 let statsSessionId = null;            // active reading_sessions.id
 let sessionPageCount = 0;             // page navigation events in current session
@@ -242,6 +260,7 @@ let currentEndPage   = 0;     // right-page number in two-page mode (0 in single
 let currentChapTotal = 0;     // total pages in current chapter
 let currentIsTwoPage = false; // true when two pages are visible simultaneously
 let chapPageCache    = {};    // { [spineIndex]: totalPages } accumulated as chapters are visited
+let currentLocsKey   = '';    // cache key for current column mode (reset on rendition restart)
 let lastLocation     = null;  // last location object from updateProgress
 // Reading speed tracking: each entry is a { time } recorded on every page turn
 let speedSamples     = [];    // up to 25 recent samples
@@ -701,8 +720,15 @@ function fontStyleFromFilename(f) {
 }
 
 async function loadCustomFonts() {
+  let files;
   try {
-    const files = await apiFetch('/fonts');
+    files = await apiFetch('/fonts');
+    try { localStorage.setItem('br_font_list', JSON.stringify(files)); } catch {}
+  } catch {
+    try { files = JSON.parse(localStorage.getItem('br_font_list') || '[]'); } catch {}
+    if (!files?.length) return;
+  }
+  try {
     if (!files.length) return;
     const families = {};
     files.forEach(f => {
@@ -1143,6 +1169,7 @@ function attachIframeDictionary(contents) {
         try { cfiRange = contents.cfiFromRange(range); } catch {}
       }
       // Highlight the pressed word — CFI already captured, safe to modify DOM now
+      clearTimeout(_clearHlTimer); _clearHlTimer = null;
       try {
         const hl = doc.createElement('mark');
         hl.className = 'br-press-hl';
@@ -1508,11 +1535,40 @@ function clearPressHighlight() {
   } catch { /* ignore */ }
 }
 
+function scheduleClearPressHighlight() {
+  clearTimeout(_clearHlTimer);
+  _clearHlTimer = setTimeout(clearPressHighlight, WORD_HIGHLIGHT_LINGER_MS);
+}
+
+// Navigate to a CFI with a graceful fallback chain when toRange() fails.
+// epub.js throws IndexSizeError when a CFI's element-child index doesn't match the
+// current DOM (bionic-reading transform, column-mode change, epub structural quirks).
+async function navigateToCfi(cfi) {
+  try {
+    await rendition.display(cfi);
+  } catch {
+    const pct = book.locations?.percentageFromCfi?.(cfi) ?? 0;
+    if (pct > 0) { await seekToPercentage(pct); return; }
+    const m = String(cfi).match(/^epubcfi\(\/6\/(\d+)!/);
+    if (m) {
+      const spineIdx = Math.floor(parseInt(m[1], 10) / 2) - 1;
+      const item = spineIdx >= 0 ? book.spine?.get(spineIdx) : null;
+      if (item?.href) await rendition.display(item.href);
+    }
+  }
+}
+
+function closeAnnotationUI() {
+  closeAnnotationToolbar();
+  closeAnnotationNoteEditor();
+  closeAnnotationEditSheet();
+}
+
 function closeAnnotationToolbar(keepHighlight = false) {
   _pendingAnnotation = null;
   document.getElementById('annot-toolbar')?.classList.remove('open');
   document.getElementById('annot-backdrop')?.classList.remove('open');
-  if (!keepHighlight) clearPressHighlight();
+  if (!keepHighlight) scheduleClearPressHighlight();
 }
 
 function showAnnotationNoteEditor(annotationId, existingNote) {
@@ -1528,7 +1584,7 @@ function closeAnnotationNoteEditor() {
   _editingAnnotationId = null;
   document.getElementById('annot-note-editor')?.classList.remove('open');
   document.getElementById('annot-backdrop')?.classList.remove('open');
-  clearPressHighlight();
+  scheduleClearPressHighlight();
 }
 
 // Inject <mark> elements for all cached annotations that belong to this contents view.
@@ -1626,18 +1682,21 @@ function closeAnnotationEditSheet() {
 
 async function createAnnotation(cfiRange, text, color, note) {
   if (!currentBook) return;
+  const payload = { cfi: cfiRange, pct: currentPct || 0, color, note: note || '', text };
   try {
     const a = await apiFetch(`/annotations/${currentBook.id}`, {
       method: 'POST',
-      body: JSON.stringify({ cfi: cfiRange, pct: currentPct || 0, color, note: note || '', text }),
+      body: JSON.stringify(payload),
     });
     annotationsCache.push(a);
-    reapplyAnnotations();
-    renderAnnotationList();
-    toast(t('reader.annotation_added'));
   } catch {
-    /* silent */
+    annotationsCache.push({ id: -(Date.now()), ...payload, offline: true });
+    enqueueOfflineOp(`br_ann_q_${currentBook.id}`, 'create', payload);
   }
+  try { localStorage.setItem(`br_ann_${currentBook.id}`, JSON.stringify(annotationsCache)); } catch { /* ignore */ }
+  reapplyAnnotations();
+  renderAnnotationList();
+  toast(t('reader.annotation_added'));
 }
 
 async function updateAnnotation(id, updates) {
@@ -1649,43 +1708,46 @@ async function updateAnnotation(id, updates) {
       method: 'PUT',
       body: JSON.stringify(updates),
     });
-    Object.assign(a, updates);
-    // Update mark classes in DOM
-    try {
-      const contents = rendition?.getContents?.() || [];
-      contents.forEach(c => {
-        c.document?.querySelectorAll(`mark[data-annot-id="${id}"]`).forEach(m => {
-          m.className = 'annot-hl annot-' + a.color + (a.note ? ' has-note' : '');
-        });
-      });
-    } catch { /* ignore */ }
-    renderAnnotationList();
   } catch {
-    /* silent */
+    if (id > 0) enqueueOfflineOp(`br_ann_q_${currentBook.id}`, 'update', { id, updates });
   }
+  Object.assign(a, updates);
+  try { localStorage.setItem(`br_ann_${currentBook.id}`, JSON.stringify(annotationsCache)); } catch { /* ignore */ }
+  // Update mark classes in DOM
+  try {
+    const contents = rendition?.getContents?.() || [];
+    contents.forEach(c => {
+      c.document?.querySelectorAll(`mark[data-annot-id="${id}"]`).forEach(m => {
+        m.className = 'annot-hl annot-' + a.color + (a.note ? ' has-note' : '');
+      });
+    });
+  } catch { /* ignore */ }
+  renderAnnotationList();
 }
 
 async function deleteAnnotation(id) {
   if (!currentBook) return;
   try {
     await apiFetch(`/annotations/${currentBook.id}/${id}`, { method: 'DELETE' });
-    annotationsCache = annotationsCache.filter(x => x.id !== id);
-    removeAnnotationFromDom(id);
-    renderAnnotationList();
-    toast(t('reader.annotation_deleted'));
   } catch {
-    /* silent */
+    if (id > 0) enqueueOfflineOp(`br_ann_q_${currentBook.id}`, 'delete', { id });
   }
+  annotationsCache = annotationsCache.filter(x => x.id !== id);
+  try { localStorage.setItem(`br_ann_${currentBook.id}`, JSON.stringify(annotationsCache)); } catch { /* ignore */ }
+  removeAnnotationFromDom(id);
+  renderAnnotationList();
+  toast(t('reader.annotation_deleted'));
 }
 
 async function loadAnnotations(bookId) {
   try {
     annotationsCache = await apiFetch(`/annotations/${bookId}`);
-    reapplyAnnotations();
-    renderAnnotationList();
+    try { localStorage.setItem(`br_ann_${bookId}`, JSON.stringify(annotationsCache)); } catch { /* ignore */ }
   } catch {
-    annotationsCache = [];
+    try { annotationsCache = JSON.parse(localStorage.getItem(`br_ann_${bookId}`) || '[]'); } catch { annotationsCache = []; }
   }
+  reapplyAnnotations();
+  renderAnnotationList();
 }
 
 function renderAnnotationList() {
@@ -1715,7 +1777,7 @@ function renderAnnotationList() {
       <button class="annotation-delete-btn btn-icon-sm" title="${t('reader.annotation_delete')}">🗑</button>`;
     item.querySelector('.annotation-item-body').addEventListener('click', () => {
       closePanels();
-      rendition?.display(a.cfi).catch(() => {});
+      navigateToCfi(a.cfi);
     });
     item.querySelector('.annotation-delete-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -1794,7 +1856,7 @@ function estimateBookPagesLeft() {
 }
 
 // Lookup icon for a stat id
-const STAT_ICON = Object.fromEntries(getStatusStats().map(s => [s.id, s.icon]));
+const STAT_ICON = getStatusStats().reduce((acc, s) => { acc[s.id] = s.icon; return acc; }, {});
 
 // Compute the text value of a single stat (no icon — icon added by computeSlot)
 function computeStatValue(id) {
@@ -2686,7 +2748,7 @@ async function showDictPopup(word) {
 }
 
 function closeDictPopup() {
-  clearPressHighlight();
+  scheduleClearPressHighlight();
   // Clear text selection so highlighted word is removed after dictionary closes.
   try { window.getSelection?.()?.removeAllRanges?.(); } catch { /* ignore */ }
   try {
@@ -2726,7 +2788,7 @@ window.addEventListener('message', (e) => {
   }
 });
 
-document.getElementById('footnote-backdrop')?.addEventListener('click', closeFootnotePopup);
+onTap(document.getElementById('footnote-backdrop'), closeFootnotePopup);
 document.getElementById('footnote-popup-close')?.addEventListener('click', closeFootnotePopup);
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeFootnotePopup();
@@ -3459,7 +3521,7 @@ function updateProgress(location) {
 }
 
 function initLocations() {
-  const key    = `br_locs_${currentBook.file_hash}`;
+  const key    = getLocsCacheKey();
   const cached = localStorage.getItem(key);
   if (cached) {
     try {
@@ -3587,13 +3649,18 @@ async function saveProgress({ forceRemote = false, allowRemote = true } = {}) {
   console.log('[pos] SAVE cfi:', cfi.slice(0,60), 'pct:', (pct*100).toFixed(2)+'%');
   const docKey = externalDocKey();
   const posChanged = cfi !== openCfi;
-  const shouldPushRemote = !prefs.skipSaveOnClose && (forceRemote || (allowRemote && posChanged));
+  const shouldPushRemote = pct > 0 && !prefs.skipSaveOnClose && (forceRemote || (allowRemote && posChanged));
   console.log('[kosync] saveProgress docKey:', docKey, 'cfi:', cfi.slice(0, 40), 'pct:', Math.round(pct * 100) + '%', shouldPushRemote ? '' : '(no remote push)');
+  const progressPayload = { cfi_position: cfi, percentage: pct, device: 'web' };
   const saves = [
     apiFetch(`/progress/${currentBook.file_hash}`, {
       method: 'PUT',
-      body: JSON.stringify({ cfi_position: cfi, percentage: pct, device: 'web' }),
-    }),
+      body: JSON.stringify(progressPayload),
+    }).then(() => {
+      if (pct > 0) {
+        try { localStorage.setItem(`br_progress_${currentBook.file_hash}`, JSON.stringify(progressPayload)); } catch { /* ignore */ }
+      }
+    }).catch(() => {}),
   ];
   if (shouldPushRemote) {
     saves.push(pushRemoteProgress(docKey, koReaderXPointer(), pct));
@@ -3619,7 +3686,10 @@ function saveProgressBackground() {
   const xp     = koReaderXPointer();
   const posChanged = cfi !== openCfi;
   fetch(`/api/progress/${currentBook.file_hash}`, opts({ cfi_position: cfi, percentage: pct, device: 'web' })).catch(() => {});
-  if (!prefs.skipSaveOnClose && posChanged) {
+  if (pct > 0) {
+    try { localStorage.setItem(`br_progress_${currentBook.file_hash}`, JSON.stringify({ cfi_position: cfi, percentage: pct, device: 'web' })); } catch { /* ignore */ }
+  }
+  if (pct > 0 && !prefs.skipSaveOnClose && posChanged) {
     fetch(`/api/kosync/remote/${encodeURIComponent(docKey)}`,   opts({ document: docKey, progress: xp, percentage: pct, device: 'web', device_id: 'codexa-web' })).catch(() => {});
     fetch(`/api/kosync/internal/${encodeURIComponent(docKey)}`, opts({ progress: xp, percentage: pct, device: 'web', device_id: 'codexa-web' })).catch(() => {});
   }
@@ -3766,10 +3836,25 @@ async function networkRestoreSync() {
 }
 window.__codexaNetworkRestore = networkRestoreSync;
 
+window.addEventListener('online', () => {
+  if (!currentBook) return;
+  syncOfflineBookmarks(currentBook.id).catch(() => {});
+  syncOfflineAnnotations(currentBook.id).catch(() => {});
+  networkRestoreSync().catch(() => {});
+});
+
 
 function isMobileScreen() { return window.innerWidth < 640; }
 
+function getLocsCacheKey() {
+  const w = epubViewer?.clientWidth || window.innerWidth;
+  const isTwoCol = prefs.spread === 'auto' && !isMobileScreen() && w >= 800;
+  return `br_locs_${currentBook.file_hash}_${isTwoCol ? '2' : '1'}col`;
+}
+
 async function startRendition(displayCfi = null) {
+  chapPageCache  = {};
+  currentLocsKey = getLocsCacheKey();
   // On small screens always force single-page, regardless of user preference
   const spreadMode = (prefs.spread === 'auto' && !isMobileScreen()) ? 'auto' : 'none';
   // Reserve 38px at the bottom so epub content doesn't flow behind the
@@ -4129,6 +4214,16 @@ document.addEventListener('br-wheel', (e) => { handleWheel(e.detail.deltaY); });
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 async function resizeRenditionToViewer() {
   if (!rendition) return;
+  const newKey = getLocsCacheKey();
+  if (newKey !== currentLocsKey) {
+    // Column mode flipped (e.g. phone rotation crossing 640px or 800px threshold)
+    const savePct = currentPct;
+    chapPageCache = {};
+    rendition.destroy();
+    await startRendition(null);
+    if (savePct > 0 && book.locations?.length() > 0) await seekToPercentage(savePct);
+    return;
+  }
   const pctBeforeResize = currentPct;
   rendition.resize(epubViewer.clientWidth, Math.max(200, epubViewer.clientHeight - RENDITION_BOTTOM_RESERVE));
   if (isReady && pctBeforeResize > 0 && book.locations?.length() > 0) {
@@ -4209,6 +4304,51 @@ function logChapterVisit(bookId, href, title) {
   }).catch(() => {});
 }
 
+// ── Offline queues (bookmarks + annotations) ──────────────────────────────────
+
+function enqueueOfflineOp(queueKey, op, data) {
+  try {
+    const q = JSON.parse(localStorage.getItem(queueKey) || '[]');
+    q.push({ op, data, ts: Date.now() });
+    localStorage.setItem(queueKey, JSON.stringify(q));
+  } catch { /* ignore */ }
+}
+
+async function syncOfflineBookmarks(bookId) {
+  const key = `br_bm_q_${bookId}`;
+  try {
+    const q = JSON.parse(localStorage.getItem(key) || '[]');
+    if (!q.length) return;
+    for (const item of q) {
+      if (item.op === 'create') await apiFetch(`/bookmarks/${bookId}`, { method: 'POST', body: JSON.stringify(item.data) }).catch(() => {});
+      if (item.op === 'delete') await apiFetch(`/bookmarks/${bookId}/${item.data.id}`, { method: 'DELETE' }).catch(() => {});
+    }
+    localStorage.removeItem(key);
+    bookmarksCache = await apiFetch(`/bookmarks/${bookId}`).catch(() => bookmarksCache);
+    try { localStorage.setItem(`br_bm_${bookId}`, JSON.stringify(bookmarksCache)); } catch { /* ignore */ }
+    renderBookmarkList();
+    updateBookmarkBadge();
+  } catch { /* ignore */ }
+}
+
+async function syncOfflineAnnotations(bookId) {
+  const key = `br_ann_q_${bookId}`;
+  try {
+    const q = JSON.parse(localStorage.getItem(key) || '[]');
+    if (!q.length) return;
+    for (const item of q) {
+      if (item.op === 'create') await apiFetch(`/annotations/${bookId}`, { method: 'POST', body: JSON.stringify(item.data) }).catch(() => {});
+      if (item.op === 'delete') await apiFetch(`/annotations/${bookId}/${item.data.id}`, { method: 'DELETE' }).catch(() => {});
+      if (item.op === 'update') await apiFetch(`/annotations/${bookId}/${item.data.id}`, { method: 'PUT', body: JSON.stringify(item.data.updates) }).catch(() => {});
+    }
+    localStorage.removeItem(key);
+    annotationsCache = await apiFetch(`/annotations/${bookId}`).catch(() => annotationsCache);
+    try { localStorage.setItem(`br_ann_${bookId}`, JSON.stringify(annotationsCache)); } catch { /* ignore */ }
+    reapplyAnnotations();
+    renderAnnotationList();
+  } catch { /* ignore */ }
+}
+
 // ── Bookmarks ─────────────────────────────────────────────────────────────────
 function updateBookmarkBadge() {
   const n = bookmarksCache.length;
@@ -4252,7 +4392,7 @@ function renderBookmarkList() {
         bookmarkAcceptBtn.style.display = '';
       }
       closePanels();
-      rendition?.display(bm.cfi).catch(() => {});
+      navigateToCfi(bm.cfi);
     });
 
     // Edit label
@@ -4287,13 +4427,14 @@ function renderBookmarkList() {
     item.querySelector('.bookmark-action-btn.delete').addEventListener('click', async () => {
       try {
         await apiFetch(`/bookmarks/${currentBook.id}/${bm.id}`, { method: 'DELETE' });
-        bookmarksCache = bookmarksCache.filter(b => b.id !== bm.id);
-        renderBookmarkList();
-        updateBookmarkBadge();
-        toast.success(t('reader.bookmark_deleted'));
-      } catch (err) {
-        toast.error(err.message || t('reader.bookmark_err_delete'));
+      } catch {
+        if (bm.id > 0) enqueueOfflineOp(`br_bm_q_${currentBook.id}`, 'delete', { id: bm.id });
       }
+      bookmarksCache = bookmarksCache.filter(b => b.id !== bm.id);
+      try { localStorage.setItem(`br_bm_${currentBook.id}`, JSON.stringify(bookmarksCache)); } catch { /* ignore */ }
+      renderBookmarkList();
+      updateBookmarkBadge();
+      toast.success(t('reader.bookmark_deleted'));
     });
 
     bookmarksListEl.appendChild(item);
@@ -4303,11 +4444,12 @@ function renderBookmarkList() {
 async function loadBookmarks(bookId) {
   try {
     bookmarksCache = await apiFetch(`/bookmarks/${bookId}`);
-    renderBookmarkList();
-    updateBookmarkBadge();
+    try { localStorage.setItem(`br_bm_${bookId}`, JSON.stringify(bookmarksCache)); } catch { /* ignore */ }
   } catch {
-    bookmarksCache = [];
+    try { bookmarksCache = JSON.parse(localStorage.getItem(`br_bm_${bookId}`) || '[]'); } catch { bookmarksCache = []; }
   }
+  renderBookmarkList();
+  updateBookmarkBadge();
 }
 
 async function addBookmark() {
@@ -4318,19 +4460,22 @@ async function addBookmark() {
   const chapter = chapterTitleEl.textContent || '';
   const label = `${chapter ? chapter + ' · ' : ''}${Math.round(pct * 100)}%`;
 
+  const payload = { cfi, pct, label };
   try {
     const bm = await apiFetch(`/bookmarks/${currentBook.id}`, {
       method: 'POST',
-      body: JSON.stringify({ cfi, pct, label }),
+      body: JSON.stringify(payload),
     });
     bookmarksCache.push(bm);
-    bookmarksCache.sort((a, b) => a.pct - b.pct);
-    renderBookmarkList();
-    updateBookmarkBadge();
-    toast.success(t('reader.bookmark_added'));
-  } catch (err) {
-    toast.error(err.message || t('reader.bookmark_err_add'));
+  } catch {
+    bookmarksCache.push({ id: -(Date.now()), ...payload, offline: true });
+    enqueueOfflineOp(`br_bm_q_${currentBook.id}`, 'create', payload);
   }
+  bookmarksCache.sort((a, b) => a.pct - b.pct);
+  try { localStorage.setItem(`br_bm_${currentBook.id}`, JSON.stringify(bookmarksCache)); } catch { /* ignore */ }
+  renderBookmarkList();
+  updateBookmarkBadge();
+  toast.success(t('reader.bookmark_added'));
 }
 
 function escapeHtml(str) {
@@ -4344,11 +4489,7 @@ function escapeHtml(str) {
 // ── Button wiring ─────────────────────────────────────────────────────────────
 
 // Annotation toolbar
-document.getElementById('annot-backdrop')?.addEventListener('click', () => {
-  closeAnnotationToolbar();
-  closeAnnotationNoteEditor();
-  closeAnnotationEditSheet();
-});
+onTap(document.getElementById('annot-backdrop'), closeAnnotationUI);
 document.getElementById('annot-btn-cancel')?.addEventListener('click', () => closeAnnotationToolbar());
 document.querySelectorAll('.annot-color-btn').forEach(btn => {
   btn.addEventListener('click', async () => {
@@ -4607,7 +4748,7 @@ document.getElementById('btn-settings').addEventListener('click', () =>
 document.getElementById('btn-fullscreen').addEventListener('click', () => { void toggleFullscreen(); });
 document.getElementById('toc-close').addEventListener('click',      closePanels);
 document.getElementById('settings-close').addEventListener('click', closePanels);
-panelBackdrop.addEventListener('click', closePanels);
+onTap(panelBackdrop, closePanels);
 document.getElementById('btn-prev').addEventListener('click', e => { e.stopPropagation(); goPrev(); });
 document.getElementById('btn-next').addEventListener('click', e => { e.stopPropagation(); goNext(); });
 
@@ -4676,17 +4817,22 @@ document.addEventListener('fullscreenchange', async () => {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
+  await _i18nReady;
   console.log('[reader] v4.2026-05-15.01');
+  // Always inherit library e-ink setting so reader opens in e-ink when library is in e-ink mode
+  if (localStorage.getItem('br_library_theme') === 'eink' ||
+      (typeof window.AndroidCodexa?.isEinkMode === 'function' && window.AndroidCodexa.isEinkMode())) {
+    prefs.eink = true;
+  }
   applyUiTheme();
   applyPageShadow();
   applyAutoHide();
   syncFullscreenButton();
   await loadCustomFonts();
-  // First-ever open: apply defaults based on current library theme / available fonts
+  // First-ever open: apply font defaults based on available custom fonts
   if (!localStorage.getItem('br_reader_prefs')) {
     const bookerly = customFonts.find(f => f.label.toLowerCase().includes('bookerly'));
     if (bookerly) prefs.fontFamily = bookerly.value;
-    if (localStorage.getItem('br_library_theme') === 'eink') prefs.eink = true;
   }
   initSettingsUi();
   applyVolumeKeyMode(prefs.volumeKeysEnabled);
@@ -4707,9 +4853,9 @@ async function init() {
 
   try {
     loadingMsg.textContent = t('reader.loading_book');
-    if (navigator.onLine) {
+    try {
       currentBook = await apiFetch(`/books/${bookId}`);
-    } else {
+    } catch {
       const meta = await getBookMeta(Number(bookId));
       if (!meta) throw new Error(t('reader.err_no_book'));
       currentBook = meta;
@@ -4718,9 +4864,11 @@ async function init() {
     document.title = `${currentBook.title} — Codexa`;
     loadBookPrefs(currentBook.id);
     syncSettingsUi();
-  } catch (err) {
-    loadingMsg.textContent = t('reader.err_no_book');
-    toast.error(err.message);
+  } catch {
+    const msg = t('reader.err_no_book');
+    loadingMsg.textContent = msg;
+    toast.error(msg);
+    setTimeout(() => { window.location.href = '/'; }, 2500);
     return;
   }
 
@@ -4732,11 +4880,13 @@ async function init() {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     arrayBuffer = await res.arrayBuffer();
-  } catch (err) {
-    loadingMsg.textContent = !navigator.onLine
+  } catch {
+    const msg = !navigator.onLine
       ? t('reader.err_offline_not_cached')
       : t('reader.err_download');
-    toast.error(err.message);
+    loadingMsg.textContent = msg;
+    toast.error(msg);
+    setTimeout(() => { window.location.href = '/'; }, 2500);
     return;
   }
 
@@ -4794,14 +4944,22 @@ async function init() {
       }
     } catch { /* ignore */ }
     try {
-      localProgress = navigator.onLine
-        ? await apiFetch(`/progress/${currentBook.file_hash}`).catch(() => null)
-        : null;
+      try {
+        localProgress = await apiFetch(`/progress/${currentBook.file_hash}`);
+        if (localProgress) {
+          try { localStorage.setItem(`br_progress_${currentBook.file_hash}`, JSON.stringify(localProgress)); } catch { /* ignore */ }
+        }
+      } catch {
+        try {
+          const cached = localStorage.getItem(`br_progress_${currentBook.file_hash}`);
+          if (cached) localProgress = JSON.parse(cached);
+        } catch { /* ignore */ }
+      }
       console.log('[reader] localProgress:', localProgress?.cfi_position?.slice(0, 60), 'pct:', localProgress?.percentage);
       if (!startCfi && localProgress?.cfi_position) startCfi = localProgress.cfi_position;
       // Pre-load locations from cache so seekToPercentage works immediately after startRendition
       if (localProgress?.percentage != null) {
-        const locsKey    = `br_locs_${currentBook.file_hash}`;
+        const locsKey    = getLocsCacheKey();
         const cachedLocs = localStorage.getItem(locsKey);
         if (cachedLocs) { try { book.locations.load(cachedLocs); } catch { localStorage.removeItem(locsKey); } }
       }
@@ -4887,7 +5045,7 @@ async function init() {
             }
           } else {
             console.warn('[kosync] spine item not found for index', spineIdx, '— falling back to pct');
-            const key    = `br_locs_${currentBook.file_hash}`;
+            const key    = getLocsCacheKey();
             const cached = localStorage.getItem(key);
             if (cached) { try { book.locations.load(cached); } catch { localStorage.removeItem(key); } }
             if (!book.locations.length()) {
@@ -4898,7 +5056,7 @@ async function init() {
           }
         } else {
           // No DocFragment info (no xpointer or unknown format) — fall back to percentage
-          const key    = `br_locs_${currentBook.file_hash}`;
+          const key    = getLocsCacheKey();
           const cached = localStorage.getItem(key);
           if (cached) { try { book.locations.load(cached); } catch { localStorage.removeItem(key); } }
           if (!book.locations.length()) {

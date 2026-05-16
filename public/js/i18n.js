@@ -246,6 +246,16 @@ async function _load(code) {
     try { localStorage.setItem(cacheKey, JSON.stringify(_strings)); } catch { /* storage full */ }
   } catch (err) {
     console.warn(`i18n: could not load locale "${lang}"`, err);
+    // SW cache fallback — handles when SW hasn't claimed this tab yet (e.g. after version bump clears localStorage)
+    try {
+      const swCached = await caches.match(`/locales/${lang}.json`);
+      if (swCached?.ok) {
+        _strings = await swCached.json();
+        _lang = lang;
+        try { localStorage.setItem(cacheKey, JSON.stringify(_strings)); } catch {}
+        return;
+      }
+    } catch {}
     if (lang !== FALLBACK) {
       // Attempt fallback locale
       try {

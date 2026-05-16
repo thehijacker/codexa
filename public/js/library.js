@@ -1,6 +1,6 @@
 import { apiFetch } from './api.js';
 import { toast, confirmDialog, setButtonLoading, showProgressToast } from './ui.js';
-import { reloadShelves, getShelves, setActive, updateDownloadedCount } from './sidebar.js';
+import { reloadShelves, getShelves, setActive, updateDownloadedCount, updateNavCounts } from './sidebar.js';
 import { t } from './i18n.js';
 import { showPanel } from './router.js';
 import {
@@ -10,6 +10,7 @@ import {
   downloadBook,
   deleteDownload,
   autoDownloadCurrentlyReading,
+  saveBookMeta,
 } from './offline.js';
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -150,8 +151,11 @@ function initSortMenu() {
     else closeMenu();
   });
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('.sort-menu-wrap')) closeMenu();
+    if (!list.classList.contains('hidden') && !e.target.closest('.sort-menu-wrap')) closeMenu();
   });
+  document.addEventListener('touchend', (e) => {
+    if (!list.classList.contains('hidden') && !e.target.closest('.sort-menu-wrap')) closeMenu();
+  }, { passive: true });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeMenu();
   });
@@ -187,9 +191,9 @@ function renderGrid(list) {
       if (isDownloading) {
         offlineBtn = `<button class="btn-icon offline-btn downloading" disabled title="${t('library.downloading')}" data-id="${book.id}"><span class="spinner spinner-sm"></span></button>`;
       } else if (isDownloaded) {
-        offlineBtn = `<button class="btn-icon offline-btn offline-btn-delete" title="${t('library.btn_delete_offline')}" data-id="${book.id}"><img src="/images/delete.svg" class="nav-icon" alt=""></button>`;
+        offlineBtn = `<button class="btn-icon offline-btn offline-btn-delete" title="${t('library.btn_delete_offline')}" data-id="${book.id}"><img src="/images/delete.svg" class="nav-icon nav-icon-delete" alt=""></button>`;
       } else {
-        offlineBtn = `<button class="btn-icon offline-btn offline-btn-download" title="${t('library.btn_download_offline')}" data-id="${book.id}"><img src="/images/download.svg" class="nav-icon" alt=""></button>`;
+        offlineBtn = `<button class="btn-icon offline-btn offline-btn-download" title="${t('library.btn_download_offline')}" data-id="${book.id}"><img src="/images/download.svg" class="nav-icon nav-icon-download" alt=""></button>`;
       }
     }
 
@@ -423,20 +427,26 @@ async function openInfoModal(book) {
   document.getElementById('book-info-modal')?.remove();
 
   let fullBook = book;
-  try { fullBook = await apiFetch(`/books/${book.id}`); } catch { /* use cached */ }
+  try {
+    fullBook = await apiFetch(`/books/${book.id}`);
+    // Cache the full metadata for offline info-dialog display
+    saveBookMeta({ ...fullBook, percentage: book.percentage || 0 }).catch(() => {});
+  } catch { /* use cached */ }
 
   let bookShelfIds = new Set();
-  try {
-    const ids = await apiFetch(`/shelves/for-book/${book.id}`);
-    bookShelfIds = new Set(ids);
-  } catch { /* ignore */ }
+  if (!isOfflineMode) {
+    try {
+      const ids = await apiFetch(`/shelves/for-book/${book.id}`);
+      bookShelfIds = new Set(ids);
+    } catch { /* ignore */ }
+  }
 
   const allShelves = getShelves();
   const coverHtml  = fullBook.cover_path
     ? `<img class="info-modal-cover info-modal-cover-clickable" src="/covers/${fullBook.cover_path}" alt="" />`
     : `<div class="info-modal-cover info-modal-cover-ph">📖</div>`;  
 
-  const shelvesHtml = allShelves.length
+  const shelvesHtml = isOfflineMode ? '' : (allShelves.length
     ? `<div class="info-modal-section-title">${t('library.info_shelves')}</div>
        <div class="info-modal-shelves">${allShelves.map(s => `
          <label class="info-modal-shelf-row">
@@ -445,7 +455,7 @@ async function openInfoModal(book) {
            <span class="shelf-book-count">(${s.book_count})</span>
          </label>`).join('')}
        </div>`
-    : `<div style="font-size:.82rem;color:var(--color-text-muted);margin-top:.75rem">${t('library.info_no_shelves')}</div>`;
+    : `<div style="font-size:.82rem;color:var(--color-text-muted);margin-top:.75rem">${t('library.info_no_shelves')}</div>`);
 
   // Use the list-level book object for percentage — fullBook (from GET /api/books/:id)
   // does not join reading_progress, so it always returns 0.
@@ -457,7 +467,7 @@ async function openInfoModal(book) {
         <div class="info-modal-progress-bar-fill" style="width:${progressPct}%"></div>
       </div>
       <span class="info-modal-progress-pct">${progressPct}%</span>
-      <button class="btn btn-secondary btn-sm" id="info-modal-reset-progress" style="margin-left:auto;white-space:nowrap">${t('library.btn_reset_progress') || 'Reset to 0%'}</button>
+      ${isOfflineMode ? '' : `<button class="btn btn-secondary btn-sm" id="info-modal-reset-progress" style="margin-left:auto;white-space:nowrap">${t('library.btn_reset_progress') || 'Reset to 0%'}</button>`}
     </div>` : '';
 
   const descTitleHtml   = fullBook.description
@@ -504,12 +514,10 @@ async function openInfoModal(book) {
       ${descContentHtml ? `<div class="info-modal-body">${descContentHtml}</div>` : ''}
       ${shelvesHtml}
       <div class="modal-footer info-modal-footer">
-        <button class="btn btn-danger"    id="info-modal-delete"><img src="/images/delete.svg" class="nav-icon nav-icon-delete" alt=""> ${t('library.btn_del_book')}</button>
-        <a      class="btn btn-secondary" id="info-modal-download"
-                href="/api/books/${fullBook.id}/file?download=1&token=${token}" download><img src="/images/download.svg" class="nav-icon nav-icon-download" alt=""> ${t('library.btn_download')}</a>
-        <a      class="btn btn-read"      id="info-modal-read"
-                href="/readerv4.html?id=${fullBook.id}"><img src="/images/read.svg" class="nav-icon nav-icon-read" alt=""> ${t('library.btn_read')}</a>
-        <button class="btn btn-primary"   id="info-modal-save"><img src="/images/save.svg" class="nav-icon nav-icon-save" alt=""> ${t('library.btn_save_shelves')}</button>
+        ${isOfflineMode ? '' : `<button class="btn btn-danger" id="info-modal-delete"><img src="/images/delete.svg" class="nav-icon nav-icon-delete" alt=""> ${t('library.btn_del_book')}</button>`}
+        ${isOfflineMode ? '' : `<a class="btn btn-secondary" id="info-modal-download" href="/api/books/${fullBook.id}/file?download=1&token=${token}" download><img src="/images/download.svg" class="nav-icon nav-icon-download" alt=""> ${t('library.btn_download')}</a>`}
+        <a class="btn btn-read" id="info-modal-read" href="/readerv4.html?id=${fullBook.id}"><img src="/images/read.svg" class="nav-icon nav-icon-read" alt=""> ${t('library.btn_read')}</a>
+        ${isOfflineMode ? '' : `<button class="btn btn-primary" id="info-modal-save"><img src="/images/save.svg" class="nav-icon nav-icon-save" alt=""> ${t('library.btn_save_shelves')}</button>`}
       </div>
     </div>`;
 
@@ -989,7 +997,7 @@ function showOfflineBanner() {
   const banner = document.createElement('div');
   banner.id = 'offline-mode-banner';
   banner.className = 'offline-banner';
-  banner.innerHTML = `<span>${t('library.offline_mode_banner')}</span>`;
+  banner.innerHTML = `<span data-i18n="library.offline_mode_banner">${t('library.offline_mode_banner')}</span>`;
   grid.parentElement.insertBefore(banner, grid);
 }
 
@@ -997,6 +1005,9 @@ function showOfflineBanner() {
 async function loadBooks() {
   try {
     books = await apiFetch('/books');
+    // Clear offline state when we successfully reach the server
+    isOfflineMode = false;
+    document.getElementById('offline-mode-banner')?.remove();
     booksLoaded = true;
     if (!returningFromReader && !urlParams.has('shelf') && localStorage.getItem('br_auto_open_last') === 'true') {
       const lastRead = books
@@ -1017,6 +1028,7 @@ async function loadBooks() {
         booksLoaded = true;
         downloadedIds = new Set(offlineBooks.filter(b => b.downloadStatus === 'complete').map(b => b.id));
         updateDownloadedCount(downloadedIds.size);
+        updateNavCounts(offlineBooks.length, offlineBooks.filter(b => (b.percentage || 0) > 0).length);
         showOfflineBanner();
         applyFilter();
         return;
@@ -1174,7 +1186,10 @@ export async function initLibrary() {
   document.getElementById('sort-select').addEventListener('change', applyFilter);
 
   // Edit mode
-  document.getElementById('edit-mode-btn').addEventListener('click', toggleEditMode);
+  document.getElementById('edit-mode-btn').addEventListener('click', () => {
+    if (isOfflineMode) return;
+    toggleEditMode();
+  });
   document.getElementById('edit-select-all-btn').addEventListener('click', () => {
     const visibleCards = [...document.querySelectorAll('.book-card[data-id]')];
     const allSelected  = visibleCards.every(c => selectedBooks.has(Number(c.dataset.id)));
@@ -1327,6 +1342,8 @@ export async function initLibrary() {
 
   loadBooks();
   checkInterruptedSession();
+  window.addEventListener('online',  loadBooks);
+  window.addEventListener('offline', loadBooks);
 }
 
 // Re-render language-dependent content when language changes

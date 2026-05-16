@@ -46,6 +46,11 @@ export async function saveBookMeta(book) {
       file_size:      book.file_size      || 0,
       cachedAt:       Date.now(),
       downloadStatus: book.downloadStatus || 'complete',
+      description:    book.description    || null,
+      genres:         book.genres         || null,
+      pages:          book.pages          || null,
+      publisher:      book.publisher      || null,
+      language:       book.language       || null,
     });
     tx.oncomplete = () => resolve();
     tx.onerror    = e => reject(e.target.error);

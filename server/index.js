@@ -22,6 +22,10 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 const { version } = require('../package.json');
 
+const DIST_DIR   = path.join(__dirname, '../dist');
+const PUBLIC_DIR = path.join(__dirname, '../public');
+const SERVE_DIR  = fs.existsSync(path.join(DIST_DIR, 'index.html')) ? DIST_DIR : PUBLIC_DIR;
+
 // ── Startup ──────────────────────────────────────────────────────────────────
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 64) {
   console.error('[fatal] JWT_SECRET is missing or too short (must be ≥64 chars). Set it in .env');
@@ -46,7 +50,7 @@ app.use((req, res, next) => {
   if (req.method !== 'GET') return next();
   if (path.extname(req.path)) return next();
 
-  const publicDir = path.join(__dirname, '../public');
+  const publicDir = SERVE_DIR;
 
   if (req.path.startsWith('/js/flow/')) {
     const filePath = path.join(publicDir, `${req.path}.js`);
@@ -83,7 +87,7 @@ app.use((req, res, next) => {
 });
 
 // ── Static files ──────────────────────────────────────────────────────────────
-app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.static(SERVE_DIR));
 // Expose extracted covers and user-uploaded fonts to the browser
 app.use('/covers',     express.static(path.join(DATA_DIR, 'covers')));
 app.use('/user-fonts', express.static(path.join(DATA_DIR, 'fonts')));

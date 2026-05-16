@@ -36,6 +36,7 @@
   "sidebar.online_library": "Bibliothèque en ligne",
   "sidebar.settings": "Paramètres",
   "sidebar.logout": "Se déconnecter",
+  "sidebar.logout_offline_warning": "Vous êtes hors ligne. Vous aurez besoin d'internet pour vous reconnecter. Se déconnecter quand même ?",
   "sidebar.appearance": "Apparence",
   "sidebar.theme_day": "Clair",
   "sidebar.theme_night": "Sombre",

@@ -18,6 +18,10 @@
   --sidebar-width:     260px;
   --header-height:     60px;
   --transition:        .2s ease;
+  --sat:               var(--sat, env(safe-area-inset-top, 0px));
+  --sab:               var(--sab, env(safe-area-inset-bottom, 0px));
+  --sal:               var(--sal, env(safe-area-inset-left, 0px));
+  --sar:               var(--sar, env(safe-area-inset-right, 0px));
 }
 
 /* Light theme */
@@ -186,7 +190,10 @@ html[data-lib-theme="eink"] .nav-icon-book-upload       { content: url('/images/
 html[data-lib-theme="eink"] .nav-icon-statistics        { content: url('/images/statistics_bw.svg'); }
 html[data-lib-theme="eink"] .book-cover,
 html[data-lib-theme="eink"] .stats-book-cover,
-html[data-lib-theme="eink"] .info-modal-cover { filter: grayscale(100%); }
+html[data-lib-theme="eink"] .info-modal-cover,
+html[data-lib-theme="eink"] .cover-preview-img { filter: grayscale(100%); }
+html[data-lib-theme="eink"] .book-offline-badge,
+.sidebar-layout[data-lib-theme="eink"] .book-offline-badge { background: #111; }
 
 /* ── Utility ────────────────────────────────────────────────────────────────── */
 .sr-only {
@@ -279,7 +286,7 @@ input:focus, select:focus, textarea:focus {
 
 #toast-container {
   position: fixed;
-  bottom: 1.5rem;
+  bottom: calc(1.5rem + var(--sab, env(safe-area-inset-bottom, 0px)));
   right: 1.5rem;
   z-index: 9999;
   display: flex;
@@ -342,7 +349,7 @@ input:focus, select:focus, textarea:focus {
   align-items: center;
   justify-content: space-between;
   padding: 0 1.5rem;
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--sat, env(safe-area-inset-top, 0px));
   position: sticky;
   top: 0;
   z-index: 100;
@@ -365,10 +372,30 @@ input:focus, select:focus, textarea:focus {
   vertical-align: middle;
   margin-left: .2em;
 }
+.offline-icon {
+  display: none;
+  width: 18px;
+  height: 18px;
+  margin-left: .4rem;
+  vertical-align: middle;
+  opacity: .85;
+}
+body.is-offline .offline-icon { display: inline-block; }
+body.is-offline .app-version { display: none; }
+html[data-lib-theme="eink"] .nav-icon-offline { content: url('/images/offline_bw.svg'); }
+body.is-offline #nav-settings,
+body.is-offline #nav-opds { opacity: 0.4; cursor: not-allowed; }
+body.is-offline .sidebar-shelf-item,
+body.is-offline #add-shelf-btn { opacity: 0.4; cursor: not-allowed; }
+body.is-offline #sidebar-stats-btn { opacity: 0.4; cursor: not-allowed; }
+body.is-offline #upload-btn,
+body.is-offline #edit-mode-btn { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+.sidebar-header .logo { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
 
 .app-main {
   flex: 1;
   padding: 2rem 1.5rem;
+  padding-bottom: calc(2rem + var(--sab, env(safe-area-inset-bottom, 0px)));
   max-width: 1400px;
   margin: 0 auto;
   width: 100%;
@@ -547,7 +574,7 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
 
 /* ── Modal ──────────────────────────────────────────────────────────────────── */
 .modal-backdrop {
-  position: fixed; inset: 0;
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0;
   background: rgba(0,0,0,.65);
   z-index: 400;
   display: flex;
@@ -679,7 +706,7 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
 
 /* ── Responsive ─────────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
-  .app-main    { padding: 1rem; }
+  .app-main    { padding: 1rem; padding-bottom: calc(1rem + var(--sab, env(safe-area-inset-bottom, 0px))); }
   .app-header  { padding: 0 1rem; position: sticky; flex-wrap: wrap; height: auto; min-height: var(--header-height); }
   .book-grid   { grid-template-columns: repeat(2, 1fr); gap: .75rem; }
   .modal       { padding: 1.25rem; }
@@ -718,7 +745,8 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
   position: sticky;
   top: 0;
   height: 100vh;
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--sat, env(safe-area-inset-top, 0px));
+  padding-left: var(--sal, env(safe-area-inset-left, 0px));
   overflow-y: auto;
   overflow-x: hidden;
   transition: width var(--transition);
@@ -861,6 +889,7 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
 
 .sidebar-footer {
   padding: .75rem .5rem;
+  padding-bottom: calc(.75rem + var(--sab, env(safe-area-inset-bottom, 0px)));
   border-top: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
@@ -1163,6 +1192,7 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
   min-width: 0;
   display: flex;
   flex-direction: column;
+  padding-right: var(--sar, env(safe-area-inset-right, 0px));
 }
 
 /* Mobile top bar with hamburger (hidden on desktop) */
@@ -1170,7 +1200,7 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
   display: none;
   align-items: center;
   gap: .75rem;
-  padding: calc(.5rem + env(safe-area-inset-top, 0px)) 1rem .75rem;
+  padding: calc(.5rem + var(--sat, env(safe-area-inset-top, 0px))) 1rem .75rem;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   position: sticky;
@@ -1192,7 +1222,7 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
 .sidebar-hamburger span {
   display: block;
   height: 2px;
-  width: 100%;
+  width: 24px;
   background: var(--color-text);
   border-radius: 2px;
 }
@@ -1201,7 +1231,7 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
 .sidebar-overlay {
   display: none;
   position: fixed;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   background: rgba(0,0,0,.5);
   z-index: 199;
 }
@@ -1408,7 +1438,7 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
 /* ── Cover preview overlay ───────────────────────────────────────────────────── */
 .cover-preview-overlay {
   position: fixed;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   background: rgba(0, 0, 0, .88);
   z-index: 500;
   display: flex;
@@ -1459,8 +1489,13 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
     transition: transform .25s ease;
     width: var(--sidebar-width) !important; /* always full width on mobile */
     z-index: 300;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
 }
   .app-sidebar.open { transform: translateX(0); }
+  html[data-lib-theme="eink"] .app-sidebar { transition: none; }
+  .sidebar-nav { -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   .app-body-header  { display: flex; }
   .sidebar-collapse-btn { display: none; }
   .app-sidebar.open .sidebar-collapse-btn { display: flex; }
@@ -1472,8 +1507,9 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
     display: block;
     overflow-y: auto;
     scrollbar-width: none;
-    max-height: calc(100vh - 2rem);
-    padding-top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
+    max-height: calc(100vh - var(--sat, env(safe-area-inset-top, 0px)) - var(--sab, env(safe-area-inset-bottom, 0px)) - 1rem);
+    padding-top: calc(var(--sat, env(safe-area-inset-top, 0px)) + 0.5rem);
+    padding-bottom: calc(var(--sab, env(safe-area-inset-bottom, 0px)) + 0.5rem);
   }
   .info-modal::-webkit-scrollbar { display: none; }
   .info-modal-body {
@@ -1493,7 +1529,7 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
     border-radius: 50%;
     width: 2rem; height: 2rem;
     display: flex; align-items: center; justify-content: center;
-    top: calc(env(safe-area-inset-top, 0px) + 0.6rem);
+    top: calc(var(--sat, env(safe-area-inset-top, 0px)) + 0.6rem);
     right: .6rem;
     z-index: 1;
   }
@@ -1534,6 +1570,13 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
   box-shadow: 0 1px 0 rgba(255,255,255,.03) inset;
   transition: border-color var(--transition), transform var(--transition), box-shadow var(--transition);
 }
+#sort-menu-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.sort-menu-caret { flex-shrink: 0; }
 .sort-menu-btn:hover {
   border-color: var(--color-text-muted);
 }
@@ -1597,28 +1640,27 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
   opacity: 1;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 768px) {
+  /* Switch to grid: search spans all 3 columns, sort/edit/upload get one each.
+     Avoids Chrome 74 flex-wrap + flex-basis bugs that collapse sort to 0px. */
   .library-toolbar-controls {
-    width: 100%;
-    flex-wrap: wrap;
-    align-items: stretch;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr 1fr;
     gap: .5rem;
-  }
-  /* Search fills the full first row */
-  .library-toolbar-controls .search-wrap {
     width: 100%;
-    flex: 1 1 100%;
+    align-items: stretch;
+  }
+  .library-toolbar-controls .search-wrap {
+    grid-column: 1 / -1;
+    width: 100%;
   }
   .library-toolbar-controls #search-input {
-    flex: 1 1 0;
     width: 100%;
     min-width: 0;
   }
-  /* Sort, edit, upload share the second row equally */
   .library-toolbar-controls .sort-menu-wrap,
   .library-toolbar-controls #edit-mode-btn,
   .library-toolbar-controls .upload-menu-wrap {
-    flex: 1 1 0;
     min-width: 0;
   }
   .library-toolbar-controls #edit-mode-btn,
@@ -1637,6 +1679,7 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
   .sort-menu-list {
     left: 0;
     right: auto;
+    min-width: 260px;
     min-width: min(78vw, 260px);
     max-width: calc(100vw - 1rem);
   }
@@ -1863,7 +1906,7 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
 .toggle input { opacity: 0; width: 0; height: 0; }
 .toggle-slider {
   position: absolute;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   background: var(--color-border);
   border-radius: 24px;
   cursor: pointer;
@@ -1976,3 +2019,7 @@ html[data-lib-theme="eink"] .info-modal-shelf-row input[type="checkbox"],
 html[data-lib-theme="eink"] .book-card-checkbox,
 .sidebar-layout[data-lib-theme="eink"] .info-modal-shelf-row input[type="checkbox"],
 .sidebar-layout[data-lib-theme="eink"] .book-card-checkbox { accent-color: #111; }
+
+/* Ensure spinners are greyscale in e-ink mode */
+html[data-lib-theme="eink"] .spinner,
+.sidebar-layout[data-lib-theme="eink"] .spinner { color: var(--color-text); }

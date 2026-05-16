@@ -36,6 +36,7 @@
   "sidebar.online_library": "Biblioteca online",
   "sidebar.settings": "Definições",
   "sidebar.logout": "Sair",
+  "sidebar.logout_offline_warning": "Você está offline. Precisará de internet para fazer login novamente. Sair mesmo assim?",
   "sidebar.appearance": "Aparência",
   "sidebar.theme_day": "Claro",
   "sidebar.theme_night": "Escuro",

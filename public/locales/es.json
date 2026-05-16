@@ -36,6 +36,7 @@
   "sidebar.online_library": "Biblioteca en línea",
   "sidebar.settings": "Ajustes",
   "sidebar.logout": "Cerrar sesión",
+  "sidebar.logout_offline_warning": "Estás sin conexión. Necesitarás internet para volver a iniciar sesión. ¿Cerrar sesión de todos modos?",
   "sidebar.appearance": "Apariencia",
   "sidebar.theme_day": "Claro",
   "sidebar.theme_night": "Oscuro",

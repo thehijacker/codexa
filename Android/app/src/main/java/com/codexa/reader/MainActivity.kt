@@ -24,6 +24,7 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -89,6 +90,27 @@ class MainActivity : AppCompatActivity() {
                 else
                     ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             }
+        }
+
+        /** Returns true when the user enabled e-ink mode in the server-select screen. */
+        @JavascriptInterface
+        fun isEinkMode(): Boolean =
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean("eink_mode", false)
+
+        /** Returns true when the Android system is in night/dark mode. */
+        @JavascriptInterface
+        fun isNightMode(): Boolean {
+            val uiMode = resources.configuration.uiMode and
+                    android.content.res.Configuration.UI_MODE_NIGHT_MASK
+            return uiMode == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        }
+
+        /** Persists e-ink mode so the login-page toggle stays in sync with server-select. */
+        @JavascriptInterface
+        fun setEinkMode(enabled: Boolean) {
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean("eink_mode", enabled).apply()
         }
     }
 
@@ -264,9 +286,47 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
-                // Re-apply immersive if still on reader page (handles reload)
                 val isReader = url.contains("/readerv4.html", ignoreCase = true)
-                runOnUiThread { setImmersiveMode(isReader) }
+                runOnUiThread {
+                    setImmersiveMode(isReader)
+                    // Inject status bar height as --sat so older Chrome WebViews
+                    // (< 87, where env(safe-area-inset-top) returns 0) still get
+                    // the correct top padding. getRootWindowInsets does NOT replace
+                    // WebView's internal inset listener, so env() keeps working on
+                    // modern Chrome where it is already supported.
+                    if (!isReader) {
+                        val rootInsets = ViewCompat.getRootWindowInsets(view)
+                        if (rootInsets != null) {
+                            val density = resources.displayMetrics.density
+                            val combined = WindowInsetsCompat.Type.statusBars() or
+                                    WindowInsetsCompat.Type.displayCutout()
+                            val topPx = rootInsets.getInsets(combined).top
+                            if (topPx > 0) {
+                                val cssVal = String.format(java.util.Locale.ROOT, "%.2f", topPx / density)
+                                view.evaluateJavascript(
+                                    "document.documentElement.style.setProperty('--sat','${cssVal}px');",
+                                    null
+                                )
+                            }
+                            val nav = rootInsets.getInsets(WindowInsetsCompat.Type.navigationBars())
+                            if (nav.bottom > 0) {
+                                val v = String.format(java.util.Locale.ROOT, "%.2f", nav.bottom / density)
+                                view.evaluateJavascript(
+                                    "document.documentElement.style.setProperty('--sab','${v}px');", null)
+                            }
+                            if (nav.left > 0) {
+                                val v = String.format(java.util.Locale.ROOT, "%.2f", nav.left / density)
+                                view.evaluateJavascript(
+                                    "document.documentElement.style.setProperty('--sal','${v}px');", null)
+                            }
+                            if (nav.right > 0) {
+                                val v = String.format(java.util.Locale.ROOT, "%.2f", nav.right / density)
+                                view.evaluateJavascript(
+                                    "document.documentElement.style.setProperty('--sar','${v}px');", null)
+                            }
+                        }
+                    }
+                }
             }
         }
     }

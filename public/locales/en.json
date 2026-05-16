@@ -36,6 +36,7 @@
   "sidebar.online_library": "Online library",
   "sidebar.settings": "Settings",
   "sidebar.logout": "Sign out",
+  "sidebar.logout_offline_warning": "You are offline. You will need internet to log back in. Sign out anyway?",
   "sidebar.appearance": "Appearance",
   "sidebar.theme_day": "Light",
   "sidebar.theme_night": "Dark",

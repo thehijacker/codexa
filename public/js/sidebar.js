@@ -6,6 +6,7 @@
 import { apiFetch, requireAuth, clearToken } from './api.js';
 import { t, initIconLangPicker } from './i18n.js';
 import { showPanel, getCurrentPanel } from './router.js';
+import { confirmDialog } from './ui.js';
 
 const LIB_THEME_KEY = 'br_library_theme';
 const LIB_THEMES = new Set(['system', 'day', 'night', 'eink']);
@@ -58,10 +59,16 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
 
   // Mobile open / close
   document.getElementById('sidebar-open-btn')?.addEventListener('click', openSidebar);
-  document.getElementById('sidebar-overlay')?.addEventListener('click', closeSidebar);
+  const overlay = document.getElementById('sidebar-overlay');
+  overlay?.addEventListener('click', closeSidebar);
+  overlay?.addEventListener('touchend', (e) => { e.preventDefault(); closeSidebar(); });
 
   // Logout
   sidebar.querySelector('#sidebar-logout-btn').addEventListener('click', () => {
+    if (!navigator.onLine) {
+      confirmDialog(t('sidebar.logout_offline_warning'), () => { clearToken(); window.location.href = '/login.html'; }, t('sidebar.logout'), false);
+      return;
+    }
     clearToken();
     window.location.href = '/login.html';
   });
@@ -86,19 +93,25 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
 
   // Add shelf button
   sidebar.querySelector('#add-shelf-btn').addEventListener('click', () => {
+    if (!navigator.onLine) return;
     document.dispatchEvent(new CustomEvent('sidebar:addshelf'));
   });
 
-  // Nav: Settings and OPDS panels
+  // Nav: Settings and OPDS panels — blocked when offline (both require live API)
   sidebar.querySelector('#nav-settings')?.addEventListener('click', e => {
-    e.preventDefault(); showPanel('settings'); closeSidebar();
+    e.preventDefault();
+    if (!navigator.onLine) return;
+    showPanel('settings'); closeSidebar();
   });
   sidebar.querySelector('#nav-opds')?.addEventListener('click', e => {
-    e.preventDefault(); showPanel('opds'); closeSidebar();
+    e.preventDefault();
+    if (!navigator.onLine) return;
+    showPanel('opds'); closeSidebar();
   });
 
   // Statistics button
   sidebar.querySelector('#sidebar-stats-btn')?.addEventListener('click', () => {
+    if (!navigator.onLine) return;
     document.dispatchEvent(new CustomEvent('sidebar:stats'));
   });
 
@@ -178,6 +191,15 @@ export function setActive(shelfId) {
   }
 }
 
+export function updateNavCounts(allCount, readingCount) {
+  const allEl     = document.getElementById('nav-all-count');
+  const readingEl = document.getElementById('nav-reading-count');
+  if (allEl) allEl.textContent = allCount > 0 ? allCount : '';
+  _readingCount = readingCount;
+  if (readingEl) readingEl.textContent = readingCount > 0 ? readingCount : '';
+  applyCurrentlyReadingVisibility();
+}
+
 export function updateDownloadedCount(n) {
   _downloadedCount = n;
   const el      = document.getElementById('nav-downloaded');
@@ -202,7 +224,7 @@ function initSidebarLangPicker(container) {
 function buildSidebarHtml() {
   return `
     <div class="sidebar-header">
-      <a href="/" class="logo"><img src="/images/codexa.svg" class="nav-icon nav-icon-codexa" alt="Codexa"> Codexa</a>
+      <a href="/" class="logo"><img src="/images/codexa.svg" class="nav-icon nav-icon-codexa" alt="Codexa"> Codexa<img src="/images/offline.svg" class="nav-icon nav-icon-offline offline-icon" alt="" aria-hidden="true"></a>
       <button id="sidebar-collapse-btn" class="sidebar-collapse-btn" title="${t('sidebar.collapse')}" aria-label="${t('sidebar.collapse')}">‹</button>
     </div>
     <nav class="sidebar-nav">
@@ -278,10 +300,12 @@ function renderShelves() {
 
     item.addEventListener('click', e => {
       if (e.target.closest('.shelf-edit-btn')) return;
+      if (!navigator.onLine) return;
       navigate(shelf.id);
     });
     item.querySelector('.shelf-edit-btn').addEventListener('click', e => {
       e.stopPropagation();
+      if (!navigator.onLine) return;
       document.dispatchEvent(new CustomEvent('sidebar:editshelf', { detail: shelf }));
     });
     list.appendChild(item);
@@ -311,15 +335,27 @@ document.addEventListener('langchange', () => {
   applyCurrentlyReadingVisibility();
   if (_activePage !== 'library') loadNavCounts();
   // Re-attach event listeners (sidebar HTML was replaced)
-  sidebar.querySelector('#sidebar-collapse-btn')?.addEventListener('click', () => {
+  const collapseBtn = sidebar.querySelector('#sidebar-collapse-btn');
+  // Restore collapse state — sidebar.classList is preserved but button text was reset by innerHTML rebuild
+  const wasCollapsed = localStorage.getItem('sidebarCollapsed') === '1';
+  sidebar.classList.toggle('collapsed', wasCollapsed);
+  if (collapseBtn) {
+    collapseBtn.textContent = wasCollapsed ? '›' : '‹';
+    collapseBtn.title = wasCollapsed ? t('sidebar.expand') : t('sidebar.collapse');
+  }
+  collapseBtn?.addEventListener('click', () => {
     if (window.matchMedia('(max-width: 768px)').matches) { closeSidebar(); return; }
-    const collapseBtn = sidebar.querySelector('#sidebar-collapse-btn');
+    const btn = sidebar.querySelector('#sidebar-collapse-btn');
     const collapsed = sidebar.classList.toggle('collapsed');
-    collapseBtn.textContent = collapsed ? '›' : '‹';
-    collapseBtn.title = collapsed ? t('sidebar.expand') : t('sidebar.collapse');
+    btn.textContent = collapsed ? '›' : '‹';
+    btn.title = collapsed ? t('sidebar.expand') : t('sidebar.collapse');
     localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
   });
   sidebar.querySelector('#sidebar-logout-btn')?.addEventListener('click', () => {
+    if (!navigator.onLine) {
+      confirmDialog(t('sidebar.logout_offline_warning'), () => { clearToken(); window.location.href = '/login.html'; }, t('sidebar.logout'), false);
+      return;
+    }
     clearToken(); window.location.href = '/login.html';
   });
   sidebar.querySelector('#nav-currently-reading')?.addEventListener('click', e => {
@@ -332,15 +368,21 @@ document.addEventListener('langchange', () => {
     e.preventDefault(); navigate('all');
   });
   sidebar.querySelector('#add-shelf-btn')?.addEventListener('click', () => {
+    if (!navigator.onLine) return;
     document.dispatchEvent(new CustomEvent('sidebar:addshelf'));
   });
   sidebar.querySelector('#nav-settings')?.addEventListener('click', e => {
-    e.preventDefault(); showPanel('settings'); closeSidebar();
+    e.preventDefault();
+    if (!navigator.onLine) return;
+    showPanel('settings'); closeSidebar();
   });
   sidebar.querySelector('#nav-opds')?.addEventListener('click', e => {
-    e.preventDefault(); showPanel('opds'); closeSidebar();
+    e.preventDefault();
+    if (!navigator.onLine) return;
+    showPanel('opds'); closeSidebar();
   });
   sidebar.querySelector('#sidebar-stats-btn')?.addEventListener('click', () => {
+    if (!navigator.onLine) return;
     document.dispatchEvent(new CustomEvent('sidebar:stats'));
   });
 });
@@ -348,11 +390,13 @@ document.addEventListener('langchange', () => {
 export function openSidebar() {
   document.getElementById('app-sidebar')?.classList.add('open');
   document.getElementById('sidebar-overlay')?.classList.add('visible');
+  document.body.style.overflow = 'hidden';
 }
 
 export function closeSidebar() {
   document.getElementById('app-sidebar')?.classList.remove('open');
   document.getElementById('sidebar-overlay')?.classList.remove('visible');
+  document.body.style.overflow = '';
 }
 
 function getLibraryTheme() {
@@ -370,12 +414,16 @@ function applyLibraryTheme(theme) {
   const html = document.documentElement;
   const body = document.body;
   if (!body || !body.classList.contains('sidebar-layout')) return;
-  if (theme === 'system') {
+  let resolved = theme;
+  if (theme === 'system' && typeof window.AndroidCodexa?.isNightMode === 'function') {
+    resolved = window.AndroidCodexa.isNightMode() ? 'night' : 'day';
+  }
+  if (resolved === 'system') {
     body.removeAttribute('data-lib-theme');
     html.removeAttribute('data-lib-theme');
   } else {
-    body.setAttribute('data-lib-theme', theme);
-    html.setAttribute('data-lib-theme', theme);
+    body.setAttribute('data-lib-theme', resolved);
+    html.setAttribute('data-lib-theme', resolved);
   }
 }
 
@@ -388,7 +436,10 @@ function syncLibraryThemeButtons(sidebar, theme) {
 }
 
 function initLibraryThemeControls(sidebar) {
-  const theme = getLibraryTheme();
+  const androidEink = typeof window.AndroidCodexa?.isEinkMode === 'function'
+    && window.AndroidCodexa.isEinkMode();
+  if (androidEink) localStorage.setItem(LIB_THEME_KEY, 'eink');
+  const theme = androidEink ? 'eink' : getLibraryTheme();
   applyLibraryTheme(theme);
   syncLibraryThemeButtons(sidebar, theme);
   sidebar.querySelectorAll('.sidebar-theme-btn').forEach(btn => {

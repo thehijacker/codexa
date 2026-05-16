@@ -1,7 +1,7 @@
 // Codexa Service Worker
 // Caches app shell for offline use. EPUBs are cached on demand in BOOKS_CACHE.
 
-const CACHE_VERSION = 'br-v16';
+const CACHE_VERSION = 'br-v09';
 const BOOKS_CACHE   = 'codexa-books-v1';
 const APP_SHELL = [
   '/',
@@ -13,6 +13,7 @@ const APP_SHELL = [
   '/css/main.css',
   '/css/reader.css',
   '/js/app.js',
+  '/js/login.js',
   '/js/router.js',
   '/js/settings.js',
   '/js/offline.js',
@@ -148,6 +149,8 @@ const APP_SHELL = [
   '/images/highlight_bw.svg',
   '/images/statistics.svg',
   '/images/statistics_bw.svg',
+  '/images/offline.svg',
+  '/images/offline_bw.svg',
   '/icons/android-chrome-192x192.png',
   '/icons/android-chrome-512x512.png',
   '/icons/apple-touch-icon.png',
@@ -203,9 +206,22 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
+  // Cache user fonts: network-first so updates apply, cache fallback for offline
+  if (url.pathname.startsWith('/user-fonts/') && url.hostname === self.location.hostname) {
+    e.respondWith(
+      fetch(e.request).then(response => {
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_VERSION).then(c => c.put(e.request, clone));
+        }
+        return response;
+      }).catch(() => caches.match(e.request).then(r => r || Response.error()))
+    );
+    return;
+  }
+
   // Never intercept other API calls or cross-origin
   if (url.pathname.startsWith('/api/') ||
-      url.pathname.startsWith('/user-fonts/') ||
       url.hostname !== self.location.hostname) {
     return;
   }

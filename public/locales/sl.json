@@ -36,6 +36,7 @@
   "sidebar.online_library": "Spletna knjižnica",
   "sidebar.settings": "Nastavitve",
   "sidebar.logout": "Odjava",
+  "sidebar.logout_offline_warning": "Brez interneta se ne boste mogli znova prijaviti. Se vseeno odjavite?",
   "sidebar.appearance": "Videz",
   "sidebar.theme_day": "Svetlo",
   "sidebar.theme_night": "Temno",

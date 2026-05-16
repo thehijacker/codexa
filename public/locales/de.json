@@ -36,6 +36,7 @@
   "sidebar.online_library": "Online-Bibliothek",
   "sidebar.settings": "Einstellungen",
   "sidebar.logout": "Abmelden",
+  "sidebar.logout_offline_warning": "Sie sind offline. Sie benötigen Internet, um sich erneut anzumelden. Trotzdem abmelden?",
   "sidebar.appearance": "Erscheinungsbild",
   "sidebar.theme_day": "Hell",
   "sidebar.theme_night": "Dunkel",

@@ -11,17 +11,34 @@ if (!requireAuth()) {
   throw new Error('not authenticated');
 }
 
-// Fetch and display app version in the logo and browser title
-fetch('/api/version').then(r => r.json()).then(({ version }) => {
-  const logoEl = document.querySelector('a.logo');
-  if (logoEl) logoEl.innerHTML = `<img src="/images/codexa.svg" class="nav-icon nav-icon-codexa" alt="Codexa"> Codexa <span class="app-version">v${version}</span>`;
-  document.title = `Codexa v${version}`;
-}).catch(() => {});
+function fetchAndShowVersion() {
+  fetch('/api/version').then(r => r.json()).then(({ version }) => {
+    document.title = `Codexa v${version}`;
+    document.querySelectorAll('a.logo').forEach(logo => {
+      const ver = logo.querySelector('.app-version');
+      if (ver) { ver.textContent = `v${version}`; }
+      else { logo.insertAdjacentHTML('beforeend', ` <span class="app-version">v${version}</span>`); }
+    });
+  }).catch(() => {});
+}
+fetchAndShowVersion();
 
-await initI18n();
-await initSidebar({ onShelfSelect: selectShelf });
-await initRouter({
-  library:  initLibrary,
-  settings: initSettings,
-  opds:     initOpds,
-});
+// Toggle is-offline class so CSS can show/hide the offline icon and version number
+function syncOfflineClass() {
+  document.body.classList.toggle('is-offline', !navigator.onLine);
+  if (navigator.onLine) fetchAndShowVersion();
+}
+window.addEventListener('online',  syncOfflineClass);
+window.addEventListener('offline', syncOfflineClass);
+syncOfflineClass();
+
+(async () => {
+  await initI18n();
+  await initSidebar({ onShelfSelect: selectShelf });
+  await initRouter({
+    library:  initLibrary,
+    settings: initSettings,
+    opds:     initOpds,
+  });
+})();
+

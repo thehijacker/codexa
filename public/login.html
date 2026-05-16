@@ -125,114 +125,16 @@
         </form>
       </div>
     </div>
+    <div id="eink-toggle-row" style="display:none;flex-direction:row;align-items:center;justify-content:space-between;margin-top:.75rem;padding:.5rem 0">
+      <span style="font-size:.85rem;color:var(--color-text-muted)" data-i18n="settings.eink_mode">E-ink mode</span>
+      <label class="toggle">
+        <input type="checkbox" id="login-eink-toggle">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
   </div>
 
-  <script type="module">
-    import { apiFetch, setToken } from '/js/api.js';
-    import { setButtonLoading }  from '/js/ui.js';
-    import { initI18n, t, initIconLangPicker } from '/js/i18n.js';
-
-    await initI18n();
-    initIconLangPicker(document.getElementById('lang-picker-login'));
-
-    // Redirect if already logged in
-    const existingToken = localStorage.getItem('br_token');
-    if (existingToken) window.location.href = '/';
-
-    // ── Check registration status ─────────────────────────────────────────────
-    (async () => {
-      try {
-        const data = await apiFetch('/auth/registration-status');
-        if (!data.enabled) {
-          const regBtn = document.querySelector('[data-tab="register"]');
-          if (regBtn) regBtn.style.display = 'none';
-        }
-      } catch (_) { /* silently ignore */ }
-    })();
-
-    // ── Tabs ─────────────────────────────────────────────────────────────────
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn, .tab-panel').forEach(el => el.classList.remove('active'));
-        btn.classList.add('active');
-        document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
-      });
-    });
-
-    function showAlert(id, message, type = 'error') {
-      const el = document.getElementById(id);
-      el.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
-    }
-    function clearAlert(id) {
-      document.getElementById(id).innerHTML = '';
-    }
-
-    // ── Login ─────────────────────────────────────────────────────────────────
-    document.getElementById('login-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      clearAlert('login-alert');
-      const btn      = document.getElementById('login-btn');
-      const username = document.getElementById('login-username').value.trim();
-      const password = document.getElementById('login-password').value;
-
-      if (!username || !password) {
-        showAlert('login-alert', t('login.err_fill_all'));
-        return;
-      }
-
-      setButtonLoading(btn, true);
-      try {
-        const data = await apiFetch('/auth/login', {
-          method: 'POST',
-          body: JSON.stringify({ username, password }),
-        });
-        setToken(data.token);
-        localStorage.setItem('br_user', JSON.stringify(data.user));
-        window.location.href = '/';
-      } catch (err) {
-        showAlert('login-alert', err.message);
-        setButtonLoading(btn, false, t('login.btn_submit'));
-      }
-    });
-
-    // ── Register ──────────────────────────────────────────────────────────────
-    document.getElementById('register-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      clearAlert('register-alert');
-      const btn      = document.getElementById('register-btn');
-      const username = document.getElementById('reg-username').value.trim();
-      const password = document.getElementById('reg-password').value;
-      const password2 = document.getElementById('reg-password2').value;
-
-      if (!username || !password || !password2) {
-        showAlert('register-alert', t('login.err_fill_all'));
-        return;
-      }
-      if (password !== password2) {
-        showAlert('register-alert', t('login.err_no_match'));
-        return;
-      }
-      if (password.length < 8) {
-        showAlert('register-alert', t('login.err_pass_short'));
-        return;
-      }
-
-      setButtonLoading(btn, true);
-      try {
-        const name = document.getElementById('reg-name').value.trim();
-        const data = await apiFetch('/auth/register', {
-          method: 'POST',
-          body: JSON.stringify({ name, username, password }),
-        });
-        setToken(data.token);
-        localStorage.setItem('br_user', JSON.stringify(data.user));
-        window.location.href = '/';
-      } catch (err) {
-        showAlert('register-alert', err.message);
-        setButtonLoading(btn, false, t('login.reg_btn'));
-      }
-    });
-  </script>
+  <script type="module" src="/js/login.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(() => {});
