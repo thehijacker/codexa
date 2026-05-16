@@ -23,7 +23,9 @@ function fetchAndShowVersion() {
 }
 fetchAndShowVersion();
 
-// Toggle is-offline class so CSS can show/hide the offline icon and version number
+// Toggle is-offline class so CSS can show/hide the offline icon and version number.
+// Note: body.is-offline is also set/cleared by library.js based on actual API
+// reachability, which is more reliable than navigator.onLine on desktop.
 function syncOfflineClass() {
   document.body.classList.toggle('is-offline', !navigator.onLine);
   if (navigator.onLine) fetchAndShowVersion();
@@ -31,6 +33,9 @@ function syncOfflineClass() {
 window.addEventListener('online',  syncOfflineClass);
 window.addEventListener('offline', syncOfflineClass);
 syncOfflineClass();
+// Fired by library.js when the API becomes reachable after an offline period,
+// even when navigator.onLine was already true (LAN-connected, no internet).
+document.addEventListener('app:network-restored', fetchAndShowVersion);
 
 (async () => {
   await initI18n();

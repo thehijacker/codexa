@@ -165,6 +165,12 @@ html, body {
   transition: none !important;
   animation: none !important;
 }
+/* E-ink mode: toast colours → black-and-white */
+[data-reader-eink] .toast-success,
+[data-reader-eink] .toast-error {
+  background: #111;
+  color: #fff;
+}
 
 .reader-header .btn-icon:hover {
   color: var(--reader-header-text, var(--color-text));

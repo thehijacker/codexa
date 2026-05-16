@@ -24,10 +24,11 @@ let seriesFilter        = null; // active series name filter
 let sortBeforeSeriesFilter = null; // sort value saved before auto-switching to series_asc
 
 // ── Offline state ─────────────────────────────────────────────────────────────
-let isOfflineMode   = false;
-let offlineBooks    = [];        // IDB snapshot used when server is unreachable
-let downloadedIds   = new Set(); // bookIds currently stored offline
-let downloadingIds  = new Set(); // bookIds with an active download in progress
+let isOfflineMode    = false;
+let offlineBooks     = [];        // IDB snapshot used when server is unreachable
+let downloadedIds    = new Set(); // bookIds currently stored offline
+let downloadingIds   = new Set(); // bookIds with an active download in progress
+let _offlineRetry    = null;      // setTimeout handle for polling when offline
 
 // ── URL-based shelf navigation (from settings / opds pages) ───────────────────
 const urlParams    = new URLSearchParams(location.search);
@@ -1006,7 +1007,10 @@ async function loadBooks() {
   try {
     books = await apiFetch('/books');
     // Clear offline state when we successfully reach the server
+    const wasOffline = isOfflineMode;
     isOfflineMode = false;
+    if (_offlineRetry) { clearTimeout(_offlineRetry); _offlineRetry = null; }
+    document.body.classList.remove('is-offline');
     document.getElementById('offline-mode-banner')?.remove();
     booksLoaded = true;
     if (!returningFromReader && !urlParams.has('shelf') && localStorage.getItem('br_auto_open_last') === 'true') {
@@ -1018,6 +1022,10 @@ async function loadBooks() {
     // Refresh offline state, then auto-download currently-reading books silently
     await refreshDownloadedIds();
     autoDownloadCurrentlyReading(books, getToken()).catch(() => {});
+    if (wasOffline) {
+      reloadShelves().catch(() => {});
+      document.dispatchEvent(new CustomEvent('app:network-restored'));
+    }
     applyFilter();
   } catch (err) {
     // Server unreachable — try loading from IndexedDB
@@ -1026,11 +1034,14 @@ async function loadBooks() {
       if (offlineBooks.length > 0) {
         isOfflineMode = true;
         booksLoaded = true;
+        document.body.classList.add('is-offline');
         downloadedIds = new Set(offlineBooks.filter(b => b.downloadStatus === 'complete').map(b => b.id));
         updateDownloadedCount(downloadedIds.size);
         updateNavCounts(offlineBooks.length, offlineBooks.filter(b => (b.percentage || 0) > 0).length);
         showOfflineBanner();
         applyFilter();
+        // Retry every 30s so we self-heal when internet returns even without an 'online' event
+        if (!_offlineRetry) _offlineRetry = setTimeout(() => { _offlineRetry = null; loadBooks().catch(() => {}); }, 30_000);
         return;
       }
     } catch { /* IDB also unavailable */ }
@@ -1157,6 +1168,10 @@ function checkInterruptedSession() {
 export async function initLibrary() {
   if (_initialized) return;
   _initialized = true;
+
+  // Register early so we never miss an online/offline event during async setup
+  window.addEventListener('online',  () => loadBooks().catch(() => {}));
+  window.addEventListener('offline', () => loadBooks().catch(() => {}));
 
   // SW download progress messages
   if (isOfflineSupported) {
@@ -1342,8 +1357,6 @@ export async function initLibrary() {
 
   loadBooks();
   checkInterruptedSession();
-  window.addEventListener('online',  loadBooks);
-  window.addEventListener('offline', loadBooks);
 }
 
 // Re-render language-dependent content when language changes

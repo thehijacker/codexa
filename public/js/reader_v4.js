@@ -2,7 +2,7 @@ import { apiFetch, requireAuth, getToken } from './api.js';
 import { toast } from './ui.js';
 import { t, initI18n, applyTranslations, getCurrentLang } from './i18n.js';
 import ePub from './flow/index.js';
-import { isBookDownloaded, downloadBook, getBookMeta } from './offline.js';
+import { isBookDownloaded, downloadBook, getBookMeta, saveBookMeta } from './offline.js';
 
 const _i18nReady = initI18n();
 
@@ -217,7 +217,8 @@ let book, rendition;
 let currentBook  = null;
 let prefs        = loadPrefs();
 let currentCfi   = '';
-let currentPct   = 0;
+let currentPct        = 0;
+let lastKnownGoodPct  = 0;
 let currentSpineIndex = 0;  // 0-based spine item index, used to generate KOReader xpointer
 let lastKnownXPointer = null; // precise xpointer last received from KOReader/server (e.g. /body/DocFragment[5]/body/div/p[21]/text().0)
 let lastChapterHref = null;  // chapter-boundary save tracking
@@ -244,6 +245,7 @@ let bionicPrefetchSeq = 0;
 const bionicPrefetchInFlight = new Set();
 let bookmarksCache = [];              // loaded bookmarks for current book
 let preBookmarkCfi = null;            // position before a bookmark jump (for back/accept)
+let preAnnotationCfi = null;          // position before an annotation jump (for back/accept)
 let annotationsCache = [];            // loaded annotations for current book
 let _pendingAnnotation = null;        // {cfiRange, text} waiting for color/note pick
 let _editingAnnotationId = null;      // id of annotation being edited in note editor
@@ -310,8 +312,10 @@ const fullscreenBtn   = document.getElementById('btn-fullscreen');
 const bookmarksSidebar = document.getElementById('bookmarks-sidebar');
 const bookmarksListEl  = document.getElementById('bookmarks-list');
 const bookmarksBadge   = document.getElementById('bookmarks-badge');
-const bookmarkBackBtn  = document.getElementById('btn-bookmark-back');
-const bookmarkAcceptBtn = document.getElementById('btn-bookmark-accept');
+const bookmarkBackBtn    = document.getElementById('btn-bookmark-back');
+const bookmarkAcceptBtn  = document.getElementById('btn-bookmark-accept');
+const annotationBackBtn  = document.getElementById('btn-annotation-back');
+const annotationAcceptBtn = document.getElementById('btn-annotation-accept');
 
 // ── Prefs ─────────────────────────────────────────────────────────────────────
 // Keys that are stored per-book (content appearance).  All others are global.
@@ -1545,7 +1549,7 @@ function scheduleClearPressHighlight() {
 // current DOM (bionic-reading transform, column-mode change, epub structural quirks).
 async function navigateToCfi(cfi) {
   try {
-    await rendition.display(cfi);
+    await rendition.display(cfiRangeToStart(cfi));
   } catch {
     const pct = book.locations?.percentageFromCfi?.(cfi) ?? 0;
     if (pct > 0) { await seekToPercentage(pct); return; }
@@ -1592,8 +1596,11 @@ function closeAnnotationNoteEditor() {
 function injectAnnotationsIntoContents(contents) {
   if (!contents?.document || !annotationsCache.length) return;
   const doc = contents.document;
+  const contentsSpineIdx = contents.sectionIndex ?? currentSpineIndex;
   annotationsCache.forEach(a => {
     if (doc.querySelector(`mark[data-annot-id="${a.id}"]`)) return; // already injected
+    const annotSpineIdx = spineIndexFromCfi(a.cfi);
+    if (annotSpineIdx !== null && annotSpineIdx !== contentsSpineIdx) return;
     try {
       // Resolve CFI to a range; verify it matched the expected text to detect bionic mismatch
       let range = null;
@@ -1696,7 +1703,7 @@ async function createAnnotation(cfiRange, text, color, note) {
   try { localStorage.setItem(`br_ann_${currentBook.id}`, JSON.stringify(annotationsCache)); } catch { /* ignore */ }
   reapplyAnnotations();
   renderAnnotationList();
-  toast(t('reader.annotation_added'));
+  toast.success(t('reader.annotation_added'));
 }
 
 async function updateAnnotation(id, updates) {
@@ -1736,7 +1743,7 @@ async function deleteAnnotation(id) {
   try { localStorage.setItem(`br_ann_${currentBook.id}`, JSON.stringify(annotationsCache)); } catch { /* ignore */ }
   removeAnnotationFromDom(id);
   renderAnnotationList();
-  toast(t('reader.annotation_deleted'));
+  toast.success(t('reader.annotation_deleted'));
 }
 
 async function loadAnnotations(bookId) {
@@ -1776,6 +1783,11 @@ function renderAnnotationList() {
       </div>
       <button class="annotation-delete-btn btn-icon-sm" title="${t('reader.annotation_delete')}">🗑</button>`;
     item.querySelector('.annotation-item-body').addEventListener('click', () => {
+      if (!preAnnotationCfi && currentCfi) {
+        preAnnotationCfi = currentCfi;
+        annotationBackBtn.style.display   = '';
+        annotationAcceptBtn.style.display = '';
+      }
       closePanels();
       navigateToCfi(a.cfi);
     });
@@ -3452,6 +3464,7 @@ function updateProgress(location) {
   if (isReady) {
     currentCfi        = cfi || '';
     currentPct        = pct;
+    if (pct > 0) lastKnownGoodPct = pct;
     currentSpineIndex = location?.start?.index ?? currentSpineIndex;
   } else {
     // Still track spine index even during init for accurate xpointer on first save
@@ -3644,7 +3657,7 @@ function pushInternalProgress(docKey, xpointer, pct) {
 async function saveProgress({ forceRemote = false, allowRemote = true } = {}) {
   if (!currentBook || !isReady) return;
   const cfi = currentCfi || '';
-  const pct = currentPct || 0;
+  const pct = currentPct > 0 ? currentPct : lastKnownGoodPct;
   if (!cfi && pct === 0) return;
   console.log('[pos] SAVE cfi:', cfi.slice(0,60), 'pct:', (pct*100).toFixed(2)+'%');
   const docKey = externalDocKey();
@@ -3674,7 +3687,7 @@ async function saveProgress({ forceRemote = false, allowRemote = true } = {}) {
 function saveProgressBackground() {
   if (!currentBook || !isReady) return;
   const cfi = currentCfi || '';
-  const pct = currentPct || 0;
+  const pct = currentPct > 0 ? currentPct : lastKnownGoodPct;
   if (!cfi && pct === 0) return;
   const token = getToken();
   const headers = {
@@ -4706,6 +4719,22 @@ document.getElementById('btn-bookmark-accept').addEventListener('click', () => {
   // Now that the user accepted the position, push progress normally
   void saveProgress({ forceRemote: true });
 });
+document.getElementById('btn-annotation-back').addEventListener('click', async () => {
+  if (!preAnnotationCfi) return;
+  const cfi = preAnnotationCfi;
+  preAnnotationCfi = null;
+  annotationBackBtn.style.display   = 'none';
+  annotationAcceptBtn.style.display = 'none';
+  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  await rendition.display(cfi);
+});
+document.getElementById('btn-annotation-accept').addEventListener('click', () => {
+  preAnnotationCfi = null;
+  annotationBackBtn.style.display   = 'none';
+  annotationAcceptBtn.style.display = 'none';
+  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  void saveProgress({ forceRemote: true });
+});
 document.getElementById('btn-jump-pct').addEventListener('click', () => {
   if (jumpPctPanel.style.display !== 'none') {
     closeJumpPanel();
@@ -4956,6 +4985,13 @@ async function init() {
         } catch { /* ignore */ }
       }
       console.log('[reader] localProgress:', localProgress?.cfi_position?.slice(0, 60), 'pct:', localProgress?.percentage);
+      if (localProgress?.percentage > 0) {
+        lastKnownGoodPct = localProgress.percentage;
+        // Keep the offline metadata in sync so "Currently Reading" is correct offline
+        getBookMeta(Number(bookId)).then(meta => {
+          if (meta) saveBookMeta({ ...meta, percentage: localProgress.percentage }).catch(() => {});
+        }).catch(() => {});
+      }
       if (!startCfi && localProgress?.cfi_position) startCfi = localProgress.cfi_position;
       // Pre-load locations from cache so seekToPercentage works immediately after startRendition
       if (localProgress?.percentage != null) {

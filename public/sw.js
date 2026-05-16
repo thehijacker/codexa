@@ -1,7 +1,7 @@
 // Codexa Service Worker
 // Caches app shell for offline use. EPUBs are cached on demand in BOOKS_CACHE.
 
-const CACHE_VERSION = 'br-v09';
+const CACHE_VERSION = 'br-v16';
 const BOOKS_CACHE   = 'codexa-books-v1';
 const APP_SHELL = [
   '/',
