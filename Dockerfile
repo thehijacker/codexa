@@ -1,5 +1,7 @@
 # ── Build stage ───────────────────────────────────────────────────────────────
-FROM node:18-alpine AS deps
+# Installs all deps (including devDeps for esbuild), transpiles public/ → dist/
+# for Chrome 69 / older Android WebView, then prunes devDeps before handoff.
+FROM node:18-alpine AS build
 
 WORKDIR /app
 
@@ -7,7 +9,11 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++
 
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci
+
+COPY . .
+RUN npm run build
+RUN npm prune --omit=dev
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM node:18-alpine
@@ -18,8 +24,10 @@ WORKDIR /app
 RUN addgroup -S codexa && adduser -S codexa -G codexa && \
     apk add --no-cache su-exec
 
-# Copy deps and source
-COPY --from=deps /app/node_modules ./node_modules
+# Production node_modules (devDeps already pruned) + transpiled dist/
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+# Source files (public/ kept as server-side fallback; dist/ wins at runtime)
 COPY . .
 
 # Data directory — mount a named volume here for persistence
