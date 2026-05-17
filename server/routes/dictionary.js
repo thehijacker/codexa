@@ -2,9 +2,13 @@
 const express   = require('express');
 const fs        = require('fs');
 const path      = require('path');
+const multer    = require('multer');
+const AdmZip    = require('adm-zip');
 const { DATA_DIR } = require('../db');
 const { authenticateToken } = require('../middleware/auth');
 const StarDict  = require('../utils/stardict');
+
+const TMP_DIR = path.join(DATA_DIR, 'tmp');
 
 const router   = express.Router();
 const DICT_DIR = path.join(DATA_DIR, 'dictionaries');
@@ -94,6 +98,58 @@ router.get('/lookup', authenticateToken, (req, res) => {
     } catch { /* skip missing/broken dicts */ }
   }
   res.json({ word, results });
+});
+
+const uploadDict = multer({
+  dest: TMP_DIR,
+  limits: { fileSize: 200 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok = file.originalname.toLowerCase().endsWith('.zip');
+    cb(ok ? null : new Error('error.zip_required'), ok);
+  },
+});
+
+// ── POST /api/dictionary — upload one or many StarDict ZIP archives ────────────
+router.post('/', authenticateToken, uploadDict.array('dict', 10), (req, res) => {
+  ensureDictDir();
+  const results = [];
+  for (const file of req.files) {
+    try {
+      const zip = new AdmZip(file.path);
+      const entries = zip.getEntries();
+      const hasIfo  = entries.some(e => e.entryName.endsWith('.ifo'));
+      if (!hasIfo) {
+        results.push({ file: file.originalname, error: 'no .ifo found in ZIP' });
+        continue;
+      }
+      const baseName = path.basename(file.originalname, '.zip').replace(/[^\w.\-]/g, '_');
+      const destDir  = path.join(DICT_DIR, baseName);
+      fs.mkdirSync(destDir, { recursive: true });
+      zip.extractAllTo(destDir, true);
+      results.push({ file: file.originalname, id: baseName });
+    } catch (e) {
+      results.push({ file: file.originalname, error: e.message });
+    } finally {
+      try { fs.unlinkSync(file.path); } catch {}
+    }
+  }
+  res.json({ results });
+});
+
+// ── DELETE /api/dictionary/* — remove a dictionary folder ────────────────────
+// id may be a slash-separated path like "en-en/merriam-webster"
+router.delete('/*', authenticateToken, (req, res) => {
+  const id       = req.params[0];
+  const resolved = path.resolve(DICT_DIR, id);
+  if (!resolved.startsWith(path.resolve(DICT_DIR) + path.sep)) {
+    return res.status(400).json({ error: 'error.invalid_path' });
+  }
+  for (const k of cache.keys()) {
+    if (k === id || k.startsWith(id + '/')) cache.delete(k);
+  }
+  if (!fs.existsSync(resolved)) return res.status(404).json({ error: 'error.not_found' });
+  fs.rmSync(resolved, { recursive: true, force: true });
+  res.json({ ok: true });
 });
 
 module.exports = router;

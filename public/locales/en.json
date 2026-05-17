@@ -139,6 +139,12 @@
   "reader.search_count_1": "1 result",
   "reader.search_count_2_4": "{n} results",
   "reader.settings_title": "Reading settings",
+  "reader.settings_tab_theme": "Theme",
+  "reader.settings_tab_text": "Text",
+  "reader.settings_tab_layout": "Page",
+  "reader.settings_tab_device": "Device",
+  "reader.settings_tab_statusbar": "Status",
+  "reader.settings_tab_dicts": "Dicts",
   "reader.btn_reset_book": "Reset for this book",
   "reader.theme_light": "Light",
   "reader.theme_sepia": "Sepia",
@@ -478,5 +484,10 @@
   "reader.annotation_color_green": "Green",
   "reader.annotation_color_blue": "Blue",
   "reader.annotation_color_pink": "Pink",
-  "reader.annotation_dict_lookup": "Dictionary"
+  "reader.annotation_dict_lookup": "Dictionary",
+  "reader.custom_fonts": "Custom fonts",
+  "reader.no_custom_fonts": "No custom fonts",
+  "reader.upload_fonts": "Upload fonts…",
+  "reader.upload_dict": "Upload dictionary ZIP…",
+  "reader.uploading": "Uploading"
 }

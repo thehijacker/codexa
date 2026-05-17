@@ -1891,6 +1891,19 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
 .admin-user-info { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
 .admin-user-name { font-size: .875rem; font-weight: 500; color: var(--color-text); }
 .admin-user-meta { font-size: .75rem; color: var(--color-text-muted); }
+.admin-upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .35rem .75rem;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--color-border);
+  font-size: .82rem;
+  color: var(--color-text-secondary, var(--color-text-muted));
+  cursor: pointer;
+  user-select: none;
+}
+.admin-upload-btn:hover { background: var(--color-hover, rgba(255,255,255,.07)); }
 @media (max-width: 640px) {
   .kosync-actions { grid-template-columns: 1fr; }
 }

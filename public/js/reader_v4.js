@@ -724,6 +724,7 @@ function fontStyleFromFilename(f) {
 }
 
 async function loadCustomFonts() {
+  customFonts = [];
   let files;
   try {
     files = await apiFetch('/fonts');
@@ -754,9 +755,13 @@ async function loadCustomFonts() {
     });
     fontFaceCSS = cssLines.join('\n');
     customFonts.sort((a, b) => a.label.localeCompare(b.label));
-    const hostStyle = document.createElement('style');
+    let hostStyle = document.getElementById('_custom-font-faces');
+    if (!hostStyle) {
+      hostStyle = document.createElement('style');
+      hostStyle.id = '_custom-font-faces';
+      document.head.appendChild(hostStyle);
+    }
     hostStyle.textContent = fontFaceCSS;
-    document.head.appendChild(hostStyle);
   } catch (err) {
     console.warn('[reader] Custom fonts not loaded:', err.message);
   }
@@ -1547,9 +1552,17 @@ function scheduleClearPressHighlight() {
 // Navigate to a CFI with a graceful fallback chain when toRange() fails.
 // epub.js throws IndexSizeError when a CFI's element-child index doesn't match the
 // current DOM (bionic-reading transform, column-mode change, epub structural quirks).
+// When locations are ready, always prefer seekToPercentage — rendition.display(cfi)
+// silently fails to reach the correct page in spread/paginated mode (error stays inside
+// epub.js's rAF queue, so the catch block never fires).
 async function navigateToCfi(cfi) {
+  const startCfi = cfiRangeToStart(cfi);
+  if (book.locations?.length() > 0) {
+    const pct = book.locations.percentageFromCfi(startCfi) ?? book.locations.percentageFromCfi(cfi);
+    if (pct != null) { await seekToPercentage(pct); return; }
+  }
   try {
-    await rendition.display(cfiRangeToStart(cfi));
+    await rendition.display(startCfi);
   } catch {
     const pct = book.locations?.percentageFromCfi?.(cfi) ?? 0;
     if (pct > 0) { await seekToPercentage(pct); return; }
@@ -2305,13 +2318,25 @@ function openToc() {
     centerActiveTocItem();
   }, 280);
 }
+function activateSettingsTab(tab) {
+  const bar = settingsPanel.querySelector('.settings-tabs-bar');
+  if (!bar) return;
+  bar.querySelectorAll('.settings-tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+  settingsPanel.querySelectorAll('.settings-tab-pane').forEach(pane => {
+    pane.classList.toggle('active', pane.dataset.tab === tab);
+  });
+  try { localStorage.setItem('settingsTab', tab); } catch {}
+}
 function openSettings() {
   settingsPanel.classList.add('open');
   tocSidebar.classList.remove('open');
   bookmarksSidebar.classList.remove('open');
   panelBackdrop.classList.add('visible');
-  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek'); // hide bar when settings opens
-  renderDictSettings(); // lazy-load dictionary list
+  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  activateSettingsTab(localStorage.getItem('settingsTab') || 'theme');
+  renderDictSettings();
 }
 function openBookmarks() {
   bookmarksSidebar.classList.add('open');
@@ -2328,6 +2353,7 @@ function closeJumpPanel() {
   }
 }
 function closePanels() {
+  closeFontPicker();
   const activeEl = document.activeElement;
   const searchHadFocus = !!activeEl && searchSidebar.contains(activeEl);
   tocSidebar.classList.remove('open');
@@ -2807,26 +2833,125 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ── Settings UI ───────────────────────────────────────────────────────────────
-function populateFontSelect() {
-  const sel = document.getElementById('font-family-select');
-  sel.innerHTML = '';
-  [...SYSTEM_FONTS, ...customFonts]
-    .sort((a, b) => a.label.localeCompare(b.label))
-    .forEach(f => {
-      const opt = document.createElement('option');
-      opt.value       = f.value;
-      opt.textContent = f.label;
-      sel.appendChild(opt);
-    });
-  const exact  = Array.from(sel.options).find(o => o.value === prefs.fontFamily);
-  if (exact) {
-    sel.value = prefs.fontFamily;
-  } else {
-    const first  = prefs.fontFamily.split(',')[0].replace(/"/g, '').trim();
-    const approx = Array.from(sel.options).find(o =>
-      o.value.split(',')[0].replace(/"/g, '').trim() === first);
-    if (approx) sel.value = approx.value;
+let _fontPickerDropdown = null;
+let _fontPickerBtn      = null;
+let _fontPickerCleanup  = null;
+
+function closeFontPicker() {
+  _fontPickerDropdown?.remove();
+  _fontPickerDropdown = null;
+  _fontPickerBtn?.setAttribute('aria-expanded', 'false');
+  _fontPickerBtn = null;
+  _fontPickerCleanup?.();
+  _fontPickerCleanup = null;
+}
+
+function openFontPicker(wrapId, { prependOptions = [], customFonts: cf, systemFonts: sf, value, onSelect }) {
+  closeFontPicker();
+  const wrap = document.getElementById(wrapId);
+  const btn  = wrap.querySelector('.font-picker-btn');
+  _fontPickerBtn = btn;
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'font-picker-dropdown';
+
+  const makeOpt = (val, label, previewFont) => {
+    const opt = document.createElement('button');
+    opt.type = 'button';
+    opt.className = 'font-picker-option' + (val === value ? ' active' : '');
+    opt.dataset.value = val;
+    const check = document.createElement('span');
+    check.className = 'font-picker-check';
+    check.textContent = '✓';
+    const name = document.createElement('span');
+    name.textContent = label;
+    if (previewFont) name.style.fontFamily = previewFont;
+    opt.appendChild(check);
+    opt.appendChild(name);
+    opt.addEventListener('click', () => { onSelect(val, label); closeFontPicker(); });
+    return opt;
+  };
+
+  prependOptions.forEach(o => dropdown.appendChild(makeOpt(o.value, o.label, null)));
+  if (prependOptions.length && (cf.length || sf.length)) {
+    const sep = document.createElement('div');
+    sep.className = 'font-picker-separator';
+    dropdown.appendChild(sep);
   }
+  if (cf.length > 0) {
+    cf.forEach(f => dropdown.appendChild(makeOpt(f.value, f.label, f.value)));
+    const sep = document.createElement('div');
+    sep.className = 'font-picker-separator';
+    dropdown.appendChild(sep);
+  }
+  sf.forEach(f => dropdown.appendChild(makeOpt(f.value, f.label, f.value)));
+
+  document.body.appendChild(dropdown);
+  _fontPickerDropdown = dropdown;
+
+  // Position: align right edge to button's right edge, open below or above
+  const rect    = btn.getBoundingClientRect();
+  const dropW   = Math.max(rect.width, 200);
+  dropdown.style.width    = dropW + 'px';
+  dropdown.style.maxHeight = '320px';
+  const dropH   = Math.min(dropdown.scrollHeight, 320);
+  const below   = window.innerHeight - rect.bottom - 8;
+  const above   = rect.top - 8;
+  if (below >= dropH || below >= above) {
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+  } else {
+    dropdown.style.top = Math.max(4, rect.top - Math.min(dropH, above) - 4) + 'px';
+  }
+  const left = Math.max(8, Math.min(rect.right - dropW, window.innerWidth - dropW - 8));
+  dropdown.style.left = left + 'px';
+
+  btn.setAttribute('aria-expanded', 'true');
+
+  // Scroll active item into view after paint
+  requestAnimationFrame(() => dropdown.querySelector('.active')?.scrollIntoView({ block: 'nearest' }));
+
+  const onOutside = e => { if (!dropdown.contains(e.target) && !wrap.contains(e.target)) closeFontPicker(); };
+  const onKey     = e => { if (e.key === 'Escape') { closeFontPicker(); btn.focus(); } };
+  requestAnimationFrame(() => document.addEventListener('pointerdown', onOutside));
+  document.addEventListener('keydown', onKey);
+  _fontPickerCleanup = () => {
+    document.removeEventListener('pointerdown', onOutside);
+    document.removeEventListener('keydown', onKey);
+  };
+}
+
+function setFontPickerLabel(wrapId, value, allFonts, placeholder) {
+  const wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+  const lbl  = wrap.querySelector('.font-picker-label');
+  const font = allFonts.find(f => f.value === value) ||
+    allFonts.find(f => f.value.split(',')[0].replace(/"/g,'').trim() ===
+                       (value||'').split(',')[0].replace(/"/g,'').trim());
+  if (font) {
+    lbl.textContent  = font.label;
+    lbl.style.fontFamily = font.value;
+  } else {
+    lbl.textContent  = placeholder || (value ? value.split(',')[0].replace(/"/g,'').trim() : '');
+    lbl.style.fontFamily = value || '';
+  }
+}
+
+function populateFontSelect() {
+  setFontPickerLabel('font-family-picker', prefs.fontFamily, [...customFonts, ...SYSTEM_FONTS]);
+  const btn = document.querySelector('#font-family-picker .font-picker-btn');
+  btn.onclick = () => {
+    if (_fontPickerBtn === btn) { closeFontPicker(); return; }
+    openFontPicker('font-family-picker', {
+      customFonts,
+      systemFonts: SYSTEM_FONTS,
+      value: prefs.fontFamily,
+      onSelect: val => {
+        prefs.fontFamily = val;
+        setFontPickerLabel('font-family-picker', val, [...customFonts, ...SYSTEM_FONTS]);
+        reapplyStyles(); persistPrefs();
+      },
+    });
+  };
 }
 
 function syncSettingsUi() {
@@ -3014,9 +3139,8 @@ function syncStatusBarSettings() {
   document.getElementById('sb-style-bold')?.classList.toggle('active',   sb.fontStyle === 'bold' || sb.fontStyle === 'bold italic');
   document.getElementById('sb-style-italic')?.classList.toggle('active', sb.fontStyle === 'italic' || sb.fontStyle === 'bold italic');
 
-  // Font select (populated by populateSbFontSelect)
-  const sbFontSel = document.getElementById('sb-font-select');
-  if (sbFontSel) sbFontSel.value = sb.font || '';
+  // Font picker (populated by populateSbFontSelect)
+  setFontPickerLabel('sb-font-picker', sb.font, [...customFonts, ...SYSTEM_FONTS], t('reader.sb_font_inherit'));
 
   // Separator
   const anySep     = sb.separatorTop || sb.separatorBottom;
@@ -3057,33 +3181,28 @@ function syncStatusBarSettings() {
 }
 
 function populateSbFontSelect() {
-  const sel = document.getElementById('sb-font-select');
-  if (!sel) return;
-  sel.innerHTML = `<option value="">${t('reader.sb_font_inherit')}</option>`;
-  [...SYSTEM_FONTS, ...customFonts]
-    .sort((a, b) => a.label.localeCompare(b.label))
-    .forEach(f => {
-      const opt = document.createElement('option');
-      opt.value = f.value;
-      opt.textContent = f.label;
-      sel.appendChild(opt);
+  const btn = document.querySelector('#sb-font-picker .font-picker-btn');
+  if (!btn) return;
+  const inheritLabel = t('reader.sb_font_inherit');
+  setFontPickerLabel('sb-font-picker', prefs.statusBar.font, [...customFonts, ...SYSTEM_FONTS], inheritLabel);
+  btn.onclick = () => {
+    if (_fontPickerBtn === btn) { closeFontPicker(); return; }
+    openFontPicker('sb-font-picker', {
+      prependOptions: [{ value: '', label: inheritLabel }],
+      customFonts,
+      systemFonts: SYSTEM_FONTS,
+      value: prefs.statusBar.font || '',
+      onSelect: val => {
+        prefs.statusBar.font = val;
+        setFontPickerLabel('sb-font-picker', val, [...customFonts, ...SYSTEM_FONTS], inheritLabel);
+        applyStatusBarStyles(); persistPrefs();
+      },
     });
-  const initialValue = prefs.statusBar.font || '';
-  sel.value = initialValue;
-  if (!sel.value && initialValue) {
-    const fallback = Array.from(sel.options).find(o => o.textContent === initialValue);
-    if (fallback) sel.value = fallback.value;
-  }
+  };
 }
 
 function initStatusBarSettings() {
   renderSbItems();
-
-  // Font select
-  document.getElementById('sb-font-select')?.addEventListener('change', (e) => {
-    prefs.statusBar.font = e.target.value;
-    applyStatusBarStyles(); persistPrefs();
-  });
 
   // Font size
   document.getElementById('sb-font-size-slider')?.addEventListener('input', (e) => {
@@ -3261,10 +3380,6 @@ function initSettingsUi() {
       rendition.manager.updateLayout();
     }
     persistPrefs();
-  });
-  document.getElementById('font-family-select').addEventListener('change', (e) => {
-    prefs.fontFamily = e.target.value;
-    reapplyStyles(); persistPrefs();
   });
   document.getElementById('override-styles-toggle').addEventListener('change', (e) => {
     prefs.overrideStyles = e.target.checked;
@@ -4777,6 +4892,10 @@ document.getElementById('btn-settings').addEventListener('click', () =>
 document.getElementById('btn-fullscreen').addEventListener('click', () => { void toggleFullscreen(); });
 document.getElementById('toc-close').addEventListener('click',      closePanels);
 document.getElementById('settings-close').addEventListener('click', closePanels);
+settingsPanel.querySelector('.settings-tabs-bar').addEventListener('click', e => {
+  const btn = e.target.closest('.settings-tab-btn');
+  if (btn) activateSettingsTab(btn.dataset.tab);
+});
 onTap(panelBackdrop, closePanels);
 document.getElementById('btn-prev').addEventListener('click', e => { e.stopPropagation(); goPrev(); });
 document.getElementById('btn-next').addEventListener('click', e => { e.stopPropagation(); goNext(); });

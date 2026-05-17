@@ -139,6 +139,12 @@
   "reader.search_count_1": "1 Ergebnis",
   "reader.search_count_2_4": "{n} Ergebnisse",
   "reader.settings_title": "Leseeinstellungen",
+  "reader.settings_tab_theme": "Thema",
+  "reader.settings_tab_text": "Text",
+  "reader.settings_tab_layout": "Seite",
+  "reader.settings_tab_device": "Gerät",
+  "reader.settings_tab_statusbar": "Leiste",
+  "reader.settings_tab_dicts": "Wörterb.",
   "reader.btn_reset_book": "Für dieses Buch zurücksetzen",
   "reader.theme_light": "Hell",
   "reader.theme_sepia": "Sepia",
@@ -478,5 +484,10 @@
   "reader.annotation_color_green": "Grün",
   "reader.annotation_color_blue": "Blau",
   "reader.annotation_color_pink": "Rosa",
-  "reader.annotation_dict_lookup": "Wörterbuch"
+  "reader.annotation_dict_lookup": "Wörterbuch",
+  "reader.custom_fonts": "Eigene Schriften",
+  "reader.no_custom_fonts": "Keine eigenen Schriften",
+  "reader.upload_fonts": "Schriften hochladen…",
+  "reader.upload_dict": "Wörterbuch ZIP hochladen…",
+  "reader.uploading": "Hochladen"
 }

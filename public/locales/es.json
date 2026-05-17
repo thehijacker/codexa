@@ -139,6 +139,12 @@
   "reader.search_count_1": "1 resultado",
   "reader.search_count_2_4": "{n} resultados",
   "reader.settings_title": "Ajustes de lectura",
+  "reader.settings_tab_theme": "Tema",
+  "reader.settings_tab_text": "Texto",
+  "reader.settings_tab_layout": "Página",
+  "reader.settings_tab_device": "Dispositivo",
+  "reader.settings_tab_statusbar": "Barra",
+  "reader.settings_tab_dicts": "Diccionar.",
   "reader.btn_reset_book": "Restablecer para este libro",
   "reader.theme_light": "Claro",
   "reader.theme_sepia": "Sepia",
@@ -478,5 +484,10 @@
   "reader.annotation_color_green": "Verde",
   "reader.annotation_color_blue": "Azul",
   "reader.annotation_color_pink": "Rosa",
-  "reader.annotation_dict_lookup": "Diccionario"
+  "reader.annotation_dict_lookup": "Diccionario",
+  "reader.custom_fonts": "Fuentes propias",
+  "reader.no_custom_fonts": "Sin fuentes propias",
+  "reader.upload_fonts": "Subir fuentes…",
+  "reader.upload_dict": "Subir diccionario ZIP…",
+  "reader.uploading": "Subiendo"
 }

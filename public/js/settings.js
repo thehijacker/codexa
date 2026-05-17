@@ -184,6 +184,125 @@ const adminCard    = document.getElementById('admin-card');
 const adminRegTgl  = document.getElementById('admin-reg-toggle');
 const btnSaveReg   = document.getElementById('btn-save-reg');
 
+async function loadAdminFonts() {
+  const list = document.getElementById('admin-fonts-list');
+  if (!list) return;
+  let files;
+  try { files = await apiFetch('/fonts'); } catch { files = []; }
+  if (!files.length) {
+    list.innerHTML = `<p style="color:var(--color-text-muted);font-size:.85rem;margin:0">${t('reader.no_custom_fonts')}</p>`;
+    return;
+  }
+  const families = {};
+  files.forEach(f => {
+    const fam = f.replace(/\.(ttf|otf|woff2?)$/i, '')
+      .replace(/[-_](Regular|Bold|Italic|BoldItalic|Light|Medium|SemiBold|Black|Thin|ExtraLight|ExtraBold|Heavy|Oblique)$/i, '')
+      .replace(/[-_]/g, ' ').trim();
+    if (!families[fam]) families[fam] = [];
+    families[fam].push(f);
+  });
+  list.innerHTML = Object.keys(families).map(fam => `
+    <div class="admin-user-row" data-fam="${escHtml(fam)}">
+      <div class="admin-user-info"><span class="admin-user-name">${escHtml(fam)}</span></div>
+      <button class="btn btn-danger btn-sm">${t('common.delete')}</button>
+    </div>
+  `).join('');
+  list.querySelectorAll('[data-fam]').forEach(row => {
+    row.querySelector('button').addEventListener('click', async () => {
+      const fam   = row.dataset.fam;
+      const toDelete = files.filter(f => {
+        const fFam = f.replace(/\.(ttf|otf|woff2?)$/i, '')
+          .replace(/[-_](Regular|Bold|Italic|BoldItalic|Light|Medium|SemiBold|Black|Thin|ExtraLight|ExtraBold|Heavy|Oblique)$/i, '')
+          .replace(/[-_]/g, ' ').trim();
+        return fFam === fam;
+      });
+      try {
+        for (const filename of toDelete) {
+          await apiFetch(`/fonts/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+        }
+        await loadAdminFonts();
+      } catch (err) {
+        toast.error(t('common.error_msg', { msg: err.message }));
+      }
+    });
+  });
+}
+
+async function loadAdminDicts() {
+  const list = document.getElementById('admin-dicts-list');
+  if (!list) return;
+  let dicts;
+  try { dicts = await apiFetch('/dictionary'); } catch { dicts = []; }
+  if (!dicts.length) {
+    list.innerHTML = `<p style="color:var(--color-text-muted);font-size:.85rem;margin:0">${t('reader.dict_no_dicts_short')}</p>`;
+    return;
+  }
+  list.innerHTML = dicts.map(d => `
+    <div class="admin-user-row" data-dict-id="${escHtml(d.id)}">
+      <div class="admin-user-info">
+        <span class="admin-user-name">${escHtml(d.name)}</span>
+        ${d.wordcount ? `<span class="admin-user-meta">${d.wordcount.toLocaleString()} ${t('reader.dict_words')}</span>` : ''}
+      </div>
+      <button class="btn btn-danger btn-sm">${t('common.delete')}</button>
+    </div>
+  `).join('');
+  list.querySelectorAll('[data-dict-id]').forEach(row => {
+    row.querySelector('button').addEventListener('click', async () => {
+      const id = row.dataset.dictId;
+      try {
+        await apiFetch(`/dictionary/${id.split('/').map(encodeURIComponent).join('/')}`, { method: 'DELETE' });
+        await loadAdminDicts();
+      } catch (err) {
+        toast.error(t('common.error_msg', { msg: err.message }));
+      }
+    });
+  });
+}
+
+let _adminUploadsBound = false;
+function bindAdminUploads() {
+  if (_adminUploadsBound) return;
+  _adminUploadsBound = true;
+
+  document.getElementById('admin-font-upload')?.addEventListener('change', async function() {
+    const files = Array.from(this.files);
+    if (!files.length) return;
+    this.value = '';
+    for (const file of files) {
+      toast.info(`${t('reader.uploading')} ${file.name}…`);
+      const fd = new FormData();
+      fd.append('fonts', file);
+      try {
+        await apiFetch('/fonts', { method: 'POST', body: fd });
+        toast.success(file.name);
+      } catch (e) {
+        toast.error(`${file.name}: ${e.message}`);
+      }
+    }
+    await loadAdminFonts();
+  });
+
+  document.getElementById('admin-dict-upload')?.addEventListener('change', async function() {
+    const files = Array.from(this.files);
+    if (!files.length) return;
+    this.value = '';
+    for (const file of files) {
+      toast.info(`${t('reader.uploading')} ${file.name}…`);
+      const fd = new FormData();
+      fd.append('dict', file);
+      try {
+        const result = await apiFetch('/dictionary', { method: 'POST', body: fd });
+        const r = result.results?.[0];
+        if (r?.error) toast.error(`${file.name}: ${r.error}`);
+        else toast.success(file.name);
+      } catch (e) {
+        toast.error(`${file.name}: ${e.message}`);
+      }
+    }
+    await loadAdminDicts();
+  });
+}
+
 async function loadAdminSection() {
   try {
     const { isAdmin, user: _ } = await apiFetch('/auth/me');
@@ -192,6 +311,9 @@ async function loadAdminSection() {
     const { enabled } = await apiFetch('/auth/registration-status');
     adminRegTgl.checked = enabled;
     await loadAdminUsers();
+    await loadAdminFonts();
+    await loadAdminDicts();
+    bindAdminUploads();
   } catch (_) { /* not admin or error — keep hidden */ }
 }
 
@@ -438,6 +560,10 @@ btnCancelEdit.addEventListener('click', exitEditMode);
       document.getElementById('opds-form-title').textContent = t('settings.opds_add_title');
       document.getElementById('btn-add-opds-server').textContent = t('settings.btn_add_opds');
     }
-    if (!document.getElementById('admin-card').hidden) loadAdminUsers();
+    if (!document.getElementById('admin-card').hidden) {
+      loadAdminUsers();
+      loadAdminFonts();
+      loadAdminDicts();
+    }
   });
 } // end initSettings

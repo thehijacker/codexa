@@ -139,6 +139,12 @@
   "reader.search_count_1": "1 zadetek",
   "reader.search_count_2_4": "{n} zadetki",
   "reader.settings_title": "Nastavitve branja",
+  "reader.settings_tab_theme": "Tema",
+  "reader.settings_tab_text": "Besedilo",
+  "reader.settings_tab_layout": "Stran",
+  "reader.settings_tab_device": "Naprava",
+  "reader.settings_tab_statusbar": "Vrstica",
+  "reader.settings_tab_dicts": "Slovarji",
   "reader.btn_reset_book": "Ponastavi za to knjigo",
   "reader.theme_light": "Svetla",
   "reader.theme_sepia": "Sepija",
@@ -478,5 +484,10 @@
   "reader.annotation_color_green": "Zelena",
   "reader.annotation_color_blue": "Modra",
   "reader.annotation_color_pink": "Roza",
-  "reader.annotation_dict_lookup": "Slovar"
+  "reader.annotation_dict_lookup": "Slovar",
+  "reader.custom_fonts": "Pisave po meri",
+  "reader.no_custom_fonts": "Ni pisav po meri",
+  "reader.upload_fonts": "Naloži pisave…",
+  "reader.upload_dict": "Naloži slovar ZIP…",
+  "reader.uploading": "Nalaganje"
 }

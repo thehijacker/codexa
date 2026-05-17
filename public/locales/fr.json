@@ -139,6 +139,12 @@
   "reader.search_count_1": "1 résultat",
   "reader.search_count_2_4": "{n} résultats",
   "reader.settings_title": "Paramètres de lecture",
+  "reader.settings_tab_theme": "Thème",
+  "reader.settings_tab_text": "Texte",
+  "reader.settings_tab_layout": "Page",
+  "reader.settings_tab_device": "Appareil",
+  "reader.settings_tab_statusbar": "Barre",
+  "reader.settings_tab_dicts": "Dicos",
   "reader.btn_reset_book": "Réinitialiser pour ce livre",
   "reader.theme_light": "Clair",
   "reader.theme_sepia": "Sépia",
@@ -478,5 +484,10 @@
   "reader.annotation_color_green": "Vert",
   "reader.annotation_color_blue": "Bleu",
   "reader.annotation_color_pink": "Rose",
-  "reader.annotation_dict_lookup": "Dictionnaire"
+  "reader.annotation_dict_lookup": "Dictionnaire",
+  "reader.custom_fonts": "Polices personnalisées",
+  "reader.no_custom_fonts": "Aucune police personnalisée",
+  "reader.upload_fonts": "Télécharger des polices…",
+  "reader.upload_dict": "Télécharger un dico ZIP…",
+  "reader.uploading": "Téléchargement"
 }
