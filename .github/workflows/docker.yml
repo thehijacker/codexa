@@ -13,6 +13,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4.2.2
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Determine registry and image name
         id: reg
         run: |
@@ -26,25 +32,29 @@ jobs:
           echo "host=$REGISTRY" >> $GITHUB_OUTPUT
           echo "image=$IMAGE" >> $GITHUB_OUTPUT
 
+      - name: Compute image tags
+        id: tags
+        run: |
+          IMAGE="${{ steps.reg.outputs.image }}"
+          TAGS="${IMAGE}:latest"
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}"
+            TAGS="${TAGS},${IMAGE}:${VERSION}"
+          fi
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+
       - name: Log in to container registry
-        run: |
-          echo "${{ secrets.REGISTRY_TOKEN }}" | \
-            docker login ${{ steps.reg.outputs.host }} -u ${{ secrets.REGISTRY_USER }} --password-stdin
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ steps.reg.outputs.host }}
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
 
-      - name: Build Docker image
-        run: docker build -t ${{ steps.reg.outputs.image }}:latest .
-
-      - name: Tag with version (on git tag push)
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"
-          docker tag ${{ steps.reg.outputs.image }}:latest ${{ steps.reg.outputs.image }}:${VERSION}
-          echo "VERSION=${VERSION}" >> $GITHUB_ENV
-
-      - name: Push latest
-        run: docker push ${{ steps.reg.outputs.image }}:latest
-
-      - name: Push version tag
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: docker push ${{ steps.reg.outputs.image }}:${{ env.VERSION }}
+      - name: Build and push multi-platform image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          tags: ${{ steps.tags.outputs.tags }}
