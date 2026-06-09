@@ -521,6 +521,7 @@ async function openInfoModal(book) {
         ${isOfflineMode ? '' : `<button class="btn btn-danger" id="info-modal-delete"><img src="/images/delete.svg" class="nav-icon nav-icon-delete" alt=""> ${t('library.btn_del_book')}</button>`}
         ${isOfflineMode ? '' : `<a class="btn btn-secondary" id="info-modal-download" href="/api/books/${fullBook.id}/file?download=1&token=${token}" download><img src="/images/download.svg" class="nav-icon nav-icon-download" alt=""> ${t('library.btn_download')}</a>`}
         <a class="btn btn-read" id="info-modal-read" href="/readerv4.html?id=${fullBook.id}"><img src="/images/read.svg" class="nav-icon nav-icon-read" alt=""> ${t('library.btn_read')}</a>
+        <a class="btn btn-secondary" id="info-modal-peek" href="/readerv4.html?id=${fullBook.id}&peek=1"><img src="/images/peek.svg" class="nav-icon nav-icon-peek" alt=""> ${t('library.btn_peek')}</a>
         ${isOfflineMode ? '' : `<button class="btn btn-primary" id="info-modal-save"><img src="/images/save.svg" class="nav-icon nav-icon-save" alt=""> ${t('library.btn_save_shelves')}</button>`}
       </div>
     </div>`;

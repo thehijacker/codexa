@@ -183,6 +183,7 @@ html[data-lib-theme="eink"] .nav-icon-folder            { content: url('/images/
 html[data-lib-theme="eink"] .nav-icon-delete            { content: url('/images/delete_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-download          { content: url('/images/download_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-read              { content: url('/images/read_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-peek              { content: url('/images/peek_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-save              { content: url('/images/save_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-search            { content: url('/images/search_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-edit              { content: url('/images/edit_bw.svg'); }

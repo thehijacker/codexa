@@ -122,7 +122,6 @@ export async function setDownloadStatus(bookId, status) {
 if (isOfflineSupported) {
   navigator.serviceWorker.addEventListener('message', e => {
     const { type, bookId, message } = e.data || {};
-    console.log('[offline] SW message received:', type, bookId);
     if (type === 'CACHE_BOOK_DONE' || type === 'CACHE_BOOK_ERROR') {
       const handlers = _pending.get(bookId);
       _pending.delete(bookId);
@@ -202,6 +201,13 @@ export async function autoDownloadCurrentlyReading(books, token) {
   const registration = await navigator.serviceWorker.ready.catch(() => null);
   if (!registration?.active) return;
 
+  // Skip auto-download for a book that was just opened in peek mode
+  let lastPeekId = null;
+  try {
+    const v = sessionStorage.getItem('br_last_peek_book_id');
+    if (v) { lastPeekId = Number(v); sessionStorage.removeItem('br_last_peek_book_id'); }
+  } catch { /* ignore */ }
+
   const currentlyReading = books.filter(b => {
     const p = b.percentage || 0;
     return p > 0 && p < 1;
@@ -213,6 +219,7 @@ export async function autoDownloadCurrentlyReading(books, token) {
 
   for (const book of currentlyReading) {
     if (doneIds.has(book.id)) continue;
+    if (lastPeekId && book.id === lastPeekId) continue;
     downloadBook(book, token).catch(() => {});
   }
 }

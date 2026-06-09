@@ -248,14 +248,16 @@ function renderFeed(feed) {
         e.stopPropagation();
         setButtonLoading(btn, true, t('opds.btn_downloading'));
         try {
-          await apiFetch(`/opds/download/${currentServer.id}`, {
+          const data = await apiFetch(`/opds/download/${currentServer.id}`, {
             method: 'POST',
             body: JSON.stringify({ href: entry.acqHref, title: entry.title, author: entry.author }),
           });
           toast.success(t('opds.toast_book_added', { title: entry.title }));
-          btn.textContent = '✓ ' + t('opds.btn_add').replace(/^\+ /, '');
-          btn.disabled    = true;
-          btn.className   = 'btn btn-secondary btn-sm';
+          const actionsEl = row.querySelector('.book-row-actions');
+          actionsEl.innerHTML = `
+            <a class="btn btn-read btn-sm" href="/readerv4.html?id=${data.id}">${escHtml(t('opds.btn_read'))}</a>
+            <a class="btn btn-secondary btn-sm" href="/readerv4.html?id=${data.id}&peek=1">${escHtml(t('opds.btn_peek'))}</a>
+          `;
           reloadLibrary().catch(e => console.error('[opds] reloadLibrary failed:', e));
         } catch (err) {
           const msg = err.message?.includes('v vaši') || err.message?.includes('already') ? t('opds.err_already_in_library') : err.message;
