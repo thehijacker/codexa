@@ -177,12 +177,28 @@ function initDb() {
     [`ALTER TABLE books          ADD COLUMN genres                   TEXT    DEFAULT ''`,  'books.genres'],
     [`ALTER TABLE books          ADD COLUMN pages                    TEXT    DEFAULT ''`,  'books.pages'],
     [`ALTER TABLE user_settings  ADD COLUMN kosync_internal_enabled  INTEGER DEFAULT 0`,   'user_settings.kosync_internal_enabled'],
+    [`ALTER TABLE books          ADD COLUMN last_opened_at          INTEGER`, 'books.last_opened_at'],
   ];
   for (const [sql, label] of migrations) {
     try {
       database.exec(sql);
       console.log(`[db] Migration: added ${label}`);
     } catch { /* column already exists — ignore */ }
+  }
+
+  // Backfill last_opened_at from last progress save, else added_at (counts as "opened when added").
+  try {
+    database.exec(`
+      UPDATE books AS b
+         SET last_opened_at = COALESCE(
+           (SELECT p.updated_at FROM reading_progress p
+             WHERE p.user_id = b.user_id AND p.document_hash = b.file_hash),
+           b.added_at
+         )
+       WHERE b.last_opened_at IS NULL
+    `);
+  } catch (e) {
+    console.warn('[db] last_opened_at backfill:', e.message);
   }
 }
 

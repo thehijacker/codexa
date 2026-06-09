@@ -77,7 +77,8 @@ function sortBooks(list) {
   const sorted = [...list];
   // In "Currently Reading" view, default to last-read order when the user hasn't overridden the sort
   if (currentShelfId === 'reading' && order === 'added_desc') {
-    return sorted.sort((a, b) => (b.progress_updated_at || 0) - (a.progress_updated_at || 0));
+    return sorted.sort((a, b) =>
+      (b.last_opened_at || b.added_at || 0) - (a.last_opened_at || a.added_at || 0));
   }
   switch (order) {
     case 'added_desc':    sorted.sort((a, b) => b.added_at - a.added_at); break;
@@ -86,6 +87,8 @@ function sortBooks(list) {
     case 'title_desc':    sorted.sort((a, b) => b.title.localeCompare(a.title)); break;
     case 'author_asc':    sorted.sort((a, b) => (a.author || '').localeCompare(b.author || '')); break;
     case 'progress_desc': sorted.sort((a, b) => (b.percentage || 0) - (a.percentage || 0)); break;
+    case 'opened_desc':   sorted.sort((a, b) =>
+      (b.last_opened_at || b.added_at || 0) - (a.last_opened_at || a.added_at || 0)); break;
     case 'series_asc':    sorted.sort((a, b) => {
       const sc = (a.series_name || '').localeCompare(b.series_name || '');
       if (sc !== 0) return sc;

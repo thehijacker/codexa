@@ -29,6 +29,7 @@ router.get('/', (req, res) => {
   const db    = getDb();
   const books = db.prepare(`
     SELECT b.id, b.title, b.author, b.series_name, b.series_number, b.file_hash, b.file_hash_md5, b.cover_path, b.file_size, b.added_at,
+           COALESCE(b.last_opened_at, b.added_at) AS last_opened_at,
            COALESCE(p.percentage, 0)    AS percentage,
            COALESCE(p.cfi_position, '') AS cfi_position,
            p.updated_at                AS progress_updated_at
@@ -39,6 +40,15 @@ router.get('/', (req, res) => {
      ORDER BY b.added_at DESC
   `).all(req.user.id);
   res.json(books);
+});
+
+// ── POST /api/books/:id/opened — record that the user opened this book ─────────
+router.post('/:id/opened', (req, res) => {
+  const db   = getDb();
+  const book = db.prepare('SELECT id FROM books WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+  if (!book) return res.status(404).json({ error: 'error.book_not_found' });
+  db.prepare(`UPDATE books SET last_opened_at = strftime('%s', 'now') WHERE id = ?`).run(book.id);
+  res.json({ success: true });
 });
 
 // ── GET /api/books/:id ─────────────────────────────────────────────────────────

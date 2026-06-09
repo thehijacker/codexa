@@ -51,6 +51,7 @@
   "library.sort_title_za": "Titel Z–A",
   "library.sort_author_az": "Autor A–Z",
   "library.sort_progress": "Fortschritt",
+  "library.sort_last_opened": "Zuletzt geöffnet",
   "library.sort_series": "Reihe",
   "library.btn_edit": "Bearbeiten",
   "library.add_book": "Buch hinzufügen",
