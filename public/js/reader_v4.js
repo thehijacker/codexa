@@ -4,7 +4,7 @@ import { t, initI18n, applyTranslations, getCurrentLang } from './i18n.js';
 import ePub from './flow/index.js';
 import { isBookDownloaded, downloadBook, fetchOfflineBookFile, getBookMeta, saveBookMeta } from './offline.js';
 
-const READER_BUILD = 'br-v54';
+const READER_BUILD = 'br-v56';
 const _i18nReady = initI18n();
 console.log('[codexa] reader build', READER_BUILD);
 
@@ -6021,4 +6021,5 @@ document.addEventListener('langchange', () => {
   renderSbItems();
   renderDictSettings();
   populateSbFontSelect();
+  refreshStatusBarDynamic();
 });
