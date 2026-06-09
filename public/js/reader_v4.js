@@ -302,6 +302,23 @@ let activeReadingSeconds = 0;         // active time since last BookOrbit stats 
 let statsSessionStartTs = 0;          // unix seconds — start of current reading slice
 let statsPagesDelta = 0;              // page turns since last BookOrbit stats push
 let statsTimer = null;                // 1s interval for active reading time
+
+// ── Fork sync policy (juliefuller fork; extends upstream thehijacker/codexa) ──
+// Upstream syncs KOReader progress only on chapter boundaries and book close.
+// This fork adds e-ink / BookOrbit-friendly sync so cross-device position stays
+// fresh without cover-close or pagehide beacons (unreliable on Boox; intentionally omitted).
+//
+// Layers (all no-op when isPeekMode — peek skips progress saves entirely):
+//   1. Chapter boundary — inherited from upstream (saveProgress on spine href change)
+//   2. Debounced (60s)  — fires after last page turn; scheduleDebouncedSync on relocated
+//   3. Periodic (4 min) — heartbeat while reading within one chapter; uses inSession
+//   4. Manual sync btn  — force push; confirms if position is behind bestKnownRemotePct
+//   5. Close / leave    — saveProgressBackground (local + kosync when forward of high-water)
+//
+// Guards (not in upstream):
+//   lastSyncedCfi      — skip kosync when CFI unchanged since last successful push
+//   bestKnownRemotePct — never push backwards unless user confirms manual sync (forced)
+//   BookOrbit stats    — optional kosync_stats_enabled; piggybacks debounced/periodic/manual path
 const SYNC_DEBOUNCE_MS   = 60000;    // inactivity debounce — resets on every page turn
 const SYNC_INTERVAL_MS   = 240000;   // 4-minute heartbeat — always fires regardless of activity
 let syncDebounceTimer  = null;
