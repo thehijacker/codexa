@@ -85,6 +85,21 @@ export async function removeBook(bookId) {
   });
 }
 
+const BOOKS_CACHE_NAME = 'codexa-books-v2';
+
+/** Load a previously downloaded EPUB from the service-worker books cache. */
+export async function fetchOfflineBookFile(bookId) {
+  if (!('caches' in window)) return null;
+  try {
+    const cache = await caches.open(BOOKS_CACHE_NAME);
+    const res = await cache.match(`/offline/books/${Number(bookId)}/epub`);
+    if (!res?.ok) return null;
+    return res.arrayBuffer();
+  } catch {
+    return null;
+  }
+}
+
 export async function isBookDownloaded(bookId) {
   try {
     const meta = await getBookMeta(Number(bookId));

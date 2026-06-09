@@ -119,6 +119,12 @@
       <button id="btn-back"        class="btn-icon" data-i18n-title="reader.btn_back"       title="Nazaj v knjižnico"><img src="/images/back.svg" class="nav-icon nav-icon-back" alt=""></button>
     </header>
 
+    <!-- Tap outside to dismiss auto-hidden toolbar (covers iframe — host clicks never reach it) -->
+    <div id="header-dismiss-backdrop" class="header-dismiss-backdrop"></div>
+
+    <!-- Tap outside to dismiss jump-to-% panel (iframe clicks never reach the host document) -->
+    <div id="jump-pct-backdrop" class="jump-pct-backdrop" hidden></div>
+
     <!-- Jump-to-percentage panel -->
     <div id="jump-pct-panel" style="display:none">
       <button id="btn-prev-chap" class="sb-chap-nav-btn" data-i18n-title="reader.prev_chapter" title="Prejšnje poglavje">‹</button>
@@ -127,7 +133,7 @@
           <input type="range" id="jump-pct-slider" min="0" max="100" step="1" value="0" />
           <div id="sb-chap-markers"></div>
         </div>
-        <span id="jump-pct-value" class="setting-value">0%</span>
+        <input type="text" inputmode="numeric" id="jump-pct-value" class="jump-pct-value-input setting-value" value="0" maxlength="3" data-i18n-aria-label="reader.jump_pct_input" aria-label="Jump to percentage" />
       </div>
       <button id="btn-next-chap" class="sb-chap-nav-btn" data-i18n-title="reader.next_chapter" title="Naslednje poglavje">›</button>
     </div>
@@ -732,18 +738,6 @@
         <div class="settings-divider"></div>
 
         <div class="setting-row">
-          <div class="setting-row-inline">
-            <div>
-              <div class="setting-label" data-i18n="reader.sb_save_on_hide">Save on tablet lock / app switch</div>
-              <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_save_on_hide_hint">
-                Push reading position to the server when the screen locks or you switch away. Progress also syncs automatically every 60 seconds while reading.
-              </div>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" id="save-on-hide-toggle" checked />
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
         </div>
 
         <div class="setting-row">
@@ -981,9 +975,6 @@
   </div>
   <div id="dict-backdrop" class="dict-backdrop"></div>
 
-  <!-- Tiny tap-to-lookup chip — appears near a selected word -->
-  <button id="dict-lookup-chip" class="dict-lookup-chip hidden" type="button" data-i18n="reader.dict_lookup_chip">Lookup</button>
-
   <div id="toast-container"></div>
 
   <!-- Apply auto-hide header class before module executes to prevent layout flash -->
@@ -997,7 +988,7 @@
   <!-- JSZip must be loaded before epub.js -->
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/localforage@1.10.0/dist/localforage.min.js"></script>
-  <script type="module" src="/js/reader_v4.js?v=br-v39"></script>
+  <script type="module" src="/js/reader_v4.js?v=br-v47"></script>
   <script src="/js/sw-register.js"></script>
 </body>
 </html>
