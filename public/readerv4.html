@@ -118,6 +118,9 @@
       <button id="btn-back"        class="btn-icon" data-i18n-title="reader.btn_back"       title="Nazaj v knjižnico"><img src="/images/back.svg" class="nav-icon nav-icon-back" alt=""></button>
     </header>
 
+    <!-- Tap outside to dismiss jump-to-% panel (iframe clicks never reach the host document) -->
+    <div id="jump-pct-backdrop" class="jump-pct-backdrop" hidden></div>
+
     <!-- Jump-to-percentage panel -->
     <div id="jump-pct-panel" style="display:none">
       <button id="btn-prev-chap" class="sb-chap-nav-btn" data-i18n-title="reader.prev_chapter" title="Prejšnje poglavje">‹</button>
@@ -126,7 +129,7 @@
           <input type="range" id="jump-pct-slider" min="0" max="100" step="1" value="0" />
           <div id="sb-chap-markers"></div>
         </div>
-        <span id="jump-pct-value" class="setting-value">0%</span>
+        <input type="text" inputmode="numeric" id="jump-pct-value" class="jump-pct-value-input setting-value" value="0" maxlength="3" data-i18n-aria-label="reader.jump_pct_input" aria-label="Jump to percentage" />
       </div>
       <button id="btn-next-chap" class="sb-chap-nav-btn" data-i18n-title="reader.next_chapter" title="Naslednje poglavje">›</button>
     </div>
@@ -572,6 +575,51 @@
 
         <div class="settings-divider"></div>
 
+        <!-- Page navigation zones -->
+        <div class="setting-section-title" data-i18n="reader.sb_section_navigation">Page navigation</div>
+        <div style="font-size:.76rem;color:var(--color-text-muted);margin-bottom:.5rem" data-i18n="reader.sb_nav_zone_hint">Tap or click this portion of the screen to turn pages.</div>
+        <div class="setting-row">
+          <div class="setting-row-inline">
+            <div class="setting-label" data-i18n="reader.sb_nav_zone_left">Back zone (left edge)</div>
+            <span id="nav-zone-left-value" class="setting-value">20%</span>
+          </div>
+          <input type="range" id="nav-zone-left-slider" min="0" max="40" step="1" value="20" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-row-inline">
+            <div class="setting-label" data-i18n="reader.sb_nav_zone_right">Forward zone (right edge)</div>
+            <span id="nav-zone-right-value" class="setting-value">20%</span>
+          </div>
+          <input type="range" id="nav-zone-right-slider" min="0" max="40" step="1" value="20" />
+        </div>
+
+        <div class="settings-divider"></div>
+
+        <!-- Toolbar reveal zone & button size -->
+        <div class="setting-section-title" data-i18n="reader.sb_section_toolbar">Toolbar</div>
+        <div class="setting-row">
+          <div class="setting-row-inline">
+            <div>
+              <div class="setting-label" data-i18n="reader.sb_header_reveal_zone">Toolbar reveal zone</div>
+              <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_header_reveal_hint">Percentage of screen height from the top where tap reveals the toolbar</div>
+            </div>
+            <span id="header-reveal-zone-value" class="setting-value">12%</span>
+          </div>
+          <input type="range" id="header-reveal-zone-slider" min="2" max="30" step="1" value="12" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-row-inline">
+            <div>
+              <div class="setting-label" data-i18n="reader.sb_header_button_size">Toolbar button size</div>
+              <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_header_button_hint">Percentage of the default button size (100% = normal)</div>
+            </div>
+            <span id="header-button-size-value" class="setting-value">100%</span>
+          </div>
+          <input type="range" id="header-button-size-slider" min="75" max="225" step="5" value="100" />
+        </div>
+
+        <div class="settings-divider"></div>
+
         <!-- Edge padding (curved phone screen insets) -->
         <div class="setting-section-title" data-i18n="reader.sb_section_edge_pad">Odmik robov strani</div>
         <div class="setting-row">
@@ -684,6 +732,9 @@
         </div>
 
         <div class="settings-divider"></div>
+
+        <div class="setting-row">
+        </div>
 
         <div class="setting-row">
           <div class="setting-row-inline">
@@ -819,6 +870,16 @@
             </div>
           </div>
         </div>
+        <div class="settings-divider"></div>
+
+        <!-- Clock format -->
+        <div class="setting-row">
+          <div class="setting-label" data-i18n="reader.sb_clock_format">Clock format</div>
+          <div class="spread-buttons" style="margin-top:.4rem">
+            <button id="sb-clock-24h" class="spread-btn active" data-i18n="reader.sb_clock_24h">24h</button>
+            <button id="sb-clock-12h" class="spread-btn"        data-i18n="reader.sb_clock_12h">12h (AM/PM)</button>
+          </div>
+        </div>
       </div><!-- /.settings-tab-pane[statusbar] -->
 
       <!-- TAB: Dictionaries -->
@@ -910,6 +971,9 @@
   </div>
   <div id="dict-backdrop" class="dict-backdrop"></div>
 
+  <!-- Tap outside to dismiss auto-hidden toolbar (on body — above iframe stacking) -->
+  <div id="header-dismiss-backdrop" class="header-dismiss-backdrop"></div>
+
   <div id="toast-container"></div>
 
   <!-- Apply auto-hide header class before module executes to prevent layout flash -->
@@ -923,11 +987,7 @@
   <!-- JSZip must be loaded before epub.js -->
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/localforage@1.10.0/dist/localforage.min.js"></script>
-  <script type="module" src="/js/reader_v4.js"></script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
-    }
-  </script>
+  <script type="module" src="/js/reader_v4.js?v=br-v51"></script>
+  <script src="/js/sw-register.js"></script>
 </body>
 </html>

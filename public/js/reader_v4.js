@@ -2,9 +2,11 @@ import { apiFetch, requireAuth, getToken } from './api.js';
 import { toast } from './ui.js';
 import { t, initI18n, applyTranslations, getCurrentLang } from './i18n.js';
 import ePub from './flow/index.js';
-import { isBookDownloaded, downloadBook, getBookMeta, saveBookMeta } from './offline.js';
+import { isBookDownloaded, downloadBook, fetchOfflineBookFile, getBookMeta, saveBookMeta } from './offline.js';
 
+const READER_BUILD = 'br-v51';
 const _i18nReady = initI18n();
+console.log('[codexa] reader build', READER_BUILD);
 
 function onTap(el, handler) {
   if (!el) return;
@@ -24,9 +26,9 @@ if (!Promise.allSettled) {
 
 if (!requireAuth()) throw new Error('not authenticated');
 const params = new URLSearchParams(window.location.search);
+const isPeekMode = params.get('peek') === '1';
 const bookId = params.get('id');
 if (!bookId) { window.location.href = '/'; throw new Error(); }
-const isPeekMode = params.get('peek') === '1';
 const BIONIC_RELOAD_KEY = 'br_bionic_reload_state_v1';
 const SESSION_KEY = 'br_interrupted_session_v1';
 const RESUME_STATE_KEY = 'br_resume_state_v1';
@@ -178,6 +180,7 @@ const DEFAULT_STATUS_BAR = {
   showIcons:        {},           // { [statId]: false } to hide icon; default = show all
   bookProgressBar:  { show: false, position: 'bottom', thickness: 3 },
   chapProgressBar:  { show: false, position: 'bottom', thickness: 2 },
+  clockFormat:      '24h',   // '24h' | '12h'
 };
 
 // Stat definitions — id, icon, translated label (use function to get current lang)
@@ -195,6 +198,7 @@ function getStatusStats() {
     { id: 'bookTitle',     icon: '/images/book_title.svg',      label: t('reader.sb_book_title') },
     { id: 'bookAuthor',    icon: '/images/book_author.svg',     label: t('reader.sb_book_author') },
     { id: 'chapterTitle',  icon: '/images/chapter_title.svg',   label: t('reader.sb_chap_title') },
+    { id: 'battery',       icon: '/images/battery.svg',         label: t('reader.sb_battery') },
   ];
 }
 
@@ -243,6 +247,10 @@ const DEFAULT_PREFS = {
   dictionaries:   [],           // enabled dict IDs in priority order; null = all disabled; empty = use all
   dictionaryOrder: [],          // all dict IDs in user's display order (including disabled ones)
   edgePadding:    { top: 0, bottom: 0, left: 0, right: 0 },   // px inset for curved screens
+  navZoneLeftPct:  20,          // % of screen width — tap/click to go back
+  navZoneRightPct: 20,          // % of screen width — tap/click to go forward
+  headerRevealZonePct: 12,      // % of screen height — tap reveals auto-hidden toolbar
+  headerButtonScalePct: 100,    // % of default responsive size (36 desktop / 44 mobile)
   statusBar:      null,         // deep-merged in loadPrefs()
 };
 
@@ -258,6 +266,7 @@ let lastKnownXPointer = null; // precise xpointer last received from KOReader/se
 let lastChapterHref = null;  // chapter-boundary save tracking
 let lastSentChapterHref = null; // last chapter for which remote progress was pushed
 let availableDicts  = null;  // cached GET /api/dictionary response
+let _batteryMgr     = null;  // BatteryManager from navigator.getBattery(), null if unsupported
 let pendingNavDirection = null; // 'next' or 'prev' tracking for chapter jump corrections
 let pendingWasChapterEnd = true;  // whether goNext() was called from the last page
 let deferredNextPending  = false; // true while a mid-repagination NEXT is deferred
@@ -339,9 +348,11 @@ const searchStatusEl  = document.getElementById('search-status');
 const searchResultsEl = document.getElementById('search-results');
 const searchBackBtn   = document.getElementById('btn-search-back');
 const searchAcceptBtn = document.getElementById('btn-search-accept');
-const jumpPctPanel    = document.getElementById('jump-pct-panel');
-const jumpPctSlider   = document.getElementById('jump-pct-slider');
-const jumpPctValue    = document.getElementById('jump-pct-value');
+const jumpPctPanel     = document.getElementById('jump-pct-panel');
+const jumpPctBackdrop  = document.getElementById('jump-pct-backdrop');
+const headerDismissBackdrop = document.getElementById('header-dismiss-backdrop');
+const jumpPctSlider    = document.getElementById('jump-pct-slider');
+const jumpPctValue     = document.getElementById('jump-pct-value');
 const fullscreenBtn   = document.getElementById('btn-fullscreen');
 const bookmarksSidebar = document.getElementById('bookmarks-sidebar');
 const bookmarksListEl  = document.getElementById('bookmarks-list');
@@ -360,9 +371,22 @@ function loadPrefs() {
     const s = localStorage.getItem('br_reader_prefs');
     const saved = s ? JSON.parse(s) : {};
     const sb = saved.statusBar || {};
+    const legacyRevealPx = typeof saved.headerRevealZone === 'number' ? saved.headerRevealZone : null;
+    const legacyBtnPx = typeof saved.headerButtonSize === 'number' ? saved.headerButtonSize : null;
+    const btnBase = window.matchMedia('(max-width: 640px)').matches ? 44 : 36;
     return {
       ...DEFAULT_PREFS,
       ...saved,
+      headerRevealZonePct: saved.headerRevealZonePct ?? (
+        legacyRevealPx != null
+          ? Math.min(40, Math.max(2, Math.round(legacyRevealPx / 8)))
+          : DEFAULT_PREFS.headerRevealZonePct
+      ),
+      headerButtonScalePct: saved.headerButtonScalePct ?? (
+        legacyBtnPx != null && legacyBtnPx > 0
+          ? Math.min(225, Math.max(75, Math.round(legacyBtnPx / btnBase * 100)))
+          : DEFAULT_PREFS.headerButtonScalePct
+      ),
       edgePadding: { ...DEFAULT_PREFS.edgePadding, ...(saved.edgePadding || {}) },
       statusBar: {
         ...DEFAULT_STATUS_BAR,
@@ -371,6 +395,7 @@ function loadPrefs() {
         showIcons:       { ...DEFAULT_STATUS_BAR.showIcons,       ...sb.showIcons },
         bookProgressBar: { ...DEFAULT_STATUS_BAR.bookProgressBar, ...sb.bookProgressBar },
         chapProgressBar: { ...DEFAULT_STATUS_BAR.chapProgressBar, ...sb.chapProgressBar },
+        clockFormat:     sb.clockFormat || DEFAULT_STATUS_BAR.clockFormat,
       },
     };
   } catch { return { ...DEFAULT_PREFS, statusBar: { ...DEFAULT_STATUS_BAR } }; }
@@ -876,7 +901,6 @@ img {
   margin-right: auto !important;
   mix-blend-mode: multiply !important;
 }
-/* Keep native selection/callout enabled so iOS long-press and selection behave naturally. */
 ${prefs.eink ? buildEinkCss(theme) : ''}
 ${prefs.paraIndent ? `p { text-indent: ${(prefs.paraIndentSize / 10).toFixed(1)}em !important; }` : 'p { text-indent: 0 !important; }'}
 ${prefs.paraSpacing > 0 ? `p { margin-bottom: ${(prefs.paraSpacing / 10).toFixed(1)}em !important; }` : ''}
@@ -1010,7 +1034,7 @@ async function releaseWakeLock() {
 // Re-acquire after tab becomes visible again (wake lock is auto-released on hide)
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') acquireWakeLock();
-  if (document.visibilityState === 'hidden')  writeInterruptedSession();
+  if (document.visibilityState === 'hidden') writeInterruptedSession();
 });
 
 // ── Host page background ──────────────────────────────────────────────────────
@@ -1115,11 +1139,22 @@ function applyPageShadow() {
 }
 
 // ── FIX: Forward iframe keydown events to host ────────────────────────────────
+const IFRAME_NAV_KEYS = new Set(['ArrowRight', 'ArrowLeft', ' ', 'PageDown', 'PageUp']);
+
 function attachIframeKeyboard(contents) {
   if (!contents?.window) return;
+  // Capture phase + preventDefault stops epub.js from also turning the page when we
+  // handle navigation keys here (avoids double page-turn on e-ink Page Up/Down).
   contents.window.addEventListener('keydown', (e) => {
+    if (IFRAME_NAV_KEYS.has(e.key)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') goPrev();
+      else goNext();
+      return;
+    }
     document.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, bubbles: true }));
-  });
+  }, true);
   // Forward wheel events from iframe so mouseWheelNav works when cursor is over text
   contents.window.addEventListener('wheel', (e) => {
     if (!prefs.mouseWheelNav) return;
@@ -1281,8 +1316,8 @@ function attachIframeDictionary(contents) {
   }
 }
 
-// Detect whether an <a> element inside the epub iframe is a footnote/endnote reference.
-// Pure function — runs in the iframe context, no epub.js API needed.
+
+
 function isFootnoteLink(anchor) {
   const rawHref = anchor.dataset?.footnoteHref || anchor.dataset?.brLinkHref || anchor.getAttribute('href') || '';
   if (!rawHref.includes('#')) return false;
@@ -1872,7 +1907,7 @@ function openAnnotations() {
   settingsPanel.classList.remove('open');
   bookmarksSidebar.classList.remove('open');
   panelBackdrop.classList.add('visible');
-  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  if (prefs.autoHideHeader) forceHideAutoHeader();
 }
 
 // ── Status bar engine ─────────────────────────────────────────────────────────
@@ -1958,7 +1993,10 @@ function computeStatValue(id) {
       return formatEta(estimateBookPagesLeft());
     case 'currentTime': {
       const now = new Date();
-      return now.toLocaleTimeString('sl-SI', { hour: '2-digit', minute: '2-digit' });
+      if (prefs.statusBar?.clockFormat === '12h') {
+        return now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+      }
+      return now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
     }
     case 'bookTitle':
       return currentBook?.title || '';
@@ -1966,6 +2004,11 @@ function computeStatValue(id) {
       return currentBook?.author || '';
     case 'chapterTitle':
       return chapterLabelFromHref(currentHref);
+    case 'battery': {
+      if (!_batteryMgr) return '';
+      const pct = Math.round(_batteryMgr.level * 100);
+      return (_batteryMgr.charging ? '⚡\u202F' : '') + pct + '%';
+    }
     default:
       return '';
   }
@@ -2061,6 +2104,50 @@ function refreshStatusBarTime() {
   });
 }
 setInterval(refreshStatusBarTime, 30000);
+
+function getHeaderRevealZonePct() {
+  return prefs.headerRevealZonePct ?? 12;
+}
+
+function getHeaderRevealZonePx() {
+  return window.innerHeight * getHeaderRevealZonePct() / 100;
+}
+
+function inNavZone(x) {
+  const w = window.innerWidth;
+  const leftPct  = prefs.navZoneLeftPct  ?? 20;
+  const rightPct = prefs.navZoneRightPct ?? 20;
+  if (leftPct  > 0 && x < w * leftPct  / 100) return 'prev';
+  if (rightPct > 0 && x > w - w * rightPct / 100) return 'next';
+  return null;
+}
+
+function inHeaderRevealZone(y) {
+  return y < getHeaderRevealZonePx();
+}
+
+function applyNavZones() {
+  const root = document.documentElement;
+  root.style.setProperty('--nav-zone-left-pct',  (prefs.navZoneLeftPct  ?? 20) + '%');
+  root.style.setProperty('--nav-zone-right-pct', (prefs.navZoneRightPct ?? 20) + '%');
+}
+
+function applyHeaderRevealZone() {
+  document.documentElement.style.setProperty('--header-reveal-zone-pct', getHeaderRevealZonePct() + '%');
+}
+
+function getHeaderButtonBasePx() {
+  return window.matchMedia('(max-width: 640px)').matches ? 44 : 36;
+}
+
+function applyHeaderButtonSize() {
+  const root = document.documentElement;
+  const scale = prefs.headerButtonScalePct ?? 100;
+  const size  = Math.round(getHeaderButtonBasePx() * scale / 100);
+  root.style.setProperty('--reader-header-btn-size', size + 'px');
+  root.style.setProperty('--reader-header-icon-size', Math.max(14, Math.round(size * 0.33)) + 'px');
+  root.style.setProperty('--reader-header-min-height', (size + 8) + 'px');
+}
 
 // Apply CSS vars for edge inset (curved phone screens)
 function applyEdgePadding() {
@@ -2199,10 +2286,49 @@ function buildChapterMarkers() {
 }
 
 // ── Auto-hide header ──────────────────────────────────────────────────────────
+
+// Timestamp of the last header-reveal so we can suppress accidental button clicks
+// that arrive during/just-after the slide-in animation (pointer-events go live
+// immediately when header-peek is added, before the 250ms transition completes).
+let _headerRevealTs = 0;
+const HEADER_REVEAL_GUARD_MS = 350; // must be ≥ the 250ms transition
+
+function syncHeaderDismissBackdrop() {
+  if (!headerDismissBackdrop) return;
+  const show = prefs.autoHideHeader
+    && readerLayout.classList.contains('header-peek')
+    && !isJumpPanelOpen()
+    && !tocSidebar.classList.contains('open');
+  headerDismissBackdrop.classList.toggle('visible', show);
+}
+
+function forceHideAutoHeader() {
+  if (!readerLayout.classList.contains('header-peek')) return;
+  isMouseOverHeader = false;
+  readerLayout.classList.remove('header-peek');
+  syncHeaderDismissBackdrop();
+}
+
+function revealHeader() {
+  if (!readerLayout.classList.contains('header-peek')) {
+    _headerRevealTs = Date.now(); // record reveal time for click-guard
+  }
+  readerLayout.classList.add('header-peek');
+  syncHeaderDismissBackdrop();
+}
+
+function hideAutoHeader() {
+  if (!prefs.autoHideHeader) return;
+  if (!readerLayout.classList.contains('header-peek')) return;
+  if (tocSidebar.classList.contains('open') || isJumpPanelOpen()) return;
+  if (isMouseOverHeader) return;
+  forceHideAutoHeader();
+}
+
 function applyAutoHide() {
   readerLayout.classList.toggle('autohide-header', prefs.autoHideHeader);
   if (!prefs.autoHideHeader) {
-    readerLayout.classList.remove('header-peek');
+    forceHideAutoHeader();
   }
   // Resize rendition since available height changes
   if (rendition) {
@@ -2215,27 +2341,48 @@ function applyAutoHide() {
 // Show header when mouse enters the thin sensor zone at very top of page
 document.getElementById('header-sensor').addEventListener('mouseenter', () => {
   if (!prefs.autoHideHeader) return;
-  readerLayout.classList.add('header-peek');
+  revealHeader();
 });
 document.getElementById('header-sensor').addEventListener('touchstart', () => {
   if (!prefs.autoHideHeader) return;
-  readerLayout.classList.add('header-peek');
+  revealHeader();
 }, { passive: true });
+// Prevent the synthetic click that follows touchend from hitting a header button
+document.getElementById('header-sensor').addEventListener('touchend', (e) => {
+  if (!prefs.autoHideHeader) return;
+  e.preventDefault();
+}, { passive: false });
 document.getElementById('header-sensor').addEventListener('click', () => {
   if (!prefs.autoHideHeader) return;
-  readerLayout.classList.add('header-peek');
+  revealHeader();
 });
+
+// Capture-phase guard: swallow any click that lands on the header within
+// HEADER_REVEAL_GUARD_MS of a reveal, so the tap-to-show gesture never
+// accidentally activates a button underneath the user's finger.
+document.querySelector('.reader-header').addEventListener('click', (e) => {
+  if (prefs.autoHideHeader && Date.now() - _headerRevealTs < HEADER_REVEAL_GUARD_MS) {
+    e.stopImmediatePropagation();
+    e.preventDefault();
+  }
+}, true); // capture:true — runs before individual button handlers
 // Track whether the mouse is currently inside the header bar
 let isMouseOverHeader = false;
 document.querySelector('.reader-header').addEventListener('mouseenter', () => { isMouseOverHeader = true; });
 // Hide header as soon as mouse leaves the header bar itself
 document.querySelector('.reader-header').addEventListener('mouseleave', () => {
   isMouseOverHeader = false;
-  if (!prefs.autoHideHeader) return;
-  if (!tocSidebar.classList.contains('open') && jumpPctPanel.style.display === 'none') {
-    readerLayout.classList.remove('header-peek');
-  }
+  hideAutoHeader();
 });
+function onHeaderDismissBackdrop(e) {
+  if (!prefs.autoHideHeader || !readerLayout.classList.contains('header-peek')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  forceHideAutoHeader();
+}
+headerDismissBackdrop?.addEventListener('pointerdown', onHeaderDismissBackdrop);
+headerDismissBackdrop?.addEventListener('touchstart', onHeaderDismissBackdrop, { passive: false });
+headerDismissBackdrop?.addEventListener('click', onHeaderDismissBackdrop);
 
 // ── TOC ───────────────────────────────────────────────────────────────────────
 function buildTocRecursive(toc, depth, fragment) {
@@ -2346,6 +2493,76 @@ function chapterLabelFromHref(href) {
   return match?.label || '';
 }
 
+function tocHrefNorm(h) {
+  return decodeURIComponent(h || '')
+    .split('#')[0].split('?')[0]
+    .replace(/\\/g, '/')
+    .replace(/_split_\d+(\.\w+)$/, '$1')
+    .toLowerCase()
+    .replace(/^\//, '');
+}
+
+function findCurrentTopLevelChapIdx() {
+  const tops = tocFlatItems.filter(t => t.depth === 0);
+  if (!tops.length) return { tops, idx: -1 };
+
+  const href = currentHref || rendition?.currentLocation?.()?.start?.href || '';
+  if (!href) return { tops, idx: -1 };
+
+  const n = tocHrefNorm(href);
+  const base = n.split('/').pop();
+  let matchFlatIdx = -1;
+  tocFlatItems.forEach((t, i) => {
+    const tn = tocHrefNorm(t.href);
+    const tb = tn.split('/').pop();
+    const matches = !!(base && tb && (base === tb || base.includes(tb) || tb.includes(base)))
+      || tn === n
+      || (n.endsWith('/' + tn) || tn.endsWith('/' + n));
+    if (matches) matchFlatIdx = i;
+  });
+
+  if (matchFlatIdx >= 0) {
+    for (let i = matchFlatIdx; i >= 0; i--) {
+      if (tocFlatItems[i].depth === 0) {
+        return { tops, idx: tops.indexOf(tocFlatItems[i]) };
+      }
+    }
+  }
+
+  const curSpine = rendition?.currentLocation?.()?.start?.index;
+  if (curSpine != null) {
+    let bestIdx = -1;
+    tops.forEach((t, ti) => {
+      const spineItem = findSpineItemForHref((t.href || '').split('#')[0]);
+      if (spineItem?.index != null && spineItem.index <= curSpine) bestIdx = ti;
+    });
+    return { tops, idx: bestIdx };
+  }
+
+  return { tops, idx: -1 };
+}
+
+async function navigateToTocChapter(target) {
+  if (!target?.href || !rendition) return;
+  const [hrefBase, anchor] = (target.href || '').split('#');
+  const spineItem = findSpineItemForHref(hrefBase);
+  const displayTarget = spineItem?.index != null
+    ? (anchor && target.depth > 1 ? `${spineItem.href}#${anchor}` : spineItem.href)
+    : target.href;
+  console.log(`[nav] CHAP | depth=${target.depth} → ${JSON.stringify(displayTarget)}`);
+  try {
+    await rendition.display(displayTarget);
+    scheduleBionicPrefetchAround(rendition.currentLocation?.());
+  } catch {
+    if (target.href && displayTarget !== target.href) {
+      try {
+        await rendition.display(target.href);
+        scheduleBionicPrefetchAround(rendition.currentLocation?.());
+      } catch { /* ignore */ }
+    }
+  }
+}
+
 // ── Panels ────────────────────────────────────────────────────────────────────
 function openToc() {
   const centerActiveTocItem = () => {
@@ -2364,7 +2581,7 @@ function openToc() {
   tocSidebar.classList.add('open');
   settingsPanel.classList.remove('open');
   panelBackdrop.classList.add('visible');
-  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  if (prefs.autoHideHeader) forceHideAutoHeader();
   // Fallback recenter after slide-in in case TOC updates while opening.
   setTimeout(() => {
     centerActiveTocItem();
@@ -2386,7 +2603,7 @@ function openSettings() {
   tocSidebar.classList.remove('open');
   bookmarksSidebar.classList.remove('open');
   panelBackdrop.classList.add('visible');
-  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  if (prefs.autoHideHeader) forceHideAutoHeader();
   activateSettingsTab(localStorage.getItem('settingsTab') || 'theme');
   renderDictSettings();
 }
@@ -2395,13 +2612,37 @@ function openBookmarks() {
   tocSidebar.classList.remove('open');
   settingsPanel.classList.remove('open');
   panelBackdrop.classList.add('visible');
-  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  if (prefs.autoHideHeader) forceHideAutoHeader();
 }
+function isJumpPanelOpen() {
+  return jumpPctPanel && jumpPctPanel.style.display !== 'none';
+}
+
+function openJumpPanel() {
+  if (!jumpPctPanel) return;
+  const pct = String(Math.round(currentPct * 100));
+  jumpPctSlider.value = pct;
+  jumpPctValue.value = pct;
+  jumpPctPanel.style.display = '';
+  jumpPctBackdrop?.classList.add('visible');
+  jumpPctBackdrop?.removeAttribute('hidden');
+  if (prefs.autoHideHeader) {
+    readerLayout.classList.add('header-peek');
+    syncHeaderDismissBackdrop();
+  }
+}
+
 function closeJumpPanel() {
+  if (!jumpPctPanel) return;
   jumpPctPanel.style.display = 'none';
+  jumpPctBackdrop?.classList.remove('visible');
+  jumpPctBackdrop?.setAttribute('hidden', '');
+  jumpPctValue?.blur();
   // Re-evaluate auto-hide: hide header unless something else is keeping it open
   if (prefs.autoHideHeader && !tocSidebar.classList.contains('open') && !bookmarksSidebar.classList.contains('open') && !isMouseOverHeader) {
-    readerLayout.classList.remove('header-peek');
+    forceHideAutoHeader();
+  } else {
+    syncHeaderDismissBackdrop();
   }
 }
 function closePanels() {
@@ -2416,7 +2657,7 @@ function closePanels() {
   panelBackdrop.classList.remove('visible');
   closeJumpPanel();
   if (searchHadFocus && typeof activeEl.blur === 'function') activeEl.blur();
-  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  if (prefs.autoHideHeader) forceHideAutoHeader();
 }
 
 function hasOpenPanel() {
@@ -2488,7 +2729,7 @@ function openSearch() {
   tocSidebar.classList.remove('open');
   settingsPanel.classList.remove('open');
   panelBackdrop.classList.add('visible');
-  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  if (prefs.autoHideHeader) forceHideAutoHeader();
   setTimeout(() => searchInput.focus(), 280);
 }
 
@@ -3038,6 +3279,22 @@ function syncSettingsUi() {
     if (el) el.value = prefs.edgePadding[side];
     if (vl) vl.textContent = prefs.edgePadding[side] + 'px';
   });
+  const navLeftEl = document.getElementById('nav-zone-left-slider');
+  const navLeftVl = document.getElementById('nav-zone-left-value');
+  if (navLeftEl) navLeftEl.value = prefs.navZoneLeftPct ?? 20;
+  if (navLeftVl) navLeftVl.textContent = (prefs.navZoneLeftPct ?? 20) + '%';
+  const navRightEl = document.getElementById('nav-zone-right-slider');
+  const navRightVl = document.getElementById('nav-zone-right-value');
+  if (navRightEl) navRightEl.value = prefs.navZoneRightPct ?? 20;
+  if (navRightVl) navRightVl.textContent = (prefs.navZoneRightPct ?? 20) + '%';
+  const headerRevealEl = document.getElementById('header-reveal-zone-slider');
+  const headerRevealVl = document.getElementById('header-reveal-zone-value');
+  if (headerRevealEl) headerRevealEl.value = prefs.headerRevealZonePct ?? 12;
+  if (headerRevealVl) headerRevealVl.textContent = (prefs.headerRevealZonePct ?? 12) + '%';
+  const headerBtnEl = document.getElementById('header-button-size-slider');
+  const headerBtnVl = document.getElementById('header-button-size-value');
+  if (headerBtnEl) headerBtnEl.value = prefs.headerButtonScalePct ?? 100;
+  if (headerBtnVl) headerBtnVl.textContent = (prefs.headerButtonScalePct ?? 100) + '%';
   // Paragraph options
   const piEl = document.getElementById('para-indent-toggle');
   if (piEl) piEl.checked = prefs.paraIndent;
@@ -3236,6 +3493,11 @@ function syncStatusBarSettings() {
   if (chapProgPos)    chapProgPos.value               = sb.chapProgressBar.position;
   if (chapProgThickSlider) chapProgThickSlider.value = sb.chapProgressBar.thickness;
   if (chapProgThickValue)  chapProgThickValue.textContent = sb.chapProgressBar.thickness + 'px';
+
+  // Clock format
+  const clockFmt = sb.clockFormat || '24h';
+  document.getElementById('sb-clock-12h')?.classList.toggle('active', clockFmt === '12h');
+  document.getElementById('sb-clock-24h')?.classList.toggle('active', clockFmt === '24h');
 }
 
 function populateSbFontSelect() {
@@ -3345,6 +3607,16 @@ function initStatusBarSettings() {
     prefs.statusBar.chapProgressBar.thickness = parseInt(e.target.value);
     document.getElementById('sb-chap-prog-thick-value').textContent = prefs.statusBar.chapProgressBar.thickness + 'px';
     applyProgressBarLayout(); persistPrefs();
+  });
+
+  // Clock format
+  ['12h', '24h'].forEach(fmt => {
+    document.getElementById(`sb-clock-${fmt}`)?.addEventListener('click', () => {
+      prefs.statusBar.clockFormat = fmt;
+      syncStatusBarSettings();
+      updateStatusBar(lastLocation);
+      persistPrefs();
+    });
   });
 }
 
@@ -3590,6 +3862,28 @@ function initSettingsUi() {
     });
   });
 
+  document.getElementById('nav-zone-left-slider')?.addEventListener('input', (e) => {
+    prefs.navZoneLeftPct = parseInt(e.target.value);
+    document.getElementById('nav-zone-left-value').textContent = prefs.navZoneLeftPct + '%';
+    applyNavZones(); persistPrefs();
+  });
+  document.getElementById('nav-zone-right-slider')?.addEventListener('input', (e) => {
+    prefs.navZoneRightPct = parseInt(e.target.value);
+    document.getElementById('nav-zone-right-value').textContent = prefs.navZoneRightPct + '%';
+    applyNavZones(); persistPrefs();
+  });
+  document.getElementById('header-reveal-zone-slider')?.addEventListener('input', (e) => {
+    prefs.headerRevealZonePct = parseInt(e.target.value);
+    document.getElementById('header-reveal-zone-value').textContent = prefs.headerRevealZonePct + '%';
+    applyHeaderRevealZone(); persistPrefs();
+  });
+  document.getElementById('header-button-size-slider')?.addEventListener('input', (e) => {
+    prefs.headerButtonScalePct = parseInt(e.target.value);
+    const vl = document.getElementById('header-button-size-value');
+    if (vl) vl.textContent = prefs.headerButtonScalePct + '%';
+    applyHeaderButtonSize(); persistPrefs();
+  });
+
 
   // Dictionary popup close
   document.getElementById('dict-popup-close').addEventListener('click', closeDictPopup);
@@ -3625,6 +3919,9 @@ function initSettingsUi() {
   initStatusBarSettings();
   applyStatusBarStyles();
   applyEdgePadding();
+  applyNavZones();
+  applyHeaderRevealZone();
+  applyHeaderButtonSize();
   applyPageShadow();
   initSliderButtons();
 }
@@ -3835,6 +4132,19 @@ function pushInternalProgress(docKey, xpointer, pct) {
   }).catch(() => {});
 }
 
+// Initialise the Battery Status API once. Triggers a status-bar refresh on any change.
+// Silently no-ops on browsers that don't support it (Firefox, Safari, iOS).
+async function initBattery() {
+  if (_batteryMgr || !navigator.getBattery) return;
+  try {
+    _batteryMgr = await navigator.getBattery();
+    const refresh = () => { if (lastLocation) updateStatusBar(lastLocation); };
+    _batteryMgr.addEventListener('levelchange',   refresh);
+    _batteryMgr.addEventListener('chargingchange', refresh);
+    refresh(); // apply immediately
+  } catch { /* not available */ }
+}
+
 async function saveProgress({ forceRemote = false, allowRemote = true } = {}) {
   if (!currentBook || !isReady) return;
   if (isPeekMode) return;
@@ -3901,10 +4211,11 @@ function showSyncDialog(best, localPct, localTime) {
     const fmtTs  = (ts) => ts ? new Date(ts * 1000).toLocaleString(getCurrentLang()) : t('reader.sync_dlg_unknown_time');
     const rDate  = fmtTs(best.timestamp);
     const lDate  = fmtTs(localTime);
-    const rNewer = (best.timestamp || 0) > (localTime || 0);
+    const rNewer = (best.percentage || 0) >= localPct; // show the forward position as the highlight
     backdrop.innerHTML = `
       <div class="modal" role="dialog" aria-modal="true" style="max-width:460px">
-        <h3 style="margin:0 0 1rem;font-size:1rem;font-weight:600">${t('reader.sync_dlg_title')}</h3>
+        <h3 style="margin:0 0 .5rem;font-size:1rem;font-weight:600">${t('reader.sync_dlg_title')}</h3>
+        <p style="margin:0 0 1rem;font-size:.82rem;color:var(--color-text-muted)">${t('reader.sync_dlg_hint')}</p>
         <table style="width:100%;font-size:.85rem;border-collapse:collapse;margin-bottom:1.5rem">
           <thead>
             <tr style="color:var(--color-text-muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.04em">
@@ -3915,12 +4226,12 @@ function showSyncDialog(best, localPct, localTime) {
           </thead>
           <tbody>
             <tr style="${rNewer ? 'font-weight:600' : ''}">
-              <td style="padding:.3rem 0">${best.device || 'KOReader'} ${rNewer ? '★' : ''}</td>
+              <td style="padding:.3rem 0">${best.device || 'KOReader'} ${rNewer ? '▲' : ''}</td>
               <td style="text-align:right">${rPct}%</td>
               <td style="text-align:right;color:var(--color-text-muted);font-size:.78rem">${rDate}</td>
             </tr>
             <tr style="${!rNewer ? 'font-weight:600' : ''}">
-              <td style="padding:.3rem 0">${t('reader.sync_dlg_this_reader')} ${!rNewer ? '★' : ''}</td>
+              <td style="padding:.3rem 0">${t('reader.sync_dlg_this_reader')} ${!rNewer ? '▲' : ''}</td>
               <td style="text-align:right">${lPct}%</td>
               <td style="text-align:right;color:var(--color-text-muted);font-size:.78rem">${lDate}</td>
             </tr>
@@ -3935,7 +4246,8 @@ function showSyncDialog(best, localPct, localTime) {
     const close = (ok) => { backdrop.remove(); resolve(ok); };
     backdrop.querySelector('#sync-dlg-yes').addEventListener('click',    () => close(true));
     backdrop.querySelector('#sync-dlg-ignore').addEventListener('click', () => close(false));
-    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(false); });
+    // Backdrop click defaults to Jump (the forward/safe direction — never accidentally go backwards)
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(true); });
   });
 }
 
@@ -3986,57 +4298,21 @@ async function syncOnOpen(localProgress) {
   console.log('[kosync] xpointerMatch:', xpointerMatch, 'local:', localXPointer, 'remote:', best.progress);
 
   const pctDiffers = Math.abs((best.percentage || 0) - localPct) > 0.01;
-  if (!xpointerMatch && pctDiffers) {
+  // Never silently jump backwards — only prompt when the remote is ahead.
+  // If remote is behind local, it means we already synced more recently from this
+  // device (e.g. the hide-beacon fired but localProgress hasn't updated yet).
+  const remoteIsAhead = (best.percentage || 0) > localPct + 0.005;
+  if (!xpointerMatch && pctDiffers && remoteIsAhead) {
     const doSync = await showSyncDialog(best, localPct, localTime);
-    // Return both percentage and the xpointer string so the caller can navigate
-    // directly to a spine item when the xpointer is a DocFragment-only reference.
     if (doSync) return { percentage: best.percentage, progress: best.progress };
   }
   return null;
 }
 
-// Called by the Android app when the network becomes available (wake from standby /
-// reconnect). Re-runs the same sync-on-open flow so the reader can jump to a position
-// advanced on another device while this one was offline / sleeping.
-async function networkRestoreSync() {
-  if (!currentBook || !isReady) return;
-  try {
-    const localProgress = await apiFetch(`/progress/${currentBook.file_hash}`).catch(() => null);
-    const syncTarget = await syncOnOpen(localProgress);
-    if (!syncTarget?.percentage != null && !syncTarget?.progress) return;
-    // Reuse the same navigation logic used at book-open time
-    const dfMatch = syncTarget.progress?.match(/^\/body\/DocFragment\[(\d+)\]/);
-    if (dfMatch) {
-      const spineIdx  = parseInt(dfMatch[1]) - 1;
-      const spineItem = book.spine.get(spineIdx);
-      if (spineItem?.href) {
-        const paraMatch = !prefs.bionicReading && syncTarget.progress.match(/\/p\[(\d+)\]/);
-        let navigated = false;
-        if (paraMatch) {
-          const guessCfi = `epubcfi(/6/${(spineIdx + 1) * 2}!/4/${parseInt(paraMatch[1]) * 2})`;
-          try { await rendition.display(guessCfi); navigated = true; } catch { navigated = false; }
-        }
-        if (!navigated) {
-          await rendition.display(spineItem.href);
-          if (prefs.bionicReading && book.locations.length() > 0)
-            await seekToPercentage(syncTarget.percentage);
-        }
-      } else if (book.locations.length() > 0) {
-        await seekToPercentage(syncTarget.percentage);
-      }
-    } else if (syncTarget?.percentage != null) {
-      if (book.locations.length() > 0)
-        await seekToPercentage(syncTarget.percentage);
-    }
-  } catch (e) { console.warn('[kosync] networkRestoreSync failed:', e.message); }
-}
-window.__codexaNetworkRestore = networkRestoreSync;
-
 window.addEventListener('online', () => {
   if (!currentBook) return;
   syncOfflineBookmarks(currentBook.id).catch(() => {});
   syncOfflineAnnotations(currentBook.id).catch(() => {});
-  networkRestoreSync().catch(() => {});
 });
 
 
@@ -4180,22 +4456,34 @@ function goNext() {
 function goPrev() {
   deferredNextPending = false;
   console.log(`[nav] PREV | page=${currentChapPage}/${currentChapTotal}`);
-  pendingNavDirection = 'prev'; sessionPageCount++; rendition?.prev();
+  pendingNavDirection = 'prev';
+  sessionPageCount++;
+  rendition?.prev();
 }
 
 // ── Touch / swipe navigation ──────────────────────────────────────────────────
 const SWIPE_THRESHOLD = 24;   // min px horizontal distance
 const SWIPE_MAX_VERT  = 130;  // max vertical drift allowed
 const TAP_MAX_DRIFT   = 20;   // max px movement still counted as a tap
-const TOP_REVEAL_ZONE = 92;   // px from top where tap reveals header
 const SWIPE_DOWN_OPEN = 42;   // px downward swipe to reveal header
 const SWIPE_UP_CLOSE  = 30;   // px upward swipe to hide header when open
 // iOS detection (Chrome/Safari on iPhone/iPad use WebKit with different iframe touch behaviour)
 const isIOS = /iP(hone|od|ad)/.test(navigator.userAgent) ||
               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+/** Phone / tablet / PWA touch device. */
+function isTouchReader() {
+  return isIOS ||
+    isAndroidApp() ||
+    navigator.maxTouchPoints > 0 ||
+    !!window.matchMedia?.('(pointer: coarse)')?.matches;
+}
+
+
 let touchStartX = 0;
 let touchStartY = 0;
 let suppressNextTap = false; // set by long-press dict lookup to prevent navigation on touchend
+let _selectSuppressNav = false; // true while a text-selection gesture is active — blocks swipe-nav preventDefault
 
 function handleTouchStart(e) {
   touchStartX = e.changedTouches[0].clientX;
@@ -4209,25 +4497,30 @@ function handleTouchEnd(e) {
   const absDy = Math.abs(dy);
   const y     = e.changedTouches[0].clientY;
   if (prefs.autoHideHeader && dy > SWIPE_DOWN_OPEN && absDx < 70) {
+    const wasHidden = !readerLayout.classList.contains('header-peek');
     if (!readerLayout.classList.toggle('header-peek')) closeJumpPanel();
+    else if (wasHidden) _headerRevealTs = Date.now();
+    syncHeaderDismissBackdrop();
     return;
   }
   if (prefs.autoHideHeader && dy < -SWIPE_UP_CLOSE && absDx < 70 && readerLayout.classList.contains('header-peek')) {
-    readerLayout.classList.remove('header-peek');
+    forceHideAutoHeader();
     closeJumpPanel();
     return;
   }
   if (absDx < TAP_MAX_DRIFT && absDy < TAP_MAX_DRIFT) {
-    if (prefs.autoHideHeader && y < TOP_REVEAL_ZONE + 20) {
-      readerLayout.classList.add('header-peek');
+    const x = e.changedTouches[0].clientX;
+    if (prefs.autoHideHeader && inHeaderRevealZone(y)) {
+      revealHeader();
       return;
     }
-    const x         = e.changedTouches[0].clientX;
-    const leftZone  = prefs.edgePadding.left  + prefs.margin;
-    const rightZone = prefs.edgePadding.right + prefs.margin;
-    if (leftZone  > 0 && x < leftZone)                        { goPrev(); return; }
-    if (rightZone > 0 && x > window.innerWidth - rightZone)   { goNext(); return; }
-    if (prefs.autoHideHeader) readerLayout.classList.toggle('header-peek');
+    const nav = inNavZone(x);
+    if (nav === 'prev') { goPrev(); return; }
+    if (nav === 'next') { goNext(); return; }
+    if (prefs.autoHideHeader && readerLayout.classList.contains('header-peek')) {
+      forceHideAutoHeader();
+      return;
+    }
     return;
   }
   if (absDx > SWIPE_THRESHOLD && absDy < SWIPE_MAX_VERT) {
@@ -4243,6 +4536,9 @@ epubViewer.addEventListener('touchend',   handleTouchEnd,   { passive: false });
 function attachIframeTouchNav(view) {
   const win = view?.contents?.window;
   if (!win) return;
+  if (win.__codexaTouchNav) return;
+  win.__codexaTouchNav = true;
+  const touchTextMode = isTouchReader();
   // No tap-to-page navigation on mobile; swipe-only navigation.
   let iframeOffX = 0, iframeOffY = 0;
 
@@ -4255,6 +4551,9 @@ function attachIframeTouchNav(view) {
   }, { passive: false });
 
   win.addEventListener('touchmove', (e) => {
+    // Never call preventDefault during text selection — it kills Android drag handles.
+    const sel = win.getSelection?.();
+    if (touchTextMode || _selectSuppressNav || (sel && !sel.isCollapsed)) return;
     const dx = Math.abs(e.touches[0].clientX + iframeOffX - touchStartX);
     const dy = Math.abs(e.touches[0].clientY + iframeOffY - touchStartY);
     if (dx > 8 && dx > dy) e.preventDefault();
@@ -4263,7 +4562,7 @@ function attachIframeTouchNav(view) {
   win.addEventListener('touchend', (e) => {
     if (suppressNextTap) {
       suppressNextTap = false;
-      if (e.cancelable) e.preventDefault();
+      // Do not preventDefault — that cancels Android selection handles / toolbar.
       return;
     }
     const cx     = e.changedTouches[0].clientX + iframeOffX;
@@ -4274,33 +4573,34 @@ function attachIframeTouchNav(view) {
     const absDy  = Math.abs(dy);
     if (prefs.autoHideHeader && dy > SWIPE_DOWN_OPEN && absDx < 70) {
       if (e.cancelable) e.preventDefault();
+      const wasHidden = !readerLayout.classList.contains('header-peek');
       if (!readerLayout.classList.toggle('header-peek')) closeJumpPanel();
+      else if (wasHidden) _headerRevealTs = Date.now();
+      syncHeaderDismissBackdrop();
       return;
     }
     if (prefs.autoHideHeader && dy < -SWIPE_UP_CLOSE && absDx < 70 && readerLayout.classList.contains('header-peek')) {
       if (e.cancelable) e.preventDefault();
-      readerLayout.classList.remove('header-peek');
+      forceHideAutoHeader();
       closeJumpPanel();
       return;
     }
     if (absDx < TAP_MAX_DRIFT && absDy < TAP_MAX_DRIFT) {
-      // Tap in the margin (between text and screen edge) → navigate
-      const leftZone  = prefs.edgePadding.left  + prefs.margin;
-      const rightZone = prefs.edgePadding.right + prefs.margin;
-      if (leftZone > 0 && cx < leftZone) {
+      if (prefs.autoHideHeader && inHeaderRevealZone(cy)) {
         if (e.cancelable) e.preventDefault();
-        goPrev();
+        revealHeader();
         return;
       }
-      if (rightZone > 0 && cx > window.innerWidth - rightZone) {
+      const nav = inNavZone(cx);
+      if (nav) {
         if (e.cancelable) e.preventDefault();
-        goNext();
+        if (nav === 'prev') goPrev(); else goNext();
+        if (prefs.autoHideHeader && readerLayout.classList.contains('header-peek')) forceHideAutoHeader();
         return;
       }
-      // Tap outside margin — reveal/toggle header
-      if (prefs.autoHideHeader && cy < TOP_REVEAL_ZONE + 20) {
+      if (prefs.autoHideHeader && readerLayout.classList.contains('header-peek')) {
         if (e.cancelable) e.preventDefault();
-        readerLayout.classList.add('header-peek');
+        forceHideAutoHeader();
       }
       return;
     }
@@ -4447,6 +4747,7 @@ async function resizeRenditionToViewer() {
 }
 
 window.addEventListener('resize', debounce(() => {
+  applyHeaderButtonSize();
   // When running inside the Android app, system bars are always hidden in reader.
   // Update layout vars here since this resize fires right after bars hide/show.
   if (isAndroidApp()) {
@@ -4772,6 +5073,7 @@ document.getElementById('annot-btn-dict')?.addEventListener('click', () => {
   if (word) showDictPopup(word);
 });
 
+
 // Annotations sidebar
 document.getElementById('btn-annotations')?.addEventListener('click', () =>
   document.getElementById('annotations-sidebar')?.classList.contains('open') ? closePanels() : openAnnotations());
@@ -4893,7 +5195,7 @@ document.getElementById('btn-search-back').addEventListener('click', async () =>
   preSearchCfi = null;
   searchBackBtn.style.display   = 'none';
   searchAcceptBtn.style.display = 'none';
-  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  if (prefs.autoHideHeader) forceHideAutoHeader();
   await rendition.display(cfi);
 });
 document.getElementById('btn-search-accept').addEventListener('click', () => {
@@ -4901,7 +5203,7 @@ document.getElementById('btn-search-accept').addEventListener('click', () => {
   preSearchCfi = null;
   searchBackBtn.style.display   = 'none';
   searchAcceptBtn.style.display = 'none';
-  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  if (prefs.autoHideHeader) forceHideAutoHeader();
 });
 // Bookmark navigation back/accept — same pattern as search
 document.getElementById('btn-bookmark-back').addEventListener('click', async () => {
@@ -4910,14 +5212,14 @@ document.getElementById('btn-bookmark-back').addEventListener('click', async () 
   preBookmarkCfi = null;
   bookmarkBackBtn.style.display   = 'none';
   bookmarkAcceptBtn.style.display = 'none';
-  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  if (prefs.autoHideHeader) forceHideAutoHeader();
   await rendition.display(cfi);
 });
 document.getElementById('btn-bookmark-accept').addEventListener('click', () => {
   preBookmarkCfi = null;
   bookmarkBackBtn.style.display   = 'none';
   bookmarkAcceptBtn.style.display = 'none';
-  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  if (prefs.autoHideHeader) forceHideAutoHeader();
   // Now that the user accepted the position, push progress normally
   void saveProgress({ forceRemote: true });
 });
@@ -4927,42 +5229,54 @@ document.getElementById('btn-annotation-back').addEventListener('click', async (
   preAnnotationCfi = null;
   annotationBackBtn.style.display   = 'none';
   annotationAcceptBtn.style.display = 'none';
-  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  if (prefs.autoHideHeader) forceHideAutoHeader();
   await rendition.display(cfi);
 });
 document.getElementById('btn-annotation-accept').addEventListener('click', () => {
   preAnnotationCfi = null;
   annotationBackBtn.style.display   = 'none';
   annotationAcceptBtn.style.display = 'none';
-  if (prefs.autoHideHeader) readerLayout.classList.remove('header-peek');
+  if (prefs.autoHideHeader) forceHideAutoHeader();
   void saveProgress({ forceRemote: true });
 });
 document.getElementById('btn-jump-pct').addEventListener('click', () => {
-  if (jumpPctPanel.style.display !== 'none') {
-    closeJumpPanel();
-    return;
+  if (isJumpPanelOpen()) closeJumpPanel();
+  else openJumpPanel();
+});
+
+function syncJumpPctInputFromSlider() {
+  if (document.activeElement === jumpPctValue) return;
+  jumpPctValue.value = String(Math.round(parseInt(jumpPctSlider.value, 10) || 0));
+}
+
+function parseJumpPctInput() {
+  const raw = String(jumpPctValue?.value || '').replace(/%/g, '').trim();
+  return Math.min(100, Math.max(0, parseInt(raw, 10) || 0));
+}
+
+async function commitJumpPctInput({ seek = true } = {}) {
+  const n = parseJumpPctInput();
+  jumpPctSlider.value = String(n);
+  jumpPctValue.value = String(n);
+  if (seek) await seekToPercentage(n / 100);
+}
+
+jumpPctSlider.addEventListener('input', syncJumpPctInputFromSlider);
+jumpPctSlider.addEventListener('change', () => { void commitJumpPctInput(); });
+jumpPctValue?.addEventListener('focus', () => jumpPctValue.select());
+jumpPctValue?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    void commitJumpPctInput().then(() => jumpPctValue.blur());
+  } else if (e.key === 'Escape') {
+    syncJumpPctInputFromSlider();
+    jumpPctValue.blur();
   }
-  jumpPctSlider.value = String(Math.round(currentPct * 100));
-  jumpPctValue.textContent = `${jumpPctSlider.value}%`;
-  jumpPctPanel.style.display = '';
 });
-jumpPctSlider.addEventListener('input', () => {
-  jumpPctValue.textContent = `${jumpPctSlider.value}%`;
-});
-jumpPctSlider.addEventListener('change', async () => {
-  await seekToPercentage(parseInt(jumpPctSlider.value, 10) / 100);
-});
-document.addEventListener('mousedown', e => {
-  if (jumpPctPanel.style.display === 'none') return;
-  // Ignore clicks on btn-jump-pct (or any descendant — pointer-events:none on img
-  // means the button is always the target, but use closest() as extra safety).
-  if (e.target.closest?.('#btn-jump-pct')) return;
-  // Ignore epub.js internal focus/mousedown events targeting the viewer.
-  if (e.target.closest?.('#epub-viewer') || e.target === epubViewer) return;
-  if (!jumpPctPanel.contains(e.target)) {
-    closeJumpPanel();
-  }
-});
+jumpPctValue?.addEventListener('blur', () => { void commitJumpPctInput(); });
+
+jumpPctBackdrop?.addEventListener('click', closeJumpPanel);
+jumpPctBackdrop?.addEventListener('touchend', (e) => { e.preventDefault(); closeJumpPanel(); }, { passive: false });
 document.getElementById('search-close').addEventListener('click', closePanels);
 document.getElementById('search-submit').addEventListener('click', () => {
   const q = searchInput.value.trim();
@@ -4987,52 +5301,47 @@ onTap(panelBackdrop, closePanels);
 document.getElementById('btn-prev').addEventListener('click', e => { e.stopPropagation(); goPrev(); });
 document.getElementById('btn-next').addEventListener('click', e => { e.stopPropagation(); goNext(); });
 
-// ── Chapter navigation buttons on book progress bar ────────────────────────────
-function findCurrentTocChapIdx() {
-  const norm = h => (h || '').split('#')[0].replace(/_split_\d+(\.\w+)$/, '$1').toLowerCase();
-  const base = norm(currentHref).split('/').pop();
-  const tops = tocFlatItems.filter(t => t.depth === 0);
-  let found = -1;
-  tops.forEach((t, i) => {
-    const tb = norm(t.href || '').split('/').pop();
-    if (base && tb && (base === tb || base.includes(tb) || tb.includes(base))) found = i;
+// ── Chapter navigation buttons on jump-to-% panel ─────────────────────────────
+function bindJumpChapNav(btnId, direction) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const { tops, idx } = findCurrentTopLevelChapIdx();
+    if (!tops.length) return;
+    let target = null;
+    if (direction === 'prev') {
+      if (idx > 0) target = tops[idx - 1];
+      else if (idx === 0) target = tops[0];
+      else target = tops[0];
+    } else if (idx < 0) {
+      const curSpine = rendition?.currentLocation?.()?.start?.index;
+      target = curSpine != null
+        ? tops.find(t => {
+          const si = findSpineItemForHref((t.href || '').split('#')[0]);
+          return si?.index != null && si.index > curSpine;
+        }) || null
+        : tops[0];
+    } else if (idx < tops.length - 1) {
+      target = tops[idx + 1];
+    }
+    if (!target) return;
+    closeJumpPanel();
+    await navigateToTocChapter(target);
   });
-  return { tops, idx: found };
 }
-// Close the jump panel automatically after chapter nav button navigation.
-// This matches TOC behaviour and avoids the panel being stuck open with
-// the header invisible (autohide removes header-peek on close but epub.js
-// sometimes re-focuses the iframe making btn-jump-pct unreachable).
-document.getElementById('btn-prev-chap')?.addEventListener('click', () => {
-  const { tops, idx } = findCurrentTocChapIdx();
-  const target = idx > 0 ? tops[idx - 1] : (idx === 0 ? tops[0] : null);
-  if (!target) return;
-  const spineItem = findSpineItemForHref((target.href || '').split('#')[0]);
-  const displayTarget = spineItem?.index != null ? spineItem.index : target.href;
-  console.log(`[nav] PREV-CHAP | from="${currentHref?.split('/').pop()}" → "${displayTarget}"`);
-  rendition?.display(displayTarget).then(() => {
-    const loc = rendition?.currentLocation?.();
-    console.log(`[nav] CHAP-landed | page=${loc?.start?.displayed?.page}/${loc?.start?.displayed?.total} href="${loc?.start?.href?.split('/').pop()}"`);
-    scheduleBionicPrefetchAround(loc);
-  }).catch(() => {});
-});
-document.getElementById('btn-next-chap')?.addEventListener('click', () => {
-  const { tops, idx } = findCurrentTocChapIdx();
-  if (idx < 0 || idx >= tops.length - 1) return;
-  const target = tops[idx + 1];
-  const spineItem = findSpineItemForHref((target.href || '').split('#')[0]);
-  const displayTarget = spineItem?.index != null ? spineItem.index : target.href;
-  console.log(`[nav] NEXT-CHAP | from="${currentHref?.split('/').pop()}" → "${displayTarget}"`);
-  rendition?.display(displayTarget).then(() => {
-    const loc = rendition?.currentLocation?.();
-    console.log(`[nav] CHAP-landed | page=${loc?.start?.displayed?.page}/${loc?.start?.displayed?.total} href="${loc?.start?.href?.split('/').pop()}"`);
-    scheduleBionicPrefetchAround(loc);
-  }).catch(() => {});
-});
-document.querySelector('.nav-zone-prev')?.addEventListener('click', goPrev);
-document.querySelector('.nav-zone-next')?.addEventListener('click', goNext);
-document.querySelector('.nav-zone-prev')?.addEventListener('touchend', (e) => { if (e.cancelable) e.preventDefault(); goPrev(); }, { passive: false });
-document.querySelector('.nav-zone-next')?.addEventListener('touchend', (e) => { if (e.cancelable) e.preventDefault(); goNext(); }, { passive: false });
+bindJumpChapNav('btn-prev-chap', 'prev');
+bindJumpChapNav('btn-next-chap', 'next');
+function handleNavZoneActivate(direction, e) {
+  const y = e.clientY ?? e.changedTouches?.[0]?.clientY;
+  if (prefs.autoHideHeader && y != null && inHeaderRevealZone(y)) {
+    revealHeader();
+    return;
+  }
+  if (direction === 'prev') goPrev(); else goNext();
+}
+document.querySelector('.nav-zone-prev')?.addEventListener('click', e => { e.stopPropagation(); handleNavZoneActivate('prev', e); });
+document.querySelector('.nav-zone-next')?.addEventListener('click', e => { e.stopPropagation(); handleNavZoneActivate('next', e); });
 document.getElementById('btn-prev').addEventListener('keydown', e => { if (e.key === 'Enter') goPrev(); });
 document.getElementById('btn-next').addEventListener('keydown', e => { if (e.key === 'Enter') goNext(); });
 window.addEventListener('beforeunload', () => {
@@ -5102,6 +5411,9 @@ async function init() {
     document.title = `${currentBook.title} — Codexa`;
     loadBookPrefs(currentBook.id);
     syncSettingsUi();
+    if (currentBook.id) {
+      apiFetch(`/books/${currentBook.id}/opened`, { method: 'POST' }).catch(() => {});
+    }
   } catch {
     const msg = t('reader.err_no_book');
     loadingMsg.textContent = msg;
@@ -5119,13 +5431,16 @@ async function init() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     arrayBuffer = await res.arrayBuffer();
   } catch {
-    const msg = !navigator.onLine
-      ? t('reader.err_offline_not_cached')
-      : t('reader.err_download');
-    loadingMsg.textContent = msg;
-    toast.error(msg);
-    setTimeout(() => { window.location.href = '/'; }, 2500);
-    return;
+    arrayBuffer = await fetchOfflineBookFile(bookId);
+    if (!arrayBuffer) {
+      const msg = !navigator.onLine
+        ? t('reader.err_offline_not_cached')
+        : t('reader.err_download');
+      loadingMsg.textContent = msg;
+      toast.error(msg);
+      setTimeout(() => { window.location.href = '/'; }, 2500);
+      return;
+    }
   }
 
   // Auto-download to offline cache in background after successful file load (skip in peek mode)
@@ -5197,11 +5512,9 @@ async function init() {
       if (localProgress?.percentage > 0) {
         lastKnownGoodPct = localProgress.percentage;
         // Keep the offline metadata in sync so "Currently Reading" is correct offline
-        if (!isPeekMode) {
-          getBookMeta(Number(bookId)).then(meta => {
-            if (meta) saveBookMeta({ ...meta, percentage: localProgress.percentage }).catch(() => {});
-          }).catch(() => {});
-        }
+        getBookMeta(Number(bookId)).then(meta => {
+          if (meta) saveBookMeta({ ...meta, percentage: localProgress.percentage }).catch(() => {});
+        }).catch(() => {});
       }
       if (!startCfi && localProgress?.cfi_position) startCfi = localProgress.cfi_position;
       // Pre-load locations from cache so seekToPercentage works immediately after startRendition
@@ -5348,7 +5661,8 @@ async function init() {
     // Only allow saves after the initial position (local or synced) is fully displayed
     console.log('[pos] isReady=true, currentCfi:', currentCfi.slice(0,60));
     isReady = true;
-    openCfi = currentCfi; // snapshot position-on-open for change detection
+    openCfi = currentCfi;      // snapshot position-on-open for change detection
+    void initBattery();
         // Load bookmarks and annotations for this book (non-blocking)
     void loadBookmarks(currentBook.id);
     void loadAnnotations(currentBook.id);
@@ -5373,6 +5687,7 @@ init();
 // Re-render settings panel content when language changes
 document.addEventListener('langchange', () => {
   applyTranslations();
+  syncSettingsUi();
   syncFullscreenButton();
   renderSbItems();
   renderDictSettings();
