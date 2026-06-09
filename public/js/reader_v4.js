@@ -4,7 +4,7 @@ import { t, initI18n, applyTranslations, getCurrentLang } from './i18n.js';
 import ePub from './flow/index.js';
 import { isBookDownloaded, downloadBook, fetchOfflineBookFile, getBookMeta, saveBookMeta } from './offline.js';
 
-const READER_BUILD = 'br-v48';
+const READER_BUILD = 'br-v51';
 const _i18nReady = initI18n();
 console.log('[codexa] reader build', READER_BUILD);
 
@@ -1323,8 +1323,6 @@ function attachIframeDictionary(contents) {
 
 
 
-// Detect whether an <a> element inside the epub iframe is a footnote/endnote reference.
-// Pure function — runs in the iframe context, no epub.js API needed.
 function isFootnoteLink(anchor) {
   const rawHref = anchor.dataset?.footnoteHref || anchor.dataset?.brLinkHref || anchor.getAttribute('href') || '';
   if (!rawHref.includes('#')) return false;
