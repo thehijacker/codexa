@@ -168,6 +168,16 @@
           <label for="kosync-password" data-i18n="settings.kosync_pass_label">Geslo</label>
           <input type="password" id="kosync-password" data-i18n-placeholder="settings.kosync_pass_ph" placeholder="Vnesite geslo…" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
         </div>
+        <div style="display:flex;align-items:flex-start;gap:.85rem;margin:.75rem 0">
+          <label class="toggle" style="flex-shrink:0;margin-top:.15rem">
+            <input type="checkbox" id="kosync-stats-enabled">
+            <span class="toggle-slider"></span>
+          </label>
+          <div>
+            <div style="font-size:.875rem;font-weight:600;margin-bottom:.2rem" data-i18n="settings.kosync_stats_title">Sync reading stats to BookOrbit KOReader Stats</div>
+            <div class="settings-hint" style="margin:0" data-i18n="settings.kosync_stats_hint">When enabled, Codexa sends reading time and page sessions to your KOReader sync server (BookOrbit PR #123+). Silently skipped if the server does not support stats.</div>
+          </div>
+        </div>
         <div class="card-actions kosync-actions">
           <button id="btn-save-kosync"  class="btn btn-primary"   data-i18n="settings.btn_save_kosync">Shrani nastavitve</button>
           <button id="btn-test-kosync"  class="btn btn-secondary" data-i18n="settings.btn_test_kosync">Testiraj povezavo</button>

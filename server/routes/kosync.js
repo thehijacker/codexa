@@ -160,7 +160,7 @@ proxyRouter.use(authenticateToken);
 function getExternalSettings(userId) {
   const db = getDb();
   return db.prepare(
-    'SELECT kosync_url, kosync_username, kosync_password_enc, kosync_internal_enabled FROM user_settings WHERE user_id = ?'
+    'SELECT kosync_url, kosync_username, kosync_password_enc, kosync_internal_enabled, kosync_stats_enabled FROM user_settings WHERE user_id = ?'
   ).get(userId);
 }
 
@@ -200,6 +200,40 @@ proxyRouter.get('/test', async (req, res) => {
     }
   } catch (err) {
     res.json({ connected: false, reason: err.message });
+  }
+});
+
+// POST /api/kosync/remote/stats
+// Push reading statistics to BookOrbit (KOReader stats ingest — issue #28).
+proxyRouter.post('/remote/stats', async (req, res) => {
+  const s = getExternalSettings(req.user.id);
+  if (!s?.kosync_stats_enabled) {
+    return res.json({ skipped: true, reason: 'disabled' });
+  }
+  if (!s?.kosync_url) {
+    console.log('[kosync] remote stats POST: skipped — no kosync_url configured');
+    return res.json({ skipped: true, reason: 'not_configured' });
+  }
+
+  const url = `${s.kosync_url.replace(/\/$/, '')}/stats`;
+  console.log('[kosync] remote stats POST:', url);
+  try {
+    const r = await fetch(url, {
+      method:  'POST',
+      headers: buildKoreaderHeaders(s.kosync_username, s.kosync_password_enc),
+      body:   JSON.stringify(req.body),
+      signal: AbortSignal.timeout(8000),
+    });
+    console.log('[kosync] remote stats POST response:', r.status);
+    if (r.status === 404) {
+      return res.json({ pushed: false, status: 404, unsupported: true });
+    }
+    let data = { pushed: r.ok, status: r.status };
+    try { data = { ...data, ...(await r.json()) }; } catch { /* ignore */ }
+    res.json(data);
+  } catch (err) {
+    console.warn('[kosync] stats push to external failed:', err.message);
+    res.json({ pushed: false, error: err.message });
   }
 });
 

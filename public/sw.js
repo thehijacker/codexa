@@ -1,7 +1,7 @@
 // Codexa Service Worker
 // Caches app shell for offline use. EPUBs are cached on demand in BOOKS_CACHE.
 
-const CACHE_VERSION = 'br-v32';
+const CACHE_VERSION = 'br-v30';
 const BOOKS_CACHE   = 'codexa-books-v2';
 const APP_SHELL = [
   '/',
@@ -22,6 +22,7 @@ const APP_SHELL = [
   '/js/library.js',
   '/js/sidebar.js',
   '/js/i18n.js',
+  '/js/sw-register.js',
   '/js/opds.js',
   '/js/reader_v4.js',
   '/js/flow/index.js',
@@ -228,18 +229,16 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Cache-first for app shell assets
+  // Network-first for app shell — always fetch fresh HTML/JS/CSS when online.
+  // Cached copies are kept only for offline fallback (fixes stale reader after home refresh).
   e.respondWith(
-    caches.match(e.request).then(cached => {
-      const networkFetch = fetch(e.request).then(response => {
-        if (response.ok && e.request.method === 'GET') {
-          const clone = response.clone();
-          caches.open(CACHE_VERSION).then(cache => cache.put(e.request, clone));
-        }
-        return response;
-      }).catch(() => cached);
-      return cached || networkFetch;
-    })
+    fetch(e.request).then((response) => {
+      if (response.ok && e.request.method === 'GET') {
+        const clone = response.clone();
+        caches.open(CACHE_VERSION).then((cache) => cache.put(e.request, clone));
+      }
+      return response;
+    }).catch(() => caches.match(e.request).then((r) => r || Response.error()))
   );
 });
 
