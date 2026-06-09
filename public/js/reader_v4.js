@@ -4,7 +4,7 @@ import { t, initI18n, applyTranslations, getCurrentLang } from './i18n.js';
 import ePub from './flow/index.js';
 import { isBookDownloaded, downloadBook, fetchOfflineBookFile, getBookMeta, saveBookMeta } from './offline.js';
 
-const READER_BUILD = 'br-v51';
+const READER_BUILD = 'br-v54';
 const _i18nReady = initI18n();
 console.log('[codexa] reader build', READER_BUILD);
 
@@ -198,6 +198,7 @@ function getStatusStats() {
     { id: 'bookAuthor',    icon: '/images/book_author.svg',     label: t('reader.sb_book_author') },
     { id: 'chapterTitle',  icon: '/images/chapter_title.svg',   label: t('reader.sb_chap_title') },
     { id: 'battery',       icon: '/images/battery.svg',         label: t('reader.sb_battery') },
+    { id: 'syncedAgo',     icon: '/images/sync.svg',            label: t('reader.sb_synced_ago') },
   ];
 }
 
@@ -296,12 +297,18 @@ let _clearHlTimer = null;
 // Reading statistics tracking
 let statsSessionId = null;            // active reading_sessions.id
 let sessionPageCount = 0;             // page navigation events in current session
+let activeReadingSeconds = 0;         // active time since last BookOrbit stats push
+let statsSessionStartTs = 0;          // unix seconds — start of current reading slice
+let statsPagesDelta = 0;              // page turns since last BookOrbit stats push
+let statsTimer = null;                // 1s interval for active reading time
 const SYNC_DEBOUNCE_MS   = 60000;    // inactivity debounce — resets on every page turn
 const SYNC_INTERVAL_MS   = 240000;   // 4-minute heartbeat — always fires regardless of activity
 let syncDebounceTimer  = null;
 let syncIntervalTimer  = null;
 let lastSyncedCfi      = '';           // CFI at last successful remote push — used to skip duplicate syncs
+let lastSyncedAt       = 0;            // ms timestamp of last successful remote kosync push
 let bestKnownRemotePct = 0;            // high-water mark from all sources — kosync is never pushed below this
+let kosyncStatsEnabled = false;        // user setting — sync reading stats to external KOReader server
 
 // ── Status bar state ──────────────────────────────────────────────────────────
 let currentHref      = '';    // current spine href (updated in updateProgress)
@@ -2014,6 +2021,15 @@ function computeStatValue(id) {
       const pct = Math.round(_batteryMgr.level * 100);
       return (_batteryMgr.charging ? '⚡\u202F' : '') + pct + '%';
     }
+    case 'syncedAgo': {
+      if (!lastSyncedAt) return '';
+      const sec = Math.floor((Date.now() - lastSyncedAt) / 1000);
+      if (sec < 0) return '';
+      if (sec < 60) return t('reader.sb_synced_ago_secs', { n: sec });
+      const min = Math.floor(sec / 60);
+      if (min < 60) return t('reader.sb_synced_ago_mins', { n: min });
+      return t('reader.sb_synced_ago_hours', { n: Math.floor(min / 60) });
+    }
     default:
       return '';
   }
@@ -2099,16 +2115,17 @@ function updateStatusBar(location) {
   updateBookProgressBar();
 }
 
-// Re-render only the slots that contain 'currentTime' (called by setInterval)
-function refreshStatusBarTime() {
+// Re-render slots with time-sensitive stats (currentTime, syncedAgo)
+function refreshStatusBarDynamic() {
   const pos = prefs.statusBar.positions;
+  const dynamicIds = new Set(['currentTime', 'syncedAgo']);
   const pairs = [[sbTl, pos.tl], [sbTc, pos.tc], [sbTr, pos.tr],
                  [sbBl, pos.bl], [sbBc, pos.bc], [sbBr, pos.br]];
   pairs.forEach(([el, ids]) => {
-    if (ids.includes('currentTime')) el.innerHTML = computeSlot(ids);
+    if (ids.some(id => dynamicIds.has(id))) el.innerHTML = computeSlot(ids);
   });
 }
-setInterval(refreshStatusBarTime, 30000);
+setInterval(refreshStatusBarDynamic, 1000);
 
 function getHeaderRevealZonePct() {
   return prefs.headerRevealZonePct ?? 12;
@@ -2681,6 +2698,7 @@ async function returnToLibrary() {
   clearInterruptedSession();
   cancelDebouncedSync();
   stopPeriodicSync();
+  stopBookStatsTracking();
   if (!prefs.skipSaveOnClose) {
     await saveProgress(); // await so updated_at is committed before library reloads
   }
@@ -4142,6 +4160,136 @@ function pushInternalProgress(docKey, xpointer, pct, force = false) {
   }).catch(() => {});
 }
 
+function bookStatsStorageKey(hash, field) {
+  return `br_bo_stats_${field}_${hash || ''}`;
+}
+
+function loadBookStatsTotal(hash, field) {
+  try { return Math.max(0, parseInt(localStorage.getItem(bookStatsStorageKey(hash, field)) || '0', 10) || 0); }
+  catch { return 0; }
+}
+
+function saveBookStatsTotal(hash, field, value) {
+  try { localStorage.setItem(bookStatsStorageKey(hash, field), String(Math.max(0, value))); } catch { /* ignore */ }
+}
+
+function startBookStatsTracking() {
+  const docKey = currentBook ? externalDocKey() : '';
+  statsSessionStartTs = Math.floor(Date.now() / 1000);
+  activeReadingSeconds = 0;
+  statsPagesDelta = 0;
+  stopBookStatsTracking();
+  statsTimer = setInterval(() => {
+    if (!document.hidden && isReady && currentBook) activeReadingSeconds++;
+  }, 1000);
+  if (docKey) {
+    // Ensure local cumulative counters exist for GREATEST-based BookOrbit upserts.
+    loadBookStatsTotal(docKey, 'secs');
+    loadBookStatsTotal(docKey, 'pages');
+  }
+}
+
+function stopBookStatsTracking() {
+  if (statsTimer) {
+    clearInterval(statsTimer);
+    statsTimer = null;
+  }
+}
+
+function estimateBookPageCount() {
+  const locLen = book?.locations?.length?.() || 0;
+  if (locLen > 0) return Math.max(1, Math.round(currentPct * locLen) || 1);
+  return Math.max(1, statsPagesDelta || sessionPageCount || 1);
+}
+
+function estimateBookTotalPages() {
+  const locLen = book?.locations?.length?.() || 0;
+  return Math.max(estimateBookPageCount(), locLen || 100);
+}
+
+function buildBookOrbitStatsPayload() {
+  if (!currentBook || activeReadingSeconds <= 0) return null;
+  const docKey = externalDocKey();
+  const now = Math.floor(Date.now() / 1000);
+  const sessionStart = statsSessionStartTs || now;
+  const duration = Math.max(1, activeReadingSeconds);
+  const totalReadSecs = loadBookStatsTotal(docKey, 'secs') + duration;
+  const totalReadPages = loadBookStatsTotal(docKey, 'pages') + Math.max(statsPagesDelta, 0);
+  return {
+    books: [{
+      document: docKey,
+      md5: docKey,
+      title: currentBook.title || '',
+      authors: currentBook.author || '',
+      total_read_secs: totalReadSecs,
+      total_read_pages: totalReadPages,
+      last_open: now,
+      page_sessions: [{
+        page: estimateBookPageCount(),
+        start_time: sessionStart,
+        duration,
+        total_pages: estimateBookTotalPages(),
+      }],
+    }],
+    timestamp: now,
+    device: 'web',
+    device_id: 'codexa-web',
+  };
+}
+
+function commitBookOrbitStats(payload) {
+  const bookEntry = payload?.books?.[0];
+  if (!bookEntry || !currentBook) return;
+  const docKey = externalDocKey();
+  if (typeof bookEntry.total_read_secs === 'number') saveBookStatsTotal(docKey, 'secs', bookEntry.total_read_secs);
+  if (typeof bookEntry.total_read_pages === 'number') saveBookStatsTotal(docKey, 'pages', bookEntry.total_read_pages);
+  activeReadingSeconds = 0;
+  statsPagesDelta = 0;
+  statsSessionStartTs = Math.floor(Date.now() / 1000);
+}
+
+function pushRemoteStats(payload) {
+  return apiFetch('/kosync/remote/stats', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }).catch((e) => {
+    console.warn('[stats] BookOrbit stats push failed:', e.message);
+    return null;
+  });
+}
+
+function pushRemoteStatsBackground(payload) {
+  const token = getToken();
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  return fetch('/api/kosync/remote/stats', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+    keepalive: true,
+  }).then(async (r) => {
+    let data = { pushed: r.ok, status: r.status };
+    try { data = { ...data, ...(await r.json()) }; } catch { /* ignore */ }
+    return data;
+  }).catch(() => null);
+}
+
+function markRemoteSynced() {
+  lastSyncedAt = Date.now();
+  refreshStatusBarDynamic();
+}
+
+async function loadKosyncSettings() {
+  try {
+    const s = await apiFetch('/settings');
+    kosyncStatsEnabled = !!s.kosync_stats_enabled;
+  } catch {
+    kosyncStatsEnabled = false;
+  }
+}
+
 function cancelDebouncedSync() {
   if (syncDebounceTimer) {
     clearTimeout(syncDebounceTimer);
@@ -4227,10 +4375,20 @@ async function saveProgress({ forceRemote = false, allowRemote = true, inSession
     saves.push(pushRemoteProgress(docKey, koReaderXPointer(), pct));
     saves.push(pushInternalProgress(docKey, koReaderXPointer(), pct, forced));
   }
+  const statsPayload = kosyncStatsEnabled && (inSession || forceRemote) ? buildBookOrbitStatsPayload() : null;
+  if (statsPayload) {
+    saves.push(pushRemoteStats(statsPayload).then((res) => {
+      if (res?.pushed) {
+        commitBookOrbitStats(statsPayload);
+        markRemoteSynced();
+      }
+    }));
+  }
   await Promise.allSettled(saves);
   if (shouldPushKosync) {
     lastSyncedCfi = cfi; // record what we just synced
     bestKnownRemotePct = pct; // update high-water mark (may go down if user confirmed backwards)
+    markRemoteSynced();
   }
 }
 
@@ -4258,6 +4416,14 @@ function saveProgressBackground({ inSession = false } = {}) {
   if (!alreadySynced && pct > 0 && (inSession || !prefs.skipSaveOnClose) && (posChanged || inSession) && pct >= bestKnownRemotePct - 0.005) {
     fetch(`/api/kosync/remote/${encodeURIComponent(docKey)}`,   opts({ document: docKey, progress: xp, percentage: pct, device: 'web', device_id: 'codexa-web' })).catch(() => {});
     fetch(`/api/kosync/internal/${encodeURIComponent(docKey)}`, opts({ progress: xp, percentage: pct, device: 'web', device_id: 'codexa-web' })).catch(() => {});
+    if (kosyncStatsEnabled) {
+      const statsPayload = buildBookOrbitStatsPayload();
+      if (statsPayload) {
+        pushRemoteStatsBackground(statsPayload).then((res) => {
+          if (res?.pushed) commitBookOrbitStats(statsPayload);
+        });
+      }
+    }
     if (pct > bestKnownRemotePct) bestKnownRemotePct = pct;
   }
 }
@@ -4544,6 +4710,7 @@ function goNext() {
 
   pendingNavDirection = 'next';
   sessionPageCount++;
+  statsPagesDelta++;
   // Capture whether we are truly at the last page at call-time. The library can
   // advance the chapter prematurely if a CSS expand shrinks scrollWidth between
   // this call and when manager.next() actually runs (async via rAF queue).
@@ -4564,6 +4731,7 @@ function goPrev() {
   console.log(`[nav] PREV | page=${currentChapPage}/${currentChapTotal}`);
   pendingNavDirection = 'prev';
   sessionPageCount++;
+  statsPagesDelta++;
   rendition?.prev();
 }
 
@@ -5501,6 +5669,7 @@ document.getElementById('btn-next').addEventListener('keydown', e => { if (e.key
 window.addEventListener('beforeunload', () => {
   cancelDebouncedSync();
   stopPeriodicSync();
+  stopBookStatsTracking();
   if (!prefs.skipSaveOnClose) saveProgressBackground();
   endStatsSessionBackground();
 });
@@ -5550,6 +5719,7 @@ async function init() {
     }, 600);
   }
   acquireWakeLock();
+  await loadKosyncSettings();
 
   try {
     loadingMsg.textContent = t('reader.loading_book');
@@ -5825,7 +5995,8 @@ async function init() {
     void loadBookmarks(currentBook.id);
     void loadAnnotations(currentBook.id);
     // Start a stats session (non-blocking)
-    void startStatsSession(currentBook.id);    
+    void startStatsSession(currentBook.id);
+    if (kosyncStatsEnabled) startBookStatsTracking();
     // Final chapter-name refresh — by now TOC and relocated have both fired
     if (lastChapterHref) {
       chapterTitleEl.textContent = chapterLabelFromHref(lastChapterHref);
