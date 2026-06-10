@@ -13,8 +13,10 @@
 const LANG_KEY  = 'br_lang';
 const FALLBACK  = 'sl';
 // Bump this when locale files change to bust the localStorage cache
-const CACHE_VER = '20';
+const CACHE_VER = '31';
 const CACHE_VER_KEY = 'br_strings_ver';
+// New keys added in a release — stale localStorage caches missing these are refetched
+const LOCALE_SENTINEL_KEY = 'reader.sb_current_time';
 
 /** Language codes → display names shown in the picker. Add entries here to add languages. */
 export const SUPPORTED_LANGS = {
@@ -29,6 +31,7 @@ export const SUPPORTED_LANGS = {
 
 let _strings = {};
 let _lang    = FALLBACK;
+let _enStrings = null;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -216,6 +219,58 @@ export function initLangPicker(container) {
 
 // ── Internal ──────────────────────────────────────────────────────────────────
 
+function _localeUrl(lang) {
+  return `/locales/${lang}.json?v=${CACHE_VER}`;
+}
+
+function _isLocaleComplete(strings) {
+  return strings && Object.prototype.hasOwnProperty.call(strings, LOCALE_SENTINEL_KEY);
+}
+
+function _mergeWithEnglish(lang, langStrings) {
+  if (lang === 'en') return langStrings;
+  return { ..._enStrings, ...langStrings };
+}
+
+async function _fetchLocaleFile(lang) {
+  const r = await fetch(_localeUrl(lang));
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+async function _getEnglishStrings() {
+  if (_enStrings) return _enStrings;
+
+  const cacheKey = 'br_strings_en';
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (_isLocaleComplete(parsed)) {
+        _enStrings = parsed;
+        return _enStrings;
+      }
+    }
+  } catch { /* corrupt cache */ }
+
+  try {
+    _enStrings = await _fetchLocaleFile('en');
+    try { localStorage.setItem(cacheKey, JSON.stringify(_enStrings)); } catch { /* storage full */ }
+    return _enStrings;
+  } catch (err) {
+    console.warn('i18n: could not load English locale', err);
+    try {
+      const swCached = await caches.match('/locales/en.json');
+      if (swCached?.ok) {
+        _enStrings = await swCached.json();
+        return _enStrings;
+      }
+    } catch { /* ignore */ }
+    _enStrings = {};
+    return _enStrings;
+  }
+}
+
 async function _load(code) {
   const lang = Object.prototype.hasOwnProperty.call(SUPPORTED_LANGS, code) ? code : FALLBACK;
   const cacheKey = `br_strings_${lang}`;
@@ -226,50 +281,45 @@ async function _load(code) {
       localStorage.removeItem(`br_strings_${lc}`);
     }
     localStorage.setItem(CACHE_VER_KEY, CACHE_VER);
+    _enStrings = null;
   }
 
-  // Try localStorage cache first — avoids network round-trip on repeat visits
+  await _getEnglishStrings();
+
+  // Try localStorage cache first — but only if it includes recent keys
   try {
     const cached = localStorage.getItem(cacheKey);
     if (cached) {
-      _strings = JSON.parse(cached);
-      _lang    = lang;
-      return; // Cache hit — synchronous, no fetch needed
+      const parsed = JSON.parse(cached);
+      if (_isLocaleComplete(parsed)) {
+        _strings = _mergeWithEnglish(lang, parsed);
+        _lang    = lang;
+        return;
+      }
     }
   } catch { /* corrupt cache — fall through to fetch */ }
 
   try {
-    const r = await fetch(`/locales/${lang}.json`);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    _strings = await r.json();
+    const langStrings = await _fetchLocaleFile(lang);
+    _strings = _mergeWithEnglish(lang, langStrings);
     _lang    = lang;
-    try { localStorage.setItem(cacheKey, JSON.stringify(_strings)); } catch { /* storage full */ }
+    try { localStorage.setItem(cacheKey, JSON.stringify(langStrings)); } catch { /* storage full */ }
   } catch (err) {
     console.warn(`i18n: could not load locale "${lang}"`, err);
-    // SW cache fallback — handles when SW hasn't claimed this tab yet (e.g. after version bump clears localStorage)
+    // SW cache fallback — handles when SW hasn't claimed this tab yet
     try {
-      const swCached = await caches.match(`/locales/${lang}.json`);
+      const swCached = await caches.match(_localeUrl(lang))
+        || await caches.match(`/locales/${lang}.json`);
       if (swCached?.ok) {
-        _strings = await swCached.json();
+        const langStrings = await swCached.json();
+        _strings = _mergeWithEnglish(lang, langStrings);
         _lang = lang;
-        try { localStorage.setItem(cacheKey, JSON.stringify(_strings)); } catch {}
+        try { localStorage.setItem(cacheKey, JSON.stringify(langStrings)); } catch {}
         return;
       }
     } catch {}
-    if (lang !== FALLBACK) {
-      // Attempt fallback locale
-      try {
-        const fbKey = `br_strings_${FALLBACK}`;
-        const fbCached = localStorage.getItem(fbKey);
-        if (fbCached) {
-          _strings = JSON.parse(fbCached);
-        } else {
-          const r2 = await fetch(`/locales/${FALLBACK}.json`);
-          _strings = await r2.json();
-          try { localStorage.setItem(fbKey, JSON.stringify(_strings)); } catch { /* storage full */ }
-        }
-        _lang = FALLBACK;
-      } catch { /* keep existing strings */ }
-    }
+    // Last resort: English strings (avoids showing raw i18n keys)
+    _strings = { ..._enStrings };
+    _lang = lang;
   }
 }
