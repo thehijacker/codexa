@@ -49,7 +49,7 @@ html, body {
 #header-sensor {
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: calc(26px + var(--sat));
+  height: calc(var(--header-reveal-zone-pct, 12%) + var(--sat));
   z-index: 19;
   pointer-events: none;
 }
@@ -73,6 +73,7 @@ html, body {
   transform: translateY(0);
   opacity: 1;
   pointer-events: auto;
+  z-index: 21;
 }
 /* Reader main fills full height when header is out of flow */
 .reader-layout.autohide-header .reader-main {
@@ -82,7 +83,7 @@ html, body {
 
 /* ── Header ──────────────────────────────────────────────────────────────────── */
 .reader-header {
-  min-height: 44px;
+  min-height: var(--reader-header-min-height, 44px);
   flex-shrink: 0;
   background: var(--reader-header-bg, var(--color-surface));
   backdrop-filter: blur(10px);
@@ -111,8 +112,8 @@ html, body {
 /* Uniform icon buttons — fixed square, glyph centred, no size drift between emoji */
 .reader-header .btn-icon {
   font-size: 1.1rem;
-  width: 36px;
-  height: 36px;
+  width: var(--reader-header-btn-size, 36px);
+  height: var(--reader-header-btn-size, 36px);
   padding: 0;
   display: flex;
   align-items: center;
@@ -122,7 +123,10 @@ html, body {
   color: var(--reader-header-text-muted, var(--color-text-muted));
   border-color: var(--reader-header-border, var(--color-border));
 }
-.reader-header .btn-icon .nav-icon { width: 1.2rem; height: 1.2rem; }
+.reader-header .btn-icon .nav-icon {
+  width: var(--reader-header-icon-size, 1.2rem);
+  height: var(--reader-header-icon-size, 1.2rem);
+}
 /* Prevent icon images from being the event target — the button itself should always receive pointer events */
 .reader-header .btn-icon img { pointer-events: none; }
 
@@ -140,9 +144,23 @@ html, body {
 [data-reader-eink] .nav-icon-find       { content: url('/images/find_bw.svg'); }
 [data-reader-eink] .nav-icon-percentage { content: url('/images/percentage_bw.svg'); }
 [data-reader-eink] .nav-icon-settings   { content: url('/images/settings_bw.svg'); }
+[data-reader-eink] .nav-icon-sync       { content: url('/images/sync_bw.svg'); }
+[data-reader-eink] .nav-icon-sb-battery { content: url('/images/battery_bw.svg'); }
 [data-reader-eink] .nav-icon-back       { content: url('/images/back_bw.svg'); }
 [data-reader-eink] .nav-icon-fullscreen { content: url('/images/fullscreen_bw.svg'); }
 [data-reader-eink] img[src="/images/fullscreen_exit.svg"] { content: url('/images/fullscreen_exit_bw.svg'); }
+
+/* Manual sync button states */
+@keyframes br-spin { to { transform: rotate(360deg); } }
+#btn-sync.btn-sync-busy .nav-icon-sync { animation: br-spin 0.75s linear infinite; }
+#btn-sync.btn-sync-done {
+  background: var(--color-accent) !important;
+  border-radius: 6px;
+}
+#btn-sync.btn-sync-done .nav-icon-sync { filter: brightness(0) invert(1) !important; }
+[data-reader-eink] #btn-sync.btn-sync-busy .nav-icon-sync { animation: none; opacity: .5; }
+[data-reader-eink] #btn-sync.btn-sync-done { background: none !important; }
+[data-reader-eink] #btn-sync.btn-sync-done .nav-icon-sync { filter: none !important; }
 
 /* E-ink reader: swap status bar stat icons */
 [data-reader-eink] .nav-icon-sb-chapter-page    { content: url('/images/chapter_page_bw.svg'); }
@@ -259,6 +277,7 @@ html, body {
   transform: translateY(100%); transition: transform .22s ease;
 }
 #annot-toolbar.open { transform: translateY(0); }
+
 .annot-toolbar-colors { display: flex; gap: .45rem; }
 .annot-color-btn {
   width: 28px; height: 28px; border-radius: 50%;
@@ -409,7 +428,7 @@ html, body {
   flex: 1;
   position: relative;
   overflow: hidden;
-  touch-action: pan-y; /* tell iOS we own horizontal swipes; vertical stays native */
+  touch-action: pan-y; /* iOS: we own horizontal swipes; overridden below for Android */
   /* Edge inset: shrinks viewer away from curved screen edges.
      --sab is set by JS after safe-area probe. On iOS 26 PWA this starts at 0
      and updates to ~34px after 500-1000ms. The status bar overlay sits inside this gap. */
@@ -470,15 +489,49 @@ body.page-gap-shadow-on .dict-popup {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 14%;
   z-index: 5;
   display: flex;
   align-items: center;
-  /* Zone itself never captures pointer events — iframe text selection works at edges */
-  pointer-events: none;
+  cursor: pointer;
+  pointer-events: auto;
+  background: transparent;
+  -webkit-tap-highlight-color: transparent;
+  tap-highlight-color: transparent;
+  user-select: none;
+  touch-action: manipulation;
 }
-.nav-zone-prev { left:  0; justify-content: flex-start; padding-left: .5rem; }
-.nav-zone-next { right: 0; justify-content: flex-end;   padding-right: .5rem; }
+.nav-zone:hover,
+.nav-zone:active,
+.nav-zone:focus {
+  background: transparent;
+  outline: none;
+}
+.nav-zone-prev {
+  left: 0;
+  width: var(--nav-zone-left-pct, 20%);
+  justify-content: flex-start;
+  padding-left: .5rem;
+}
+.nav-zone-next {
+  right: 0;
+  width: var(--nav-zone-right-pct, 20%);
+  justify-content: flex-end;
+  padding-right: .5rem;
+}
+
+/* Touch devices: nav zones sit above the iframe and steal long-press / drag-select.
+   Pass touches through to the book; page turns use swipe inside the iframe. */
+@media (pointer: coarse) {
+  #epub-viewer {
+    touch-action: auto;
+  }
+  .nav-zone {
+    pointer-events: none;
+  }
+  .nav-arrow {
+    pointer-events: auto;
+  }
+}
 
 /* KOSync tap hot zones */
 .kosync-hotzone {
@@ -511,6 +564,18 @@ body.page-gap-shadow-on .dict-popup {
   transition: opacity .2s;
 }
 .nav-arrow:hover { opacity: 1; }
+
+/* Touch / e-ink: hide hover-only arrows — they flash and repaint the whole zone */
+@media (hover: none), (pointer: coarse) {
+  .nav-arrow { display: none !important; }
+}
+[data-reader-eink] .nav-zone,
+[data-reader-eink] .nav-zone:hover,
+[data-reader-eink] .nav-zone:active {
+  background: transparent !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+[data-reader-eink] .nav-arrow { display: none !important; }
 
 /* ── Progress bar (bottom) ───────────────────────────────────────────────────── */
 .reader-progressbar {
@@ -606,6 +671,7 @@ body.page-gap-shadow-on .dict-popup {
 .toc-item.active {
   color: var(--color-accent);
   font-weight: 600;
+  background: rgba(233,69,96,.1); /* fallback for browsers without color-mix() */
   background: color-mix(in srgb, var(--color-accent) 10%, transparent);
   border-left: 3px solid var(--color-accent);
   padding-left: calc(1.25rem - 3px);
@@ -989,6 +1055,7 @@ body.page-gap-shadow-on .dict-popup {
 .font-picker-dropdown {
   position: fixed;
   z-index: 9999;
+  background: var(--color-surface); /* solid fallback for older WebViews (e-ink tablets, etc.) */
   background: color-mix(in srgb, var(--color-surface) 94%, var(--color-bg) 6%);
   border: 1px solid var(--color-border);
   border-radius: 12px;
@@ -997,6 +1064,12 @@ body.page-gap-shadow-on .dict-popup {
   overflow-y: auto;
   overscroll-behavior: contain;
   max-height: 320px;
+}
+[data-reader-eink] .font-picker-dropdown {
+  background: var(--color-surface);
+  box-shadow: none;
+  border: 2px solid var(--color-text);
+  border-radius: 4px;
 }
 .font-picker-option {
   width: 100%;
@@ -1341,8 +1414,10 @@ input[type="range"]::-moz-range-thumb {
 /* ── Jump-to-% panel: chapter nav buttons ─────────────── */
 .sb-chap-nav-btn {
   flex-shrink: 0;
-  width: 28px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
   background: none;
   border: 1px solid var(--color-border);
   border-radius: 4px;
@@ -1365,6 +1440,8 @@ input[type="range"]::-moz-range-thumb {
 }
 .jump-pct-track-wrap input[type="range"] {
   width: 100%;
+  pointer-events: auto;
+  touch-action: none;
 }
 .sb-chap-marker {
   position: absolute;
@@ -1388,7 +1465,8 @@ input[type="range"]::-moz-range-thumb {
   -webkit-backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--reader-header-border, var(--color-border));
   flex-shrink: 0;
-  z-index: 15;
+  z-index: 23;
+  pointer-events: auto;
 }
 .jump-pct-row {
   display: flex;
@@ -1400,31 +1478,71 @@ input[type="range"]::-moz-range-thumb {
   flex: 1;
   min-width: 0;
 }
-#jump-pct-value {
+.jump-pct-value-input {
   min-width: unset;
-  width: 2.4rem;
+  width: 2.75rem;
   text-align: center;
   flex-shrink: 0;
+  padding: .15rem .25rem;
+  font-size: inherit;
+  font-family: inherit;
+  color: inherit;
+  background: var(--color-surface2, var(--color-surface));
+  border: 1px solid var(--reader-header-border, var(--color-border));
+  border-radius: 4px;
+  -moz-appearance: textfield;
 }
+.jump-pct-value-input:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+.jump-pct-value-input::-webkit-outer-spin-button,
+.jump-pct-value-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+/* Tap-outside dismiss for auto-hidden toolbar */
+.header-dismiss-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: transparent;
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.header-dismiss-backdrop.visible { display: block; }
+
+.jump-pct-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 21;
+  background: transparent;
+  pointer-events: auto;
+}
+.jump-pct-backdrop.visible { display: block; }
 /* In auto-hide mode the header is out of flow — panel must float just below it */
 .autohide-header #jump-pct-panel {
   position: fixed;
-  top: calc(44px + var(--sat));
+  top: calc(var(--reader-header-min-height, 44px) + var(--sat, 0px));
   left: 0;
   right: 0;
+  z-index: 23;
 }
 
 /* ── Mobile ──────────────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
-  .reader-header { padding: 0 .4rem; gap: .25rem; min-height: 44px; }
-  /* Larger icon buttons on mobile — 44 px touch targets, still 6 buttons fit on 320 px */
-  .reader-header .btn-icon { font-size: 1.3rem; width: 44px; height: 44px; }
+  .reader-header { padding: 0 .4rem; gap: .25rem; min-height: var(--reader-header-min-height, 44px); }
+  /* Larger icon buttons on mobile — 44 px touch targets unless user overrides */
+  .reader-header .btn-icon {
+    font-size: 1.3rem;
+    width: var(--reader-header-btn-size, 44px);
+    height: var(--reader-header-btn-size, 44px);
+  }
   #btn-fullscreen { display: none; }
   .nav-zone {
     display: block;
-    top: calc(44px + var(--sat));
-    /* pointer-events: none (inherited) — taps fall through to epub iframe;
-       navigation is swipe-based on mobile. */
+    top: 0;
+    pointer-events: none; /* phone: arrows hidden — don't block selection; swipe to turn */
   }
   .nav-arrow { display: none; }
   /* Larger tap targets for small screens */

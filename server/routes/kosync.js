@@ -112,14 +112,18 @@ kosyncRouter.put('/syncs/progress', async (req, res) => {
   const dev = String(device || device_id || 'koreader').slice(0, 64);
 
   const db = getDb();
+  // High-water mark: only advance, never go backwards
   db.prepare(`
     INSERT INTO reading_progress (user_id, document_hash, cfi_position, percentage, device, updated_at)
     VALUES (?, ?, ?, ?, ?, strftime('%s', 'now'))
     ON CONFLICT (user_id, document_hash) DO UPDATE SET
-      cfi_position = excluded.cfi_position,
-      percentage   = excluded.percentage,
-      device       = excluded.device,
-      updated_at   = excluded.updated_at
+      cfi_position = CASE WHEN excluded.percentage >= reading_progress.percentage
+                          THEN excluded.cfi_position ELSE reading_progress.cfi_position END,
+      percentage   = MAX(reading_progress.percentage, excluded.percentage),
+      device       = CASE WHEN excluded.percentage >= reading_progress.percentage
+                          THEN excluded.device ELSE reading_progress.device END,
+      updated_at   = CASE WHEN excluded.percentage >= reading_progress.percentage
+                          THEN excluded.updated_at ELSE reading_progress.updated_at END
   `).run(user.id, String(document).slice(0, 255), String(progress), pct, dev);
 
   res.json({ document, progress, percentage: pct, device: dev });
@@ -277,21 +281,39 @@ proxyRouter.get('/internal/:document', (req, res) => {
 // PUT /api/kosync/internal/:document
 // Write the web reader's current position into the internal KOReader sync store.
 // Used so KOReader devices picking up from this server get the web reader's position.
+// Pass ?force=1 to unconditionally overwrite (e.g. user confirmed a backwards sync).
 proxyRouter.put('/internal/:document', (req, res) => {
   if (!isInternalEnabled(req.user.id)) return res.json({ skipped: true });
   const { progress, percentage, device } = req.body;
+  const forceOverwrite = req.query.force === '1';
   const pct = typeof percentage === 'number' ? percentage : parseFloat(percentage) || 0;
   const dev = String(device || 'web').slice(0, 64);
   const db  = getDb();
-  db.prepare(`
-    INSERT INTO reading_progress (user_id, document_hash, cfi_position, percentage, device, updated_at)
-    VALUES (?, ?, ?, ?, ?, strftime('%s', 'now'))
-    ON CONFLICT (user_id, document_hash) DO UPDATE SET
-      cfi_position = excluded.cfi_position,
-      percentage   = excluded.percentage,
-      device       = excluded.device,
-      updated_at   = excluded.updated_at
-  `).run(req.user.id, req.params.document, String(progress || ''), pct, dev);
+  if (forceOverwrite) {
+    db.prepare(`
+      INSERT INTO reading_progress (user_id, document_hash, cfi_position, percentage, device, updated_at)
+      VALUES (?, ?, ?, ?, ?, strftime('%s', 'now'))
+      ON CONFLICT (user_id, document_hash) DO UPDATE SET
+        cfi_position = excluded.cfi_position,
+        percentage   = excluded.percentage,
+        device       = excluded.device,
+        updated_at   = excluded.updated_at
+    `).run(req.user.id, req.params.document, String(progress || ''), pct, dev);
+  } else {
+    // High-water mark: only advance, never go backwards
+    db.prepare(`
+      INSERT INTO reading_progress (user_id, document_hash, cfi_position, percentage, device, updated_at)
+      VALUES (?, ?, ?, ?, ?, strftime('%s', 'now'))
+      ON CONFLICT (user_id, document_hash) DO UPDATE SET
+        cfi_position = CASE WHEN excluded.percentage >= reading_progress.percentage
+                            THEN excluded.cfi_position ELSE reading_progress.cfi_position END,
+        percentage   = MAX(reading_progress.percentage, excluded.percentage),
+        device       = CASE WHEN excluded.percentage >= reading_progress.percentage
+                            THEN excluded.device ELSE reading_progress.device END,
+        updated_at   = CASE WHEN excluded.percentage >= reading_progress.percentage
+                            THEN excluded.updated_at ELSE reading_progress.updated_at END
+    `).run(req.user.id, req.params.document, String(progress || ''), pct, dev);
+  }
   res.json({ pushed: true });
 });
 
