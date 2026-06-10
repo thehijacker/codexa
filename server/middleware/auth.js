@@ -5,7 +5,7 @@ function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.startsWith('Bearer ')
     ? authHeader.slice(7)
-    : (req.query?.token || null);
+    : (req.query?.token || req.query?._token || null);
 
   if (!token) {
     return res.status(401).json({ error: 'Authentication required' });
