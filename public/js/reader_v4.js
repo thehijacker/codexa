@@ -247,8 +247,8 @@ const DEFAULT_PREFS = {
   dictionaries:   [],           // enabled dict IDs in priority order; null = all disabled; empty = use all
   dictionaryOrder: [],          // all dict IDs in user's display order (including disabled ones)
   edgePadding:    { top: 0, bottom: 0, left: 0, right: 0 },   // px inset for curved screens
-  navZoneLeftPct:  20,          // % of screen width — tap/click to go back
-  navZoneRightPct: 20,          // % of screen width — tap/click to go forward
+  navZoneLeftPct:  0,          // % of screen width — tap/click to go back
+  navZoneRightPct: 0,          // % of screen width — tap/click to go forward
   headerRevealZonePct: 12,      // % of screen height — tap reveals auto-hidden toolbar
   headerButtonScalePct: 100,    // % of default responsive size (36 desktop / 44 mobile)
   statusBar:      null,         // deep-merged in loadPrefs()
@@ -2028,8 +2028,7 @@ function computeStatValue(id) {
       return chapterLabelFromHref(currentHref);
     case 'battery': {
       if (!_batteryMgr) return '';
-      const pct = Math.round(_batteryMgr.level * 100);
-      return (_batteryMgr.charging ? '⚡\u202F' : '') + pct + '%';
+      return Math.round(_batteryMgr.level * 100) + '%';
     }
     default:
       return '';
@@ -2042,7 +2041,8 @@ function computeSlot(ids) {
   return ids.map(id => {
     const val      = computeStatValue(id);
     if (!val) return '';
-    const iconSrc  = STAT_ICON[id];
+    let iconSrc    = STAT_ICON[id];
+    if (id === 'battery' && _batteryMgr?.charging) iconSrc = '/images/battery_charging.svg';
     const showIcon = prefs.statusBar.showIcons[id] !== false;   // default true
     const prefix   = (iconSrc && showIcon) ? sbIconHtml(iconSrc) + '\u202F' : '';
     return prefix + sbEsc(val);
@@ -2167,7 +2167,7 @@ function applyHeaderButtonSize() {
   const scale = prefs.headerButtonScalePct ?? 100;
   const size  = Math.round(getHeaderButtonBasePx() * scale / 100);
   root.style.setProperty('--reader-header-btn-size', size + 'px');
-  root.style.setProperty('--reader-header-icon-size', Math.max(14, Math.round(size * 0.33)) + 'px');
+  root.style.setProperty('--reader-header-icon-size', Math.max(14, Math.round(size * 0.53)) + 'px');
   root.style.setProperty('--reader-header-min-height', (size + 8) + 'px');
 }
 
@@ -2324,11 +2324,16 @@ function syncHeaderDismissBackdrop() {
   headerDismissBackdrop.classList.toggle('visible', show);
 }
 
+let _sensorCooldown = false;
 function forceHideAutoHeader() {
   if (!readerLayout.classList.contains('header-peek')) return;
   isMouseOverHeader = false;
   readerLayout.classList.remove('header-peek');
   syncHeaderDismissBackdrop();
+  // Suppress the spurious mouseenter the sensor fires when the backdrop
+  // disappears and the browser "re-enters" the now-exposed sensor element.
+  _sensorCooldown = true;
+  setTimeout(() => { _sensorCooldown = false; }, 300);
 }
 
 function revealHeader() {
@@ -2362,7 +2367,7 @@ function applyAutoHide() {
 
 // Show header when mouse enters the thin sensor zone at very top of page
 document.getElementById('header-sensor').addEventListener('mouseenter', () => {
-  if (!prefs.autoHideHeader) return;
+  if (!prefs.autoHideHeader || _sensorCooldown) return;
   revealHeader();
 });
 document.getElementById('header-sensor').addEventListener('touchstart', () => {
@@ -2699,7 +2704,10 @@ async function returnToLibrary() {
   cancelDebouncedSync();
   stopPeriodicSync();
   if (!prefs.skipSaveOnClose) {
-    await saveProgress(); // await so updated_at is committed before library reloads
+    // forceLocal only when the user actually navigated away from the opening position.
+    // An open-then-immediate-close (no pages turned) should not force-save the imprecise
+    // CFI-display starting page over the server's correct stored value.
+    await saveProgress({ forceLocal: currentCfi !== openCfi });
   }
   await endStatsSession();
   isReady = false;          // block beforeunload from double-saving
@@ -3927,7 +3935,7 @@ function initSettingsUi() {
     prefs.customText = e.target.value;
     applyUiTheme(); reapplyStyles(); persistPrefs();
   });
-  document.querySelectorAll('.spread-btn').forEach(btn => {
+  document.querySelectorAll('.spread-btn[data-spread]').forEach(btn => {
     btn.addEventListener('click', async () => {
       prefs.spread = btn.dataset.spread;
       syncSettingsUi(); persistPrefs();
@@ -4179,7 +4187,7 @@ async function initBattery() {
   if (_batteryMgr || !navigator.getBattery) return;
   try {
     _batteryMgr = await navigator.getBattery();
-    const refresh = () => { if (lastLocation) updateStatusBar(lastLocation); };
+    const refresh = () => { updateStatusBar(lastLocation ?? rendition?.currentLocation()); };
     _batteryMgr.addEventListener('levelchange',   refresh);
     _batteryMgr.addEventListener('chargingchange', refresh);
     refresh(); // apply immediately
@@ -4206,7 +4214,7 @@ function scheduleDebouncedSync() {
   }, SYNC_DEBOUNCE_MS);
 }
 
-async function saveProgress({ forceRemote = false, allowRemote = true, inSession = false, forced = false } = {}) {
+async function saveProgress({ forceRemote = false, allowRemote = true, inSession = false, forced = false, forceLocal = false } = {}) {
   if (!currentBook || !isReady) return;
   if (isPeekMode) return;
   const cfi = currentCfi || '';
@@ -4228,8 +4236,10 @@ async function saveProgress({ forceRemote = false, allowRemote = true, inSession
     console.log('[kosync] saveProgress: skipping kosync push — would go backwards:', Math.round(pct * 100) + '% < known best ' + Math.round(bestKnownRemotePct * 100) + '%');
   }
   console.log('[kosync] saveProgress docKey:', docKey, 'cfi:', cfi.slice(0, 40), 'pct:', Math.round(pct * 100) + '%', shouldPushKosync ? '' : (alreadySynced ? '(already synced)' : wouldGoBackwards ? '(would go backwards)' : '(no remote push)'));
-  // When force-pushing backwards the server needs force:true to bypass its own high-water mark
-  const progressPayload = { cfi_position: cfi, percentage: pct, device: 'web', ...(forced ? { force: true } : {}) };
+  // Local save: use force:true when the reader is closing (forceLocal) or the user is force-pushing
+  // backwards (forced).  The server's high-water mark only makes sense for passive cross-device
+  // updates — the active reader always knows the user's real current page.
+  const progressPayload = { cfi_position: cfi, percentage: pct, device: 'web', ...((forced || forceLocal) ? { force: true } : {}) };
   const saves = [
     apiFetch(`/progress/${currentBook.file_hash}`, {
       method: 'PUT',
@@ -4270,7 +4280,9 @@ function saveProgressBackground({ inSession = false } = {}) {
   const xp     = koReaderXPointer();
   const posChanged    = cfi !== openCfi;
   const alreadySynced = cfi !== '' && cfi === lastSyncedCfi;
-  fetch(`/api/progress/${currentBook.file_hash}`, opts({ cfi_position: cfi, percentage: pct, device: 'web' })).catch(() => {});
+  // force:true only when position changed — prevents an open-then-tab-close from
+  // overwriting the server's good value with the imprecise CFI-display starting page.
+  fetch(`/api/progress/${currentBook.file_hash}`, opts({ cfi_position: cfi, percentage: pct, device: 'web', ...(posChanged ? { force: true } : {}) })).catch(() => {});
   if (pct > 0) {
     try { localStorage.setItem(`br_progress_${currentBook.file_hash}`, JSON.stringify({ cfi_position: cfi, percentage: pct, device: 'web' })); } catch { /* ignore */ }
   }
@@ -4389,7 +4401,14 @@ async function syncOnOpen(localProgress) {
   // If remote is behind local, it means we already synced more recently from this
   // device (e.g. the hide-beacon fired but localProgress hasn't updated yet).
   const remoteIsAhead = (best.percentage || 0) > localPct + 0.005;
-  if (!xpointerMatch && pctDiffers && remoteIsAhead) {
+  // Exception: if the remote was saved MORE RECENTLY than our local progress (e.g.
+  // user deliberately pushed KOSync backwards to re-read a chapter), honour it even
+  // when it is behind.  Require >60 s gap to avoid spurious prompts from normal
+  // concurrent saves, and >0.5 % difference so trivial floating-point drift is ignored.
+  const remoteIsNewerAndDiffers =
+    bestTime > localTime + 60 &&
+    Math.abs((best.percentage || 0) - localPct) > 0.005;
+  if (!xpointerMatch && ((pctDiffers && remoteIsAhead) || remoteIsNewerAndDiffers)) {
     const doSync = await showSyncDialog(best, localPct, localTime);
     if (doSync) return { percentage: best.percentage, progress: best.progress };
   }
@@ -4683,6 +4702,38 @@ function attachIframeTouchNav(view) {
     const dy = Math.abs(e.touches[0].clientY + iframeOffY - touchStartY);
     if (dx > 8 && dx > dy) e.preventDefault();
   }, { passive: false });
+
+  // Zone-click navigation from inside the iframe (desktop + any pointer type).
+  // Nav zones are pointer-events:none so clicks always reach the iframe; this
+  // handler intercepts simple clicks in the nav zone area before they land on text.
+  // A 250 ms timer lets a double-click reach the dblclick/dict handler instead
+  // of treating the first click as a navigation intent.
+  let _zoneClickTimer = null;
+  win.addEventListener('click', (e) => {
+    if (hasOpenPanel()) return;
+    const iframe = view.element?.querySelector('iframe') || view.element;
+    const offX = iframe ? iframe.getBoundingClientRect().left : 0;
+    const nav = inNavZone(e.clientX + offX);
+    // Cancel any pending navigation on ANY second click — the timer check must come
+    // before the selection check because the browser selects the word on the second
+    // mousedown of a dblclick, so sel.isCollapsed is already false when the second
+    // click fires; checking selection first would skip this branch and let the
+    // first-click timer fire, causing navigation alongside the dict lookup.
+    if (_zoneClickTimer) {
+      clearTimeout(_zoneClickTimer);
+      _zoneClickTimer = null;
+      return;
+    }
+    if (!nav) return;
+    const sel = win.getSelection?.();
+    if (sel && !sel.isCollapsed) return;   // drag-select ended — don't navigate
+    e.preventDefault();
+    _zoneClickTimer = setTimeout(() => {
+      _zoneClickTimer = null;
+      if (nav === 'prev') goPrev(); else goNext();
+      if (prefs.autoHideHeader && readerLayout.classList.contains('header-peek')) forceHideAutoHeader();
+    }, 250);
+  });
 
   win.addEventListener('touchend', (e) => {
     if (suppressNextTap) {
@@ -5731,22 +5782,29 @@ async function init() {
     loadAvailableDicts().then(updateDictButtonVisibility).catch(() => {});
     loadingOverlay.classList.add('hidden');
 
-    // epub.js display(cfi) with char-offset CFIs snaps to wrong page — seek forward by pct.
+    // Secondary percentage seek — only used when no full CFI was already applied by
+    // startRendition.  When startCfi IS a full epubcfi(…) the seek is skipped: it
+    // consistently overshoots because pct-to-location mapping has ±1–2 page granularity
+    // and triggers a drift (overshot position gets saved → next open overshoots further).
+    // Bionic reloads reduce startCfi to a chapter href so they still need the pct seek.
+    const startCfiIsEpubcfi = startCfi?.startsWith('epubcfi(');
     if (reloadStartPct != null && book.locations.length() > 0) {
       console.log('[pos] seeking to bionic-toggle pct:', (reloadStartPct * 100).toFixed(2) + '%');
       await seekToPercentage(reloadStartPct);
       console.log('[pos] after bionic seek currentCfi:', currentCfi.slice(0, 60));
-    } else if (resumeStartPct != null && book.locations.length() > 0) {
+    } else if (resumeStartPct != null && !startCfiIsEpubcfi && book.locations.length() > 0) {
       console.log('[pos] seeking to session-restore pct:', (resumeStartPct * 100).toFixed(2) + '%');
       await seekToPercentage(resumeStartPct);
       console.log('[pos] after session-restore seek currentCfi:', currentCfi.slice(0, 60));
-    } else if (localProgress?.percentage != null && book.locations.length() > 0) {
+    } else if (localProgress?.percentage != null && !startCfiIsEpubcfi && book.locations.length() > 0) {
       console.log('[pos] seeking to saved pct:', (localProgress.percentage*100).toFixed(2)+'%');
       await seekToPercentage(localProgress.percentage);
       console.log('[pos] after seek currentCfi:', currentCfi.slice(0,60));
     }
 
-    // Check remote/internal sync AFTER book is visible
+    // Check remote/internal sync AFTER book is visible.
+    // syncOnOpen's network request also gives epub.js time to fully settle its layout,
+    // which is why the CFI correction loop below runs after this call.
     const syncTarget = (prefs.skipOpenProgressCheck || skipOpenSync || isPeekMode) ? null : await syncOnOpen(localProgress);
     if (syncTarget?.percentage != null) {
       try {
@@ -5803,6 +5861,21 @@ async function init() {
           if (book.locations.length() > 0) await seekToPercentage(syncTarget.percentage);
         }
       } catch (e) { console.warn('[kosync] navigate failed:', e.message); }
+    } else if (startCfiIsEpubcfi && localProgress?.percentage != null && book.locations.length() > 0) {
+      // No sync navigation occurred.  The CFI display in startRendition snaps to the page
+      // containing the saved element but can land a few pages behind when the CFI has a
+      // character offset (the element starts on an earlier page).  epub.js also silently
+      // re-paginates during the syncOnOpen await above (which provides the settle time).
+      // Advance page-by-page to correct — no display(cfi) here, so there is no p=1
+      // chapter-reload artifact that caused the old seekToPercentage to overshoot.
+      const targetPct = localProgress.percentage;
+      for (let i = 0; i < 15; i++) {
+        const loc2 = rendition.currentLocation();
+        const cur2 = book.locations.percentageFromCfi(loc2?.start?.cfi || '') || 0;
+        if (cur2 >= targetPct - 0.005) break;
+        console.log('[pos] CFI undershoot +1 page', (cur2*100).toFixed(2)+'% → target', (targetPct*100).toFixed(2)+'%');
+        await rendition.next();
+      }
     }
 
     // Capture final position after all navigation (local seek + sync) is complete.

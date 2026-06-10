@@ -500,7 +500,10 @@ class DefaultViewManager {
       {
         const tolerance = Math.min(12, Math.max(2, Math.round(this.layout.delta * 0.04)))
         if (left < this.container.scrollWidth - tolerance) {
-          this.scrollBy(this.layout.delta, 0, true)
+          // Use exact page position instead of additive += to prevent sub-pixel
+          // drift accumulation on Android WebView (margins shift with each swipe).
+          const currentPage = Math.round(this.container.scrollLeft / this.layout.delta)
+          this.scrollTo((currentPage + 1) * this.layout.delta, 0, true)
         } else {
           next = this.views.last().section.next()
         }
@@ -603,7 +606,8 @@ class DefaultViewManager {
       const tolerance = Math.min(12, Math.max(2, Math.round(this.layout.delta * 0.04)))
 
       if (left > tolerance) {
-        this.scrollBy(-this.layout.delta, 0, true)
+        const currentPage = Math.round(this.container.scrollLeft / this.layout.delta)
+        this.scrollTo(Math.max(0, (currentPage - 1) * this.layout.delta), 0, true)
       } else {
         prev = this.views.first().section.prev()
       }

@@ -145,7 +145,8 @@ html, body {
 [data-reader-eink] .nav-icon-percentage { content: url('/images/percentage_bw.svg'); }
 [data-reader-eink] .nav-icon-settings   { content: url('/images/settings_bw.svg'); }
 [data-reader-eink] .nav-icon-sync       { content: url('/images/sync_bw.svg'); }
-[data-reader-eink] .nav-icon-sb-battery { content: url('/images/battery_bw.svg'); }
+[data-reader-eink] .nav-icon-sb-battery          { content: url('/images/battery_bw.svg'); }
+[data-reader-eink] .nav-icon-sb-battery-charging { content: url('/images/battery_charging_bw.svg'); }
 [data-reader-eink] .nav-icon-back       { content: url('/images/back_bw.svg'); }
 [data-reader-eink] .nav-icon-fullscreen { content: url('/images/fullscreen_bw.svg'); }
 [data-reader-eink] img[src="/images/fullscreen_exit.svg"] { content: url('/images/fullscreen_exit_bw.svg'); }
@@ -492,13 +493,9 @@ body.page-gap-shadow-on .dict-popup {
   z-index: 5;
   display: flex;
   align-items: center;
-  cursor: pointer;
-  pointer-events: auto;
+  pointer-events: none;
   background: transparent;
-  -webkit-tap-highlight-color: transparent;
-  tap-highlight-color: transparent;
   user-select: none;
-  touch-action: manipulation;
 }
 .nav-zone:hover,
 .nav-zone:active,
@@ -509,27 +506,16 @@ body.page-gap-shadow-on .dict-popup {
 .nav-zone-prev {
   left: 0;
   width: var(--nav-zone-left-pct, 20%);
-  justify-content: flex-start;
-  padding-left: .5rem;
 }
 .nav-zone-next {
   right: 0;
   width: var(--nav-zone-right-pct, 20%);
-  justify-content: flex-end;
-  padding-right: .5rem;
 }
 
-/* Touch devices: nav zones sit above the iframe and steal long-press / drag-select.
-   Pass touches through to the book; page turns use swipe inside the iframe. */
+/* Touch devices: let the book handle its own scroll/zoom gestures. */
 @media (pointer: coarse) {
   #epub-viewer {
     touch-action: auto;
-  }
-  .nav-zone {
-    pointer-events: none;
-  }
-  .nav-arrow {
-    pointer-events: auto;
   }
 }
 
@@ -546,6 +532,10 @@ body.page-gap-shadow-on .dict-popup {
 .kosync-hotzone-br { right: 0; }
 /* Only the arrow button itself captures events and shows on hover */
 .nav-arrow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  margin: auto 0;
   background: rgba(0, 0, 0, .35);
   backdrop-filter: blur(4px);
   color: #fff;
@@ -563,6 +553,8 @@ body.page-gap-shadow-on .dict-popup {
   opacity: 0;
   transition: opacity .2s;
 }
+.nav-zone-prev .nav-arrow { left:  .5rem; }
+.nav-zone-next .nav-arrow { right: .5rem; }
 .nav-arrow:hover { opacity: 1; }
 
 /* Touch / e-ink: hide hover-only arrows — they flash and repaint the whole zone */
@@ -1478,7 +1470,7 @@ input[type="range"]::-moz-range-thumb {
   flex: 1;
   min-width: 0;
 }
-.jump-pct-value-input {
+input.jump-pct-value-input {
   min-width: unset;
   width: 2.75rem;
   text-align: center;

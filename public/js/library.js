@@ -1211,8 +1211,18 @@ export async function initLibrary() {
   uploadStatus = document.getElementById('upload-status');
 
   // Sort
+  const savedSort = localStorage.getItem('library-sort');
+  if (savedSort) {
+    const sortSelect = document.getElementById('sort-select');
+    if (sortSelect && Array.from(sortSelect.options).some(o => o.value === savedSort))
+      sortSelect.value = savedSort;
+  }
   initSortMenu();
-  document.getElementById('sort-select').addEventListener('change', applyFilter);
+  document.getElementById('sort-select').addEventListener('change', () => {
+    if (sortBeforeSeriesFilter === null)
+      localStorage.setItem('library-sort', document.getElementById('sort-select').value);
+    applyFilter();
+  });
 
   // Edit mode
   document.getElementById('edit-mode-btn').addEventListener('click', () => {
