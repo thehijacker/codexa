@@ -45,6 +45,7 @@ function initDb() {
       kosync_username          TEXT    DEFAULT '',
       kosync_password_enc      TEXT    DEFAULT '',
       kosync_internal_enabled  INTEGER DEFAULT 0,
+      kosync_stats_enabled     INTEGER DEFAULT 0,
       reader_prefs             TEXT    DEFAULT '{}',
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -178,6 +179,7 @@ function initDb() {
     [`ALTER TABLE books          ADD COLUMN pages                    TEXT    DEFAULT ''`,  'books.pages'],
     [`ALTER TABLE user_settings  ADD COLUMN kosync_internal_enabled  INTEGER DEFAULT 0`,   'user_settings.kosync_internal_enabled'],
     [`ALTER TABLE books          ADD COLUMN last_opened_at          INTEGER`, 'books.last_opened_at'],
+    [`ALTER TABLE user_settings  ADD COLUMN kosync_stats_enabled    INTEGER DEFAULT 0`, 'user_settings.kosync_stats_enabled'],
   ];
   for (const [sql, label] of migrations) {
     try {

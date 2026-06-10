@@ -28,6 +28,7 @@ router.get('/', (req, res) => {
     kosync_username:         row.kosync_username,
     has_kosync_password:     row.kosync_password_enc !== '',
     kosync_internal_enabled: row.kosync_internal_enabled === 1,
+    kosync_stats_enabled:    row.kosync_stats_enabled === 1,
     reader_prefs:            JSON.parse(row.reader_prefs || '{}'),
   });
 });
@@ -39,7 +40,7 @@ router.put('/', (req, res) => {
 
   if (!row) return res.status(404).json({ error: 'Settings not found' });
 
-  const { opds_servers, kosync_url, kosync_username, kosync_password, kosync_internal_enabled, reader_prefs } = req.body;
+  const { opds_servers, kosync_url, kosync_username, kosync_password, kosync_internal_enabled, kosync_stats_enabled, reader_prefs } = req.body;
 
   // Only update fields that were explicitly provided
   const next = {
@@ -49,6 +50,7 @@ router.put('/', (req, res) => {
     // Empty string means "clear password"; undefined means "keep existing"
     kosync_password_enc:     kosync_password !== undefined ? String(kosync_password)         : row.kosync_password_enc,
     kosync_internal_enabled: kosync_internal_enabled !== undefined ? (kosync_internal_enabled ? 1 : 0) : row.kosync_internal_enabled,
+    kosync_stats_enabled:    kosync_stats_enabled    !== undefined ? (kosync_stats_enabled ? 1 : 0)    : row.kosync_stats_enabled,
     reader_prefs:            reader_prefs    !== undefined ? JSON.stringify(reader_prefs)    : row.reader_prefs,
   };
 
@@ -59,6 +61,7 @@ router.put('/', (req, res) => {
            kosync_username         = ?,
            kosync_password_enc     = ?,
            kosync_internal_enabled = ?,
+           kosync_stats_enabled    = ?,
            reader_prefs            = ?
      WHERE user_id = ?
   `).run(
@@ -67,6 +70,7 @@ router.put('/', (req, res) => {
     next.kosync_username,
     next.kosync_password_enc,
     next.kosync_internal_enabled,
+    next.kosync_stats_enabled,
     next.reader_prefs,
     req.user.id
   );

@@ -19,6 +19,7 @@ const kosyncStatus           = document.getElementById('kosync-status');
 const btnTestKosync          = document.getElementById('btn-test-kosync');
 const btnSaveKosync          = document.getElementById('btn-save-kosync');
 const btnClearKosync         = document.getElementById('btn-clear-kosync');
+const kosyncStatsEnabled     = document.getElementById('kosync-stats-enabled');
 const kosyncInternalEnabled  = document.getElementById('kosync-internal-enabled');
 const kosyncInternalUrlBox   = document.getElementById('kosync-internal-url-box');
 const kosyncInternalUrlVal   = document.getElementById('kosync-internal-url-val');
@@ -33,6 +34,7 @@ async function loadSettings() {
     // password is never returned; show placeholder when set
     kosyncPassword.placeholder = s.has_kosync_password ? t('settings.kosync_pass_saved') : t('settings.kosync_pass_ph');
     updateStatusBadge(s.kosync_url ? null : 'not_configured');
+    kosyncStatsEnabled.checked    = s.kosync_stats_enabled || false;
     kosyncInternalEnabled.checked = s.kosync_internal_enabled || false;
     updateInternalUrlBox();
   } catch (err) {
@@ -82,7 +84,7 @@ btnTestKosync.addEventListener('click', async () => {
   setButtonLoading(btnTestKosync, true, t('settings.btn_testing'));
   try {
     // Save current form values first so the server-side test uses them
-    const body = { kosync_url: url, kosync_username: username };
+    const body = { kosync_url: url, kosync_username: username, kosync_stats_enabled: kosyncStatsEnabled.checked };
     if (password) body.kosync_password = password;
     await apiFetch('/settings', { method: 'PUT', body: JSON.stringify(body) });
     if (password) {
@@ -118,7 +120,7 @@ btnSaveKosync.addEventListener('click', async () => {
 
   setButtonLoading(btnSaveKosync, true, t('settings.btn_saving'));
   try {
-    const body = { kosync_url: url, kosync_username: username };
+    const body = { kosync_url: url, kosync_username: username, kosync_stats_enabled: kosyncStatsEnabled.checked };
     // Only send password if user typed something new
     if (password) body.kosync_password = password;
 
@@ -143,7 +145,7 @@ btnClearKosync.addEventListener('click', () => {
       try {
         await apiFetch('/settings', {
           method: 'PUT',
-          body: JSON.stringify({ kosync_url: '', kosync_username: '', kosync_password: '' }),
+          body: JSON.stringify({ kosync_url: '', kosync_username: '', kosync_password: '', kosync_stats_enabled: false }),
         });
         kosyncUrl.value      = '';
         kosyncUsername.value = '';
