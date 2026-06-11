@@ -1370,6 +1370,9 @@ function isFootnoteLink(anchor) {
       const tr = (target.getAttribute('role') || '').toLowerCase();
       if (/footnote|endnote/.test(tt) || /doc-footnote|doc-endnote/.test(tr)) return true;
       if (target.tagName === 'ASIDE') return true;
+      // Short footnote marker (*, †, single digit, etc.) linking to a same-doc target
+      const markerText = (anchor.textContent || '').trim();
+      if (markerText.length <= 3) return true;
     }
   }
   return false;
@@ -1399,8 +1402,9 @@ function attachIframeFootnotes(contents) {
     if (!rawHref.includes('#')) return;
     e.preventDefault();
     e.stopPropagation();
-    const sameDoc = rawHref.startsWith('#');
     const fragId  = rawHref.split('#').pop();
+    // treat as same-doc if href is a bare fragment OR if the target id exists in the current iframe doc
+    const sameDoc = rawHref.startsWith('#') || !!anchor.ownerDocument.getElementById(fragId);
     window.parent.postMessage({ type: 'footnote-show', rawHref, fragId, sameDoc }, '*');
   };
 
