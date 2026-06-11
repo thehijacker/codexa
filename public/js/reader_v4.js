@@ -199,6 +199,7 @@ function getStatusStats() {
     { id: 'bookAuthor',    icon: '/images/book_author.svg',     label: t('reader.sb_book_author') },
     { id: 'chapterTitle',  icon: '/images/chapter_title.svg',   label: t('reader.sb_chap_title') },
     { id: 'battery',       icon: '/images/battery.svg',         label: t('reader.sb_battery') },
+    { id: 'online',        icon: '/images/offline.svg',         label: t('reader.sb_online') },
   ];
 }
 
@@ -267,6 +268,7 @@ let lastChapterHref = null;  // chapter-boundary save tracking
 let lastSentChapterHref = null; // last chapter for which remote progress was pushed
 let availableDicts  = null;  // cached GET /api/dictionary response
 let _batteryMgr     = null;  // BatteryManager from navigator.getBattery(), null if unsupported
+let _isOnline       = navigator.onLine; // kept in sync by online/offline events
 let pendingNavDirection = null; // 'next' or 'prev' tracking for chapter jump corrections
 let pendingWasChapterEnd = true;  // whether goNext() was called from the last page
 let deferredNextPending  = false; // true while a mid-repagination NEXT is deferred
@@ -2034,6 +2036,8 @@ function computeStatValue(id) {
       if (!_batteryMgr) return '';
       return Math.round(_batteryMgr.level * 100) + '%';
     }
+    case 'online':
+      return _isOnline ? t('reader.sb_online_yes') : t('reader.sb_offline_yes');
     default:
       return '';
   }
@@ -4185,6 +4189,16 @@ function stopPeriodicSync() {
   }
 }
 
+// Subscribe to online/offline events. Triggers a status-bar refresh on change.
+function initOnlineStatus() {
+  const refresh = () => {
+    _isOnline = navigator.onLine;
+    updateStatusBar(lastLocation ?? rendition?.currentLocation());
+  };
+  window.addEventListener('online',  refresh);
+  window.addEventListener('offline', refresh);
+}
+
 // Initialise the Battery Status API once. Triggers a status-bar refresh on any change.
 // Silently no-ops on browsers that don't support it (Firefox, Safari, iOS).
 async function initBattery() {
@@ -5920,6 +5934,7 @@ async function init() {
     cancelDebouncedSync();
     startPeriodicSync();
     void initBattery();
+    initOnlineStatus();
         // Load bookmarks and annotations for this book (non-blocking)
     void loadBookmarks(currentBook.id);
     void loadAnnotations(currentBook.id);

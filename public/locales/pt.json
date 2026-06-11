@@ -519,5 +519,8 @@
   "reader.sync_back_body": "A sua posição atual é {cur}, mas a última sincronizada foi {best}. Sincronizar irá substituir a posição mais avançada em todos os dispositivos.",
   "reader.sync_back_cancel": "Cancelar",
   "reader.sync_back_confirm": "Sincronizar para {cur}",
-  "reader.sb_battery": "Bateria"
+  "reader.sb_battery": "Bateria",
+  "reader.sb_online": "Ligação",
+  "reader.sb_online_yes": "Online",
+  "reader.sb_offline_yes": "Offline"
 }
