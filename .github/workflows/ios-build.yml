@@ -55,16 +55,7 @@ jobs:
           SERVER_URL="${{ github.event.inputs.server_url }}"
           if [ -z "$SERVER_URL" ]; then SERVER_URL="$SERVER_URL_SECRET"; fi
           if [ -n "$SERVER_URL" ]; then
-            python3 -c "
-import json, sys
-url = sys.argv[1]
-with open('capacitor.config.json') as f:
-    cfg = json.load(f)
-cfg.setdefault('server', {})['url'] = url
-with open('capacitor.config.json', 'w') as f:
-    json.dump(cfg, f, indent=2)
-print('Server URL:', url)
-" "$SERVER_URL"
+            python3 -c "import json,sys;p='capacitor.config.json';d=json.loads(open(p).read());d.setdefault('server',{})['url']=sys.argv[1];open(p,'w').write(json.dumps(d,indent=2));print('Server URL:',sys.argv[1])" "$SERVER_URL"
           else
             echo "No server URL configured — app will show the setup screen"
           fi
