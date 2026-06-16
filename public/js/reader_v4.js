@@ -937,7 +937,7 @@ a, a * { color: ${theme.link} !important; }
 ${fontOverrides}
 img {
   max-width:   100% !important;
-  max-height:  95vh !important;
+  max-height:  75vh !important;
   width:       auto !important;
   height:      auto !important;
   object-fit:  contain !important;
@@ -4500,8 +4500,9 @@ async function pushRemoteProgress(docKey, xpointer, pct) {
         device_id:  'codexa-web',
       }),
     });
-    if (r && !r.pushed) _trackKosyncFailure(r.status || 0);
-    else _kosyncPushFailures = 0;
+    if (r?.pushed)           _kosyncPushFailures = 0;
+    else if (r?.status !== 404) _trackKosyncFailure(r?.status || 0);
+    // 404 = book not in external server's library — expected, not a config error
   } catch { _kosyncPushFailures = 0; }
 }
 
@@ -6179,7 +6180,10 @@ async function init() {
       } catch (e) {
         console.warn('[reader] getBookMeta failed (' + (e?.message || e) + '), using network');
       }
-      if (_localMeta) {
+      // Only use IDB cache if it has a usable KOSync hash; otherwise go to network
+      // so the server can compute file_hash_md5 on the fly. Stale IDB entries from
+      // before file_hash_md5 was populated would cause KOSync to send the wrong hash.
+      if (_localMeta && (_localMeta.file_hash_md5 || _localMeta.kosync_hash)) {
         currentBook = _localMeta;
         console.log('[reader] book metadata from IndexedDB:', currentBook.title);
       } else {

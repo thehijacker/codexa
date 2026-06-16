@@ -990,7 +990,7 @@ class Rendition {
       (contents.content.offsetHeight -
         (parseFloat(computed.paddingTop) +
           parseFloat(computed.paddingBottom))) *
-      0.95
+      0.75
     let horizontalPadding =
       parseFloat(computed.paddingLeft) + parseFloat(computed.paddingRight)
 
