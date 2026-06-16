@@ -59,6 +59,17 @@ function loadDict(id) {
   return d;
 }
 
+// Infer source/target language from dict id directory prefix.
+// Matches leading "XX-YY" or "XXX-YYY" (ISO 639-1/3) optionally followed by "/".
+// Returns { lang_from, lang_to } with null values if pattern not found.
+const LANG_PREFIX_RE = /^([a-z]{2,3})-([a-z]{2,3})(?:\/|$)/i;
+function inferDictLangs(id) {
+  const m = LANG_PREFIX_RE.exec(id);
+  return m
+    ? { lang_from: m[1].toLowerCase(), lang_to: m[2].toLowerCase() }
+    : { lang_from: null,               lang_to: null };
+}
+
 // ── GET /api/dictionary ───────────────────────────────────────────────────────
 // List all available dictionaries (recursive scan of DATA_DIR/dictionaries).
 router.get('/', authenticateToken, (req, res) => {
@@ -67,7 +78,8 @@ router.get('/', authenticateToken, (req, res) => {
     const dicts = findAllIfo().map(({ id, ifoPath }) => {
       try {
         const d    = loadDict(id);
-        return { id, name: d.name, wordcount: d.wordcount };
+        const langs = inferDictLangs(id);
+        return { id, name: d.name, wordcount: d.wordcount, ...langs };
       } catch { return null; }
     }).filter(Boolean);
     res.json(dicts);

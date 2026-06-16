@@ -3234,7 +3234,15 @@ function updateDictButtonVisibility() {
 async function renderDictSettings() {
   const container = document.getElementById('dict-settings-list');
   if (!container) return;
-  const dicts = await loadAvailableDicts();
+  // Fetch dicts and server prefs in parallel; server prefs may have dictionaryMeta
+  // updated from the Settings page (which doesn't write to localStorage).
+  const [dicts] = await Promise.all([
+    loadAvailableDicts(),
+    apiFetch('/settings').then(s => {
+      const sp = typeof s.reader_prefs === 'string' ? JSON.parse(s.reader_prefs) : (s.reader_prefs || {});
+      if (sp.dictionaryMeta) prefs.dictionaryMeta = sp.dictionaryMeta;
+    }).catch(() => {}),
+  ]);
   if (!dicts.length) {
     container.innerHTML = '<div style="font-size:.82rem;color:var(--color-text-muted)">' +
       t('reader.dict_no_dicts') + '</div>';
@@ -3270,10 +3278,15 @@ async function renderDictSettings() {
     const row = document.createElement('div');
     row.className   = 'dict-settings-item';
     row.dataset.id  = id;
+    const _lf = prefs.dictionaryMeta?.[id]?.lang_from ?? d.lang_from;
+    const _lt = prefs.dictionaryMeta?.[id]?.lang_to   ?? d.lang_to;
+    const _langTag = (_lf || _lt)
+      ? `<span class="dict-lang-tag">(${[_lf, _lt].filter(Boolean).join('-')})</span>`
+      : '';
     row.innerHTML = `
       <input type="checkbox" value="${esc(id)}" ${enabled.has(id) ? 'checked' : ''}>
       <div class="dict-settings-name" style="flex:1">
-        <span>${esc(d.name)}</span>
+        <span>${esc(d.name)}</span>${_langTag}
         ${d.wordcount ? `<span class="dict-settings-count">${d.wordcount.toLocaleString()} ${t('reader.dict_words')}</span>` : ''}
       </div>
       <div class="dict-order-btns">
@@ -3340,11 +3353,26 @@ async function showDictPopup(word) {
   popup.setAttribute('aria-hidden', 'false');
 
   const dicts   = await loadAvailableDicts();
-  // null = explicitly disabled; [] = use all; [...] = explicit list
-  const enabled = prefs.dictionaries === null ? [] :
-    Array.isArray(prefs.dictionaries) && prefs.dictionaries.length
-      ? prefs.dictionaries
-      : dicts.map(d => d.id);
+  // null = explicitly disabled; [] = default (never configured); [...] = explicit list
+  let enabled;
+  if (prefs.dictionaries === null) {
+    enabled = [];
+  } else if (Array.isArray(prefs.dictionaries) && prefs.dictionaries.length) {
+    // User has an explicit selection — respect it, no language filter
+    enabled = prefs.dictionaries;
+  } else {
+    // Default state: apply language filter based on book's source language
+    const bookLang = normalizeBookLang(currentBook?.language);
+    const allIds   = dicts.map(d => d.id);
+    if (bookLang) {
+      const matched = dicts
+        .filter(d => (prefs.dictionaryMeta?.[d.id]?.lang_from ?? d.lang_from) === bookLang)
+        .map(d => d.id);
+      enabled = matched.length ? matched : allIds; // fallback to all if no tagged match
+    } else {
+      enabled = allIds; // unknown book language — use all
+    }
+  }
 
   if (!enabled.length) {
     resultsEl.innerHTML = '<div class="dict-empty">' + t('reader.dict_no_dicts_short') + '</div>';
@@ -4456,6 +4484,35 @@ async function seekToPercentage(targetPct) {
   scheduleBionicPrefetchAround(finalLoc || rendition?.currentLocation?.());
 }
 
+// ── Book language normalisation ───────────────────────────────────────────────
+// Maps raw EPUB dc:language values (inconsistent: "EN", "eng", "English", "en-US"…)
+// to ISO 639-1 two-letter codes, or null if unrecognised.
+function normalizeBookLang(raw) {
+  if (!raw) return null;
+  let s = String(raw).trim().toLowerCase();
+  // Strip region subtag (en-US → en, zh-Hant → zh)
+  s = s.replace(/-.*$/, '');
+  // ISO 639-3 → 639-1
+  const iso3 = { eng:'en', ger:'de', deu:'de', slv:'sl', fra:'fr', fre:'fr',
+                 ita:'it', spa:'es', por:'pt', nld:'nl', dut:'nl', rus:'ru',
+                 zho:'zh', chi:'zh', jpn:'ja', kor:'ko', ara:'ar', tur:'tr',
+                 pol:'pl', ces:'cs', cze:'cs', slo:'sk', slk:'sk', hrv:'hr',
+                 ron:'ro', rum:'ro', hun:'hu', fin:'fi', swe:'sv', dan:'da',
+                 nor:'no', nob:'no', nno:'no', cat:'ca', lat:'la' };
+  if (iso3[s]) return iso3[s];
+  // English display names
+  const names = { english:'en', german:'de', slovenian:'sl', french:'fr', italian:'it',
+                  spanish:'es', portuguese:'pt', dutch:'nl', russian:'ru', chinese:'zh',
+                  japanese:'ja', korean:'ko', arabic:'ar', turkish:'tr', polish:'pl',
+                  czech:'cs', slovak:'sk', croatian:'hr', romanian:'ro', hungarian:'hu',
+                  finnish:'fi', swedish:'sv', danish:'da', norwegian:'no', catalan:'ca',
+                  latin:'la' };
+  if (names[s]) return names[s];
+  // Accept bare 2-letter code
+  if (/^[a-z]{2}$/.test(s)) return s;
+  return null;
+}
+
 // ── External + internal kosync ────────────────────────────────────────────────
 // KOReader identifies books by MD5 of file content — use file_hash_md5 so our
 // entries in Grimmory line up with what KOReader stores there.
@@ -4496,7 +4553,7 @@ async function pushRemoteProgress(docKey, xpointer, pct) {
         document:   docKey,
         progress:   xpointer,
         percentage: pct,
-        device:     'web',
+        device:     'Codexa',
         device_id:  'codexa-web',
       }),
     });
@@ -4521,7 +4578,7 @@ function pushInternalProgress(docKey, xpointer, pct, force = false) {
   const qs = force ? '?force=1' : '';
   return apiFetch(`/kosync/internal/${encodeURIComponent(docKey)}${qs}`, {
     method: 'PUT',
-    body: JSON.stringify({ progress: xpointer, percentage: pct, device: 'web', device_id: 'codexa-web' }),
+    body: JSON.stringify({ progress: xpointer, percentage: pct, device: 'Codexa', device_id: 'codexa-web' }),
   }).catch(() => {});
 }
 
@@ -4607,14 +4664,14 @@ async function saveProgress({ forceRemote = false, allowRemote = true, inSession
   // Local save: use force:true when the reader is closing (forceLocal) or the user is force-pushing
   // backwards (forced).  The server's high-water mark only makes sense for passive cross-device
   // updates — the active reader always knows the user's real current page.
-  const progressPayload = { cfi_position: cfi, percentage: pct, device: 'web', ...((forced || forceLocal) ? { force: true } : {}) };
+  const progressPayload = { cfi_position: cfi, percentage: pct, device: 'Codexa', ...((forced || forceLocal) ? { force: true } : {}) };
   const saves = [
     apiFetch(`/progress/${currentBook.file_hash}`, {
       method: 'PUT',
       body: JSON.stringify(progressPayload),
     }).then(() => {
       if (pct > 0) {
-        const cachePayload = { cfi_position: cfi, percentage: pct, device: 'web' };
+        const cachePayload = { cfi_position: cfi, percentage: pct, device: 'Codexa' };
         try { localStorage.setItem(`br_progress_${currentBook.file_hash}`, JSON.stringify(cachePayload)); } catch { /* ignore */ }
       }
     }).catch(() => {}),
@@ -4650,13 +4707,13 @@ function saveProgressBackground({ inSession = false } = {}) {
   const alreadySynced = cfi !== '' && cfi === lastSyncedCfi;
   // force:true only when position changed — prevents an open-then-tab-close from
   // overwriting the server's good value with the imprecise CFI-display starting page.
-  fetch(`/api/progress/${currentBook.file_hash}`, opts({ cfi_position: cfi, percentage: pct, device: 'web', ...(posChanged ? { force: true } : {}) })).catch(() => {});
+  fetch(`/api/progress/${currentBook.file_hash}`, opts({ cfi_position: cfi, percentage: pct, device: 'Codexa', ...(posChanged ? { force: true } : {}) })).catch(() => {});
   if (pct > 0) {
-    try { localStorage.setItem(`br_progress_${currentBook.file_hash}`, JSON.stringify({ cfi_position: cfi, percentage: pct, device: 'web' })); } catch { /* ignore */ }
+    try { localStorage.setItem(`br_progress_${currentBook.file_hash}`, JSON.stringify({ cfi_position: cfi, percentage: pct, device: 'Codexa' })); } catch { /* ignore */ }
   }
   if (!alreadySynced && pct > 0 && (inSession || !prefs.skipSaveOnClose) && (posChanged || inSession) && pct >= bestKnownRemotePct - 0.005) {
-    fetch(`/api/kosync/remote/${encodeURIComponent(docKey)}`,   opts({ document: docKey, progress: xp, percentage: pct, device: 'web', device_id: 'codexa-web' })).catch(() => {});
-    fetch(`/api/kosync/internal/${encodeURIComponent(docKey)}`, opts({ progress: xp, percentage: pct, device: 'web', device_id: 'codexa-web' })).catch(() => {});
+    fetch(`/api/kosync/remote/${encodeURIComponent(docKey)}`,   opts({ document: docKey, progress: xp, percentage: pct, device: 'Codexa', device_id: 'codexa-web' })).catch(() => {});
+    fetch(`/api/kosync/internal/${encodeURIComponent(docKey)}`, opts({ progress: xp, percentage: pct, device: 'Codexa', device_id: 'codexa-web' })).catch(() => {});
     if (pct > bestKnownRemotePct) bestKnownRemotePct = pct;
   }
 }
@@ -4839,8 +4896,13 @@ function getLocsCacheKey() {
 async function startRendition(displayCfi = null) {
   chapPageCache  = {};
   currentLocsKey = getLocsCacheKey();
-  // On small screens always force single-page, regardless of user preference
-  const spreadMode = (prefs.spread === 'auto' && !isMobileScreen()) ? 'auto' : 'none';
+  // On small screens always force single-page, regardless of user preference.
+  // On Android, use a higher minSpreadWidth (1200px) because e-ink devices such as
+  // the BOOX Palma 2 report devicePixelRatio=1 even on high-DPI screens, making
+  // window.innerWidth equal to physical resolution (~824px) and falsely crossing
+  // the default 800px spread threshold.
+  const spreadMode    = (prefs.spread === 'auto' && !isMobileScreen()) ? 'auto' : 'none';
+  const minSpreadWidth = isAndroidApp() ? 1200 : 800;
   // Reserve 38px at the bottom so epub content doesn't flow behind the
   // status-bar / separator overlays. In CSS multi-column mode padding-bottom
   // on the body only applies to the last column, so the only reliable way to
@@ -4849,7 +4911,7 @@ async function startRendition(displayCfi = null) {
     width:          epubViewer.clientWidth  || window.innerWidth,
     height:         Math.max(200, (epubViewer.clientHeight || (window.innerHeight - 55)) - RENDITION_BOTTOM_RESERVE),
     spread:         spreadMode,
-    minSpreadWidth: 800,
+    minSpreadWidth: minSpreadWidth,
     manager:        'default',
     gap:            prefs.margin * 2,
     allowScriptedContent: true,
@@ -4884,7 +4946,11 @@ async function startRendition(displayCfi = null) {
       if (!isReady) return;
       const loc = rendition?.currentLocation?.();
       const p = loc?.start?.displayed?.page;
-      if (p && p !== currentChapPage) {
+      // Only apply FORWARD corrections: unloaded images produce a stale layout
+      // where displayed.page is lower than the true position. Letting a backward
+      // correction through would corrupt currentEndPage and cause goNext() to
+      // trigger its mid-repagination defer, making one swipe appear to skip a page.
+      if (p && p > currentChapPage) {
         console.log(
           `[nav] repaginate | ${currentChapPage}→${p}/${currentChapTotal}` +
           ` chap="${currentHref?.split('/').pop()}"`
@@ -4924,8 +4990,19 @@ async function startRendition(displayCfi = null) {
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
+// On Android (BOOX e-ink devices) hardware page-turn buttons can fire multiple
+// events per physical press. Throttle to one navigation per 400ms on Android.
+let _lastNavTs = 0;
+function _navThrottle() {
+  if (!isAndroidApp()) return false;
+  const now = Date.now();
+  if (now - _lastNavTs < 400) return true; // suppressed
+  _lastNavTs = now;
+  return false;
+}
 function goNext() {
   if (deferredNextPending) return;
+  if (_navThrottle()) return;
 
   const _lL        = rendition?.currentLocation?.();
   const _liveEnd   = _lL?.end?.displayed?.page;
@@ -4966,6 +5043,7 @@ function goNext() {
   rendition?.next();
 }
 function goPrev() {
+  if (_navThrottle()) return;
   deferredNextPending = false;
   console.log(`[nav] PREV | page=${currentChapPage}/${currentChapTotal}`);
   pendingNavDirection = 'prev';
@@ -5838,11 +5916,11 @@ document.getElementById('kosync-zone-br')?.addEventListener('click', async () =>
   const [remResult, intResult] = await Promise.allSettled([
     apiFetch(`/kosync/remote/${encodeURIComponent(docKey)}`, {
       method: 'PUT',
-      body: JSON.stringify({ document: docKey, progress: xpointer, percentage: currentPct, device: 'web', device_id: 'codexa-web' }),
+      body: JSON.stringify({ document: docKey, progress: xpointer, percentage: currentPct, device: 'Codexa', device_id: 'codexa-web' }),
     }),
     apiFetch(`/kosync/internal/${encodeURIComponent(docKey)}`, {
       method: 'PUT',
-      body: JSON.stringify({ progress: xpointer, percentage: currentPct, device: 'web', device_id: 'codexa-web' }),
+      body: JSON.stringify({ progress: xpointer, percentage: currentPct, device: 'Codexa', device_id: 'codexa-web' }),
     }),
   ]);
 

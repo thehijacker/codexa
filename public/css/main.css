@@ -2191,6 +2191,57 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
 .setting-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .setting-toggle-label { font-size: .9rem; font-weight: 500; color: var(--color-text); }
 .setting-toggle-hint { font-size: .78rem; color: var(--color-text-muted); margin-top: .2rem; line-height: 1.5; }
+/* ── Dictionary preferences UI (settings page) ───────────────────────────── */
+.dict-settings-item {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .4rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.dict-settings-item:last-child { border-bottom: none; }
+.dict-settings-name {
+  display: flex;
+  flex-direction: column;
+  gap: .1rem;
+  font-size: .85rem;
+  color: var(--color-text);
+  min-width: 0;
+}
+.dict-settings-count { font-size: .72rem; color: var(--color-text-muted); }
+.dict-order-btns { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
+.dict-order-btn {
+  background: var(--color-surface2);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: .8rem;
+  line-height: 1;
+  padding: 2px 5px;
+  transition: background .15s;
+}
+.dict-order-btn:hover:not(:disabled) { background: var(--color-accent); color: #fff; }
+.dict-order-btn:disabled { opacity: .3; cursor: default; }
+.dict-lang-inputs {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  flex-shrink: 0;
+}
+.dict-lang-inputs input[type="text"] {
+  width: 3.2rem;
+  padding: .15rem .3rem;
+  font-size: .78rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface2);
+  color: var(--color-text);
+  text-align: center;
+  text-transform: lowercase;
+}
+.dict-lang-sep { font-size: .75rem; color: var(--color-text-muted); }
+
 .admin-user-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .5rem 0; border-bottom: 1px solid var(--color-border); }
 .admin-user-row:last-child { border-bottom: none; }
 .admin-user-info { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }

@@ -303,6 +303,123 @@ function bindAdminUploads() {
   });
 }
 
+// ── Dictionary preferences (all users) ───────────────────────────────────────
+let _dictPrefsData  = { dicts: [], readerPrefs: {} };
+
+async function saveDictPrefs() {
+  try {
+    await apiFetch('/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ reader_prefs: _dictPrefsData.readerPrefs }),
+    });
+  } catch (err) {
+    toast.error(t('common.error_msg', { msg: err.message }));
+  }
+}
+
+async function loadDictPrefs() {
+  const container = document.getElementById('settings-dict-list');
+  if (!container) return;
+
+  let dicts = [], readerPrefs = {};
+  try {
+    [dicts, readerPrefs] = await Promise.all([
+      apiFetch('/dictionary'),
+      apiFetch('/settings').then(s => {
+        try { return typeof s.reader_prefs === 'string' ? JSON.parse(s.reader_prefs) : (s.reader_prefs || {}); }
+        catch { return {}; }
+      }),
+    ]);
+  } catch { dicts = []; }
+
+  _dictPrefsData = { dicts, readerPrefs };
+
+  if (!dicts.length) {
+    container.innerHTML = `<p style="color:var(--color-text-muted);font-size:.85rem;margin:0">${t('reader.dict_no_dicts_short')}</p>`;
+    return;
+  }
+
+  const savedOrder = Array.isArray(readerPrefs.dictionaryOrder) && readerPrefs.dictionaryOrder.length
+    ? readerPrefs.dictionaryOrder : dicts.map(d => d.id);
+  const allIds  = dicts.map(d => d.id);
+  const ordered = [...savedOrder.filter(id => allIds.includes(id)), ...allIds.filter(id => !savedOrder.includes(id))];
+
+  function buildSettingsRow(id) {
+    const d = dicts.find(x => x.id === id);
+    if (!d) return null;
+    const meta = readerPrefs.dictionaryMeta?.[id] || {};
+    const lf = meta.lang_from ?? d.lang_from ?? '';
+    const lt = meta.lang_to   ?? d.lang_to   ?? '';
+    const row = document.createElement('div');
+    row.className  = 'dict-settings-item';
+    row.dataset.id = id;
+    row.innerHTML = `
+      <div class="dict-settings-name" style="flex:1">
+        <span>${escHtml(d.name)}</span>
+        ${d.wordcount ? `<span class="dict-settings-count">${d.wordcount.toLocaleString()} ${t('reader.dict_words')}</span>` : ''}
+      </div>
+      <div class="dict-lang-inputs">
+        <input type="text" class="dict-lang-from" value="${escHtml(lf)}" maxlength="3"
+          placeholder="${t('settings.dict_lang_placeholder')}"
+          title="${t('settings.dict_lang_from')}" aria-label="${t('settings.dict_lang_from')}">
+        <span class="dict-lang-sep">→</span>
+        <input type="text" class="dict-lang-to" value="${escHtml(lt)}" maxlength="3"
+          placeholder="${t('settings.dict_lang_placeholder')}"
+          title="${t('settings.dict_lang_to')}" aria-label="${t('settings.dict_lang_to')}">
+      </div>
+      <div class="dict-order-btns">
+        <button class="dict-order-btn" data-dir="up"   title="${t('reader.dict_move_up')}"   aria-label="${t('reader.dict_move_up')}">&#8593;</button>
+        <button class="dict-order-btn" data-dir="down" title="${t('reader.dict_move_down')}" aria-label="${t('reader.dict_move_down')}">&#8595;</button>
+      </div>`;
+
+    function onLangChange() {
+      const fromVal = row.querySelector('.dict-lang-from').value.trim().toLowerCase() || null;
+      const toVal   = row.querySelector('.dict-lang-to').value.trim().toLowerCase()   || null;
+      if (!_dictPrefsData.readerPrefs.dictionaryMeta)
+        _dictPrefsData.readerPrefs.dictionaryMeta = {};
+      if (fromVal || toVal) {
+        _dictPrefsData.readerPrefs.dictionaryMeta[id] = { lang_from: fromVal, lang_to: toVal };
+      } else {
+        delete _dictPrefsData.readerPrefs.dictionaryMeta[id];
+      }
+      saveDictPrefs();
+    }
+    row.querySelector('.dict-lang-from').addEventListener('change', onLangChange);
+    row.querySelector('.dict-lang-to').addEventListener('change',   onLangChange);
+
+    row.querySelectorAll('.dict-order-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const dir  = btn.dataset.dir;
+        const rows = Array.from(container.children);
+        const idx  = rows.indexOf(row);
+        if (dir === 'up'   && idx > 0)             container.insertBefore(row, rows[idx - 1]);
+        if (dir === 'down' && idx < rows.length - 1) container.insertBefore(rows[idx + 1], row);
+        updateSettingsBtnState();
+        // Persist new order
+        _dictPrefsData.readerPrefs.dictionaryOrder =
+          Array.from(container.children).map(el => el.dataset.id);
+        saveDictPrefs();
+      });
+    });
+    return row;
+  }
+
+  function updateSettingsBtnState() {
+    const rows = Array.from(container.children);
+    rows.forEach((r, i) => {
+      r.querySelector('[data-dir="up"]').disabled   = (i === 0);
+      r.querySelector('[data-dir="down"]').disabled = (i === rows.length - 1);
+    });
+  }
+
+  container.innerHTML = '';
+  ordered.forEach(id => {
+    const row = buildSettingsRow(id);
+    if (row) container.appendChild(row);
+  });
+  updateSettingsBtnState();
+}
+
 async function loadAdminSection() {
   try {
     const { isAdmin, user: _ } = await apiFetch('/auth/me');
@@ -549,9 +666,11 @@ btnCancelEdit.addEventListener('click', exitEditMode);
   // ── Init ──────────────────────────────────────────────────────────────────────
   loadSettings();
   loadOpdsServers();
+  loadDictPrefs();
   loadAdminSection();
 
   document.addEventListener('langchange', () => {
+    loadDictPrefs();
     renderOpdsServers(_cachedServers);
     if (_editingServerId !== null) {
       document.getElementById('opds-form-title').textContent = t('settings.opds_edit_title');
