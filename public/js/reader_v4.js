@@ -355,6 +355,7 @@ let chapPageCache    = {};    // { [spineIndex]: totalPages } accumulated as cha
 let chapOffsetCache  = {};    // { [spineIndex]: maxSkipOffset } loaded lazily from localStorage
 let currentLocsKey   = '';    // cache key for current column mode (reset on rendition restart)
 let _epubChapPage    = 0;    // epub.js raw displayed.page (before skip-offset correction)
+let _epubChapEndPage = 0;    // epub.js raw end displayed.page (before skip-offset correction)
 let _chapDisplayOffset = 0;  // columns skipped by epub.js that we hide: display = epub - offset
 let lastLocation     = null;  // last location object from updateProgress
 // Reading speed tracking: each entry is a { time } recorded on every page turn
@@ -2219,12 +2220,14 @@ function computeSlot(ids) {
 
 // Update all overlay slots from current state
 function updateStatusBar(location) {
-  const epubStartPage = location?.start?.displayed?.page  ?? 0;
-  _epubChapPage = epubStartPage; // always track epub.js raw page before offset correction
+  const epubStartPage = location?.start?.displayed?.page ?? 0;
+  const epubEndPage   = location?.end?.displayed?.page   ?? 0;
+  _epubChapPage    = epubStartPage; // always track epub.js raw page before offset correction
+  _epubChapEndPage = epubEndPage;   // raw end page — used for wasEnd and skip detection
   // Apply cumulative skip offset so page display stays sequential after epub.js overshoots
   const startPage  = epubStartPage > 0 ? epubStartPage - _chapDisplayOffset : 0;
+  const endPage    = epubEndPage   > 0 ? epubEndPage   - _chapDisplayOffset : 0;
   const totalPages = location?.start?.displayed?.total ?? 0;
-  const endPage    = location?.end?.displayed?.page    ?? 0;
   const isTwoPage  = startPage > 0 && endPage > 0 && endPage !== startPage;
 
   // Update chapter page vars & cache.
@@ -2251,7 +2254,8 @@ function updateStatusBar(location) {
     } catch { chapOffsetCache[currentSpineIndex] = 0; }
   }
   const _offsetForTotal = Math.max(_chapDisplayOffset, chapOffsetCache[currentSpineIndex] || 0);
-  const _displayTotal   = stableTotal > 0 ? Math.max(stableTotal - _offsetForTotal, startPage) : 0;
+  // Clamp to endPage (not startPage) so that in 2-column mode the right column never exceeds the total
+  const _displayTotal   = stableTotal > 0 ? Math.max(stableTotal - _offsetForTotal, endPage) : 0;
   if (_offsetForTotal > 0 || _chapDisplayOffset > 0) {
     console.log(`[skip-cache] total: raw=${stableTotal} dispOff=${_chapDisplayOffset} cached=${chapOffsetCache[currentSpineIndex]||0} → display=${_displayTotal}`);
   }
@@ -3750,7 +3754,7 @@ function renderStatusSlots() {
     } catch { chapOffsetCache[currentSpineIndex] = 0; }
   }
   const _rsOffsetForTotal = Math.max(_chapDisplayOffset, chapOffsetCache[currentSpineIndex] || 0);
-  const _rsDisplayTotal   = currentChapTotal > 0 ? Math.max(currentChapTotal - _rsOffsetForTotal, currentChapPage) : 0;
+  const _rsDisplayTotal   = currentChapTotal > 0 ? Math.max(currentChapTotal - _rsOffsetForTotal, currentEndPage) : 0;
   const leftVal  = currentChapPage > 0 ? cpIcon + currentChapPage + '/' + _rsDisplayTotal : '';
   const rightVal = currentEndPage  > 0 ? cpIcon + currentEndPage  + '/' + _rsDisplayTotal : '';
 
@@ -4385,6 +4389,7 @@ function updateProgress(location) {
   }
   // Only update save-state after init is done — during startup, relocated fires
   // with page-start CFI which is earlier than the exact saved character offset.
+  const _prevSpineIndex = currentSpineIndex; // capture before update for chapter-end cache correction
   if (isReady) {
     currentCfi        = cfi || '';
     currentPct        = pct;
@@ -4434,12 +4439,25 @@ function updateProgress(location) {
   if (isReady) lastLocation = location;
   if (isReady && currentBook && (cfi || pct > 0)) scheduleDebouncedSync();
   trackReadingSpeed();
-  const _prevChapPage  = currentChapPage; // display page before updateStatusBar mutates it
-  const _prevEpubPage  = _epubChapPage;   // epub.js raw page before updateStatusBar mutates it
-  // Reset skip offset whenever we cross into a new chapter (each chapter reindexes from 1)
+  const _prevChapPage    = currentChapPage;   // display page before updateStatusBar mutates it
+  const _prevEpubPage    = _epubChapPage;     // epub.js raw start page before updateStatusBar mutates it
+  const _prevEpubEndPage = _epubChapEndPage;  // epub.js raw end page before updateStatusBar mutates it
+  // Reset skip offset whenever we cross into a new chapter (each chapter reindexes from 1).
+  // If we completed the chapter (NEXT from last page) with fewer skips than cached, the cached
+  // value is stale (written by old buggy code or from a different device layout). Correct it down.
   if (isReady && href && oldChapterHref && href !== oldChapterHref) {
+    if (pendingNavDirection === 'next' && pendingWasChapterEnd &&
+        currentBook?.file_hash &&
+        _chapDisplayOffset < (chapOffsetCache[_prevSpineIndex] || 0)) {
+      chapOffsetCache[_prevSpineIndex] = _chapDisplayOffset;
+      try {
+        localStorage.setItem(`br_chapoff_${currentBook.file_hash}_${_prevSpineIndex}`, _chapDisplayOffset);
+        console.log(`[skip-cache] correct stale off spineIdx=${_prevSpineIndex} → ${_chapDisplayOffset}`);
+      } catch {}
+    }
     _chapDisplayOffset = 0;
     _epubChapPage      = 0;
+    _epubChapEndPage   = 0;
   }
   updateStatusBar(location);
   scheduleBionicPrefetchAround(location);
@@ -4494,11 +4512,11 @@ function updateProgress(location) {
     _wasNavDir === 'next' &&
     href === oldChapterHref &&
     isReady &&
-    _prevEpubPage > 0 &&
-    startPage > _prevEpubPage + 1 &&
+    _prevEpubEndPage > 0 &&
+    startPage > _prevEpubEndPage + 1 &&
     !wasAutoAdvance
   ) {
-    _chapDisplayOffset += startPage - _prevEpubPage - 1;
+    _chapDisplayOffset += startPage - _prevEpubEndPage - 1;
     // Persist max observed offset for this chapter so re-entry shows correct total
     const _newMaxOff = Math.max(chapOffsetCache[currentSpineIndex] || 0, _chapDisplayOffset);
     if (_newMaxOff > (chapOffsetCache[currentSpineIndex] || 0)) {
@@ -4508,20 +4526,23 @@ function updateProgress(location) {
         console.log(`[skip-cache] saved spineIdx=${currentSpineIndex} off=${_newMaxOff}`);
       } catch {}
     }
-    console.log(`[nav] skip-fix | epub ${_prevEpubPage}→${startPage} off=${_chapDisplayOffset} → show p=${startPage - _chapDisplayOffset}`);
+    console.log(`[nav] skip-fix | epub endP=${_prevEpubEndPage}→startP=${startPage} off=${_chapDisplayOffset} → show p=${startPage - _chapDisplayOffset}`);
     updateStatusBar(location);
   }
 
-  // Skip-fix (PREV): epub.js jumped >1 column backward (crossing a previously-skipped
+  // Skip-fix (PREV): epub.js jumped >1 spread backward (crossing a previously-skipped
   // boundary). Shrink _chapDisplayOffset to mirror the forward correction in reverse.
+  // Use current spread size so 2-column mode (step=2) isn't falsely flagged.
+  const _rawEpubEndHere    = location?.end?.displayed?.page ?? 0;
+  const _currentSpreadSize = (_rawEpubEndHere > startPage) ? (_rawEpubEndHere - startPage + 1) : 1;
   if (
     _wasNavDir === 'prev' &&
     href === oldChapterHref &&
     isReady &&
     _prevEpubPage > 0 &&
-    _prevEpubPage - startPage > 1
+    _prevEpubPage - startPage > _currentSpreadSize
   ) {
-    _chapDisplayOffset = Math.max(0, _chapDisplayOffset - (_prevEpubPage - startPage - 1));
+    _chapDisplayOffset = Math.max(0, _chapDisplayOffset - (_prevEpubPage - startPage - _currentSpreadSize));
     console.log(`[nav] skip-fix-prev | epub ${_prevEpubPage}→${startPage} off=${_chapDisplayOffset} → show p=${startPage - _chapDisplayOffset}`);
     updateStatusBar(location);
   }
@@ -5006,9 +5027,26 @@ function getLocsCacheKey() {
 }
 
 async function startRendition(displayCfi = null) {
+  // One-time migration: clear chapter skip-offset caches written by the old buggy
+  // 2-column detection code, which counted normal 2-column advances as skips, inflating
+  // the offset on desktop. Version '2' marks the corrected detection logic.
+  try {
+    const _SKIP_VER = '2';
+    if (localStorage.getItem('br_skipver') !== _SKIP_VER) {
+      const _toDel = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k?.startsWith('br_chapoff_')) _toDel.push(k);
+      }
+      _toDel.forEach(k => localStorage.removeItem(k));
+      localStorage.setItem('br_skipver', _SKIP_VER);
+      console.log(`[skip-cache] migration v${_SKIP_VER}: cleared ${_toDel.length} stale entries`);
+    }
+  } catch {}
   chapPageCache      = {};
   chapOffsetCache    = {};
   _epubChapPage      = 0;
+  _epubChapEndPage   = 0;
   _chapDisplayOffset = 0;
   currentLocsKey = getLocsCacheKey();
   // On small screens always force single-page, regardless of user preference.
@@ -5132,7 +5170,7 @@ function goNext() {
   // now lets the live check produce a false wasEnd=true (e.g. live=25 with total=26
   // triggers 25>=25 even though tracked says page 23). Defer 200ms so repaginate
   // can correct the tracked state first, then retry.
-  if (!!_liveEnd && !!currentEndPage && Math.abs(_liveEnd - currentEndPage) > 1) {
+  if (!!_liveEnd && !!_epubChapEndPage && Math.abs(_liveEnd - _epubChapEndPage) > 1) {
     const hrefAtDefer = currentHref;
     deferredNextPending = true;
     console.log(`[nav] NEXT deferred | mid-repagination tracked=${currentEndPage} live=${_liveEnd}`);
@@ -5151,8 +5189,8 @@ function goNext() {
   // We use both tracked state and live DOM state; OR avoids false positives from
   // stale tracked values and from missed repagination poll updates.
   pendingWasChapterEnd =
-    currentEndPage === 0 || currentChapTotal === 0 ||
-    currentEndPage >= currentChapTotal - 1 ||
+    _epubChapEndPage === 0 || currentChapTotal === 0 ||
+    _epubChapEndPage >= currentChapTotal - 1 ||
     (!!_liveEnd && !!_liveTotal && _liveEnd >= _liveTotal - 1);
   console.log(
     `[nav] NEXT | tracked end=${currentEndPage}/${currentChapTotal}` +
@@ -5503,6 +5541,7 @@ async function resizeRenditionToViewer() {
   chapPageCache      = {};
   chapOffsetCache    = {};
   _epubChapPage      = 0;
+  _epubChapEndPage   = 0;
   _chapDisplayOffset = 0;
   currentChapTotal   = 0;
   rendition.resize(epubViewer.clientWidth, Math.max(200, epubViewer.clientHeight - RENDITION_BOTTOM_RESERVE));
