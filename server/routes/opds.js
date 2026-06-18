@@ -74,6 +74,7 @@ router.get('/sync-sse', async (req, res) => {
 
   const { serverId, folderUrl, shelfName } = req.query;
   const limitParam = req.query.limit ? parseInt(req.query.limit, 10) : null;
+  const force = req.query.force === '1';
   if (serverId === undefined || serverId === null) return done({ type: 'error', message: 'error.server_id_required' });
   if (!shelfName || !String(shelfName).trim()) return done({ type: 'error', message: 'error.shelf_name_required' });
 
@@ -95,7 +96,7 @@ router.get('/sync-sse', async (req, res) => {
     const bookEntries = (limitParam && limitParam > 0)
       ? allBookEntries.slice(0, limitParam)
       : allBookEntries;
-    if (!bookEntries.length) return done({ type: 'done', added: 0, skipped: 0, errors: 0, shelfId: null });
+    if (!bookEntries.length) return done({ type: 'done', added: 0, skipped: 0, refreshed: 0, errors: 0, shelfId: null });
 
     send({ type: 'start', total: bookEntries.length });
 
@@ -127,7 +128,7 @@ router.get('/sync-sse', async (req, res) => {
     }
 
     const headers = buildAuthHeaders(server.username, server.password);
-    let added = 0, skipped = 0, errors = 0;
+    let added = 0, skipped = 0, refreshed = 0, errors = 0;
     const syncedBookIds = new Set(); // track all book IDs touched by this sync
     // All acquisition URLs present in the feed (full list, not the limited slice) — used for stale detection fallback
     const feedAcqHrefs = new Set(allBookEntries.map(e => e.acqHref).filter(Boolean));
@@ -137,8 +138,8 @@ router.get('/sync-sse', async (req, res) => {
       const entry = bookEntries[i];
       send({ type: 'progress', current: i + 1, total: bookEntries.length, book: entry.title || '' });
       try {
-        // Fast path: skip download if we already processed this acqHref
-        if (entry.acqHref) {
+        // Fast path: skip download if we already processed this acqHref (skipped when force=true)
+        if (!force && entry.acqHref) {
           const src = db.prepare('SELECT book_id FROM book_opds_sources WHERE user_id = ? AND acq_href = ?').get(user.id, entry.acqHref);
           if (src) {
             db.prepare('INSERT OR IGNORE INTO book_shelves (shelf_id, book_id) VALUES (?, ?)').run(shelf.id, src.book_id);
@@ -158,6 +159,45 @@ router.get('/sync-sse', async (req, res) => {
         try {
           const fileHash    = computeFileHash(tmpPath);
           const fileHashMd5 = computeFileMd5(tmpPath);
+
+          // Force mode: if we already own a book from this URL, overwrite its file and re-extract metadata
+          if (force && entry.acqHref) {
+            const src = db.prepare('SELECT book_id FROM book_opds_sources WHERE user_id = ? AND acq_href = ?').get(user.id, entry.acqHref);
+            if (src) {
+              const existingBook = db.prepare('SELECT * FROM books WHERE id = ? AND user_id = ?').get(src.book_id, user.id);
+              if (existingBook) {
+                const destPath = path.join(userDir, existingBook.file_hash + '.epub');
+                try { fs.renameSync(tmpPath, destPath); }
+                catch { fs.copyFileSync(tmpPath, destPath); fs.unlinkSync(tmpPath); }
+                const meta = extractEpubMetadata(destPath, COVERS_DIR, existingBook.file_hash);
+                db.prepare(`UPDATE books SET
+                  file_hash_md5 = ?, kosync_hash = '',
+                  cover_path  = ?,
+                  description = CASE WHEN ? != '' THEN ? ELSE description END,
+                  publisher   = CASE WHEN ? != '' THEN ? ELSE publisher   END,
+                  language    = CASE WHEN ? != '' THEN ? ELSE language    END,
+                  isbn        = CASE WHEN ? != '' THEN ? ELSE isbn        END,
+                  genres      = CASE WHEN ? != '' THEN ? ELSE genres      END,
+                  pages       = CASE WHEN ? > 0   THEN ? ELSE pages       END
+                WHERE id = ?`).run(
+                  fileHashMd5,
+                  meta.cover_path,
+                  meta.description || '', meta.description || '',
+                  meta.publisher   || '', meta.publisher   || '',
+                  meta.language    || '', meta.language    || '',
+                  meta.isbn        || '', meta.isbn        || '',
+                  meta.genres      || '', meta.genres      || '',
+                  meta.pages || 0,  meta.pages || 0,
+                  existingBook.id
+                );
+                db.prepare('INSERT OR IGNORE INTO book_shelves (shelf_id, book_id) VALUES (?, ?)').run(shelf.id, existingBook.id);
+                syncedBookIds.add(existingBook.id);
+                refreshed++;
+                continue;
+              }
+            }
+          }
+
           let book = db.prepare('SELECT id FROM books WHERE user_id = ? AND file_hash = ?').get(user.id, fileHash);
           if (!book) {
             const filename = `${fileHash}.epub`;
@@ -219,7 +259,7 @@ router.get('/sync-sse', async (req, res) => {
       }
     }
 
-    done({ type: 'done', added, skipped, errors, shelfId: shelf.id, staleBooks });
+    done({ type: 'done', added, skipped, refreshed, errors, shelfId: shelf.id, staleBooks });
   } catch (err) {
     console.error('[opds] sync-sse error:', err.message);
     done({ type: 'error', message: err.message });

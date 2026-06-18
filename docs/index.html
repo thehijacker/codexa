@@ -1,0 +1,1899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Codexa Documentation</title>
+  <link rel="stylesheet" href="css/docs.css">
+</head>
+<body>
+
+<button id="hamburger" aria-label="Open menu">&#9776;</button>
+<div id="nav-overlay"></div>
+
+<div id="layout">
+
+  <!-- ── Left Navigation ─────────────────────────────────────────────────── -->
+  <nav id="nav">
+    <div id="nav-header">
+      <a id="nav-logo" href="#about">&#128218; Codexa</a>
+      <div id="search-wrap">
+        <input id="search-input" type="search" placeholder="Search docs…" autocomplete="off" spellcheck="false">
+        <button id="search-clear" aria-label="Clear search">&#215;</button>
+        <span id="search-count"></span>
+      </div>
+      <div id="nav-actions">
+        <button id="theme-btn" title="Toggle theme">&#9737; System</button>
+      </div>
+    </div>
+
+    <div id="nav-links">
+      <ul>
+        <li>
+          <a href="#about" data-section="about">About Codexa</a>
+          <ul class="nav-sub">
+            <li><a href="#about-glance" data-section="about" data-scroll="about-glance">At a Glance</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#features" data-section="features">Features</a>
+        </li>
+        <li>
+          <a href="#installation" data-section="installation">Installation</a>
+          <ul class="nav-sub">
+            <li><a href="#inst-docker"  data-section="installation" data-scroll="inst-docker">Docker</a></li>
+            <li><a href="#inst-env"     data-section="installation" data-scroll="inst-env">Environment Variables</a></li>
+            <li><a href="#inst-update"  data-section="installation" data-scroll="inst-update">Updating</a></li>
+            <li><a href="#inst-manual"  data-section="installation" data-scroll="inst-manual">Manual Build from Source</a></li>
+            <li><a href="#inst-proxy"   data-section="installation" data-scroll="inst-proxy">Reverse Proxy</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#mobile" data-section="mobile">Mobile Apps</a>
+          <ul class="nav-sub">
+            <li><a href="#mobile-pwa"     data-section="mobile" data-scroll="mobile-pwa">PWA</a></li>
+            <li><a href="#mobile-android" data-section="mobile" data-scroll="mobile-android">Android APK</a></li>
+            <li><a href="#mobile-ios"     data-section="mobile" data-scroll="mobile-ios">iOS App</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#data-dir" data-section="data-dir">Data Directory</a>
+        </li>
+        <li>
+          <a href="#first-login" data-section="first-login">First Login</a>
+          <ul class="nav-sub">
+            <li><a href="#login-register" data-section="first-login" data-scroll="login-register">Registering</a></li>
+            <li><a href="#login-security" data-section="first-login" data-scroll="login-security">Security</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#settings" data-section="settings">Settings</a>
+          <ul class="nav-sub">
+            <li><a href="#settings-general"  data-section="settings" data-scroll="settings-general">General</a></li>
+            <li><a href="#settings-kosync"   data-section="settings" data-scroll="settings-kosync">KOReader Sync</a></li>
+            <li><a href="#settings-opds-srv" data-section="settings" data-scroll="settings-opds-srv">OPDS Servers</a></li>
+            <li><a href="#settings-dicts"    data-section="settings" data-scroll="settings-dicts">Dictionaries</a></li>
+            <li><a href="#settings-admin"    data-section="settings" data-scroll="settings-admin">Admin</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#dictionary" data-section="dictionary">Dictionary Lookup</a>
+          <ul class="nav-sub">
+            <li><a href="#dict-how"     data-section="dictionary" data-scroll="dict-how">How It Works</a></li>
+            <li><a href="#dict-install" data-section="dictionary" data-scroll="dict-install">Installing</a></li>
+            <li><a href="#dict-enable"  data-section="dictionary" data-scroll="dict-enable">Enabling &amp; Reordering</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#opds" data-section="opds">Online library</a>
+          <ul class="nav-sub">
+            <li><a href="#opds-start"    data-section="opds" data-scroll="opds-start">Getting Started</a></li>
+            <li><a href="#opds-browse"   data-section="opds" data-scroll="opds-browse">Browsing</a></li>
+            <li><a href="#opds-download" data-section="opds" data-scroll="opds-download">Downloading</a></li>
+            <li><a href="#opds-sync"     data-section="opds" data-scroll="opds-sync">Folder Sync to Shelf</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#themes" data-section="themes">Themes</a>
+          <ul class="nav-sub">
+            <li><a href="#themes-reader" data-section="themes" data-scroll="themes-reader">Reader Themes</a></li>
+            <li><a href="#themes-eink"   data-section="themes" data-scroll="themes-eink">E-ink Mode</a></li>
+            <li><a href="#themes-app"    data-section="themes" data-scroll="themes-app">App Theme</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#languages" data-section="languages">Supported Languages</a>
+          <ul class="nav-sub">
+            <li><a href="#lang-hyphen" data-section="languages" data-scroll="lang-hyphen">Hyphenation</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#upload" data-section="upload">Uploading Books</a>
+          <ul class="nav-sub">
+            <li><a href="#upload-methods"  data-section="upload" data-scroll="upload-methods">Upload Methods</a></li>
+            <li><a href="#upload-metadata" data-section="upload" data-scroll="upload-metadata">Metadata Extraction</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#library" data-section="library">Library</a>
+          <ul class="nav-sub">
+            <li><a href="#lib-search" data-section="library" data-scroll="lib-search">Search</a></li>
+            <li><a href="#lib-sort"   data-section="library" data-scroll="lib-sort">Sort Order</a></li>
+            <li><a href="#lib-tabs"   data-section="library" data-scroll="lib-tabs">Shelf Tabs</a></li>
+            <li><a href="#lib-edit"   data-section="library" data-scroll="lib-edit">Edit Mode</a></li>
+            <li><a href="#lib-stats"  data-section="library" data-scroll="lib-stats">Reading Statistics</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#shelves" data-section="shelves">Shelves</a>
+          <ul class="nav-sub">
+            <li><a href="#shelf-create" data-section="shelves" data-scroll="shelf-create">Creating a Shelf</a></li>
+            <li><a href="#shelf-add"    data-section="shelves" data-scroll="shelf-add">Adding Books</a></li>
+            <li><a href="#shelf-sync"   data-section="shelves" data-scroll="shelf-sync">OPDS Folder Sync</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#offline" data-section="offline">Offline Reading</a>
+          <ul class="nav-sub">
+            <li><a href="#offline-how"      data-section="offline" data-scroll="offline-how">How It Works</a></li>
+            <li><a href="#offline-download" data-section="offline" data-scroll="offline-download">Downloading a Book</a></li>
+            <li><a href="#offline-reading"  data-section="offline" data-scroll="offline-reading">Reading Offline</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#book-details" data-section="book-details">Book Details</a>
+          <ul class="nav-sub">
+            <li><a href="#details-actions" data-section="book-details" data-scroll="details-actions">Quick Actions</a></li>
+            <li><a href="#details-tab"     data-section="book-details" data-scroll="details-tab">Details Tab</a></li>
+            <li><a href="#details-shelves" data-section="book-details" data-scroll="details-shelves">Shelves Tab</a></li>
+            <li><a href="#details-kosync"  data-section="book-details" data-scroll="details-kosync">KOSync Tab</a></li>
+            <li><a href="#details-reading" data-section="book-details" data-scroll="details-reading">Reading Tab</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#reader" data-section="reader">Reader</a>
+          <ul class="nav-sub">
+            <li><a href="#reader-nav"       data-section="reader" data-scroll="reader-nav">Navigation</a></li>
+            <li><a href="#reader-toc"       data-section="reader" data-scroll="reader-toc">Table of Contents</a></li>
+            <li><a href="#reader-bookmarks" data-section="reader" data-scroll="reader-bookmarks">Bookmarks</a></li>
+            <li><a href="#reader-annot"     data-section="reader" data-scroll="reader-annot">Highlights &amp; Annotations</a></li>
+            <li><a href="#reader-search"    data-section="reader" data-scroll="reader-search">Search</a></li>
+            <li><a href="#reader-dict"      data-section="reader" data-scroll="reader-dict">Dictionary Lookup</a></li>
+            <li><a href="#reader-footnotes" data-section="reader" data-scroll="reader-footnotes">Footnotes</a></li>
+            <li><a href="#reader-progress"  data-section="reader" data-scroll="reader-progress">Reading Progress</a></li>
+            <li><a href="#reader-jump"      data-section="reader" data-scroll="reader-jump">Jump to Position</a></li>
+            <li><a href="#reader-fullscreen" data-section="reader" data-scroll="reader-fullscreen">Fullscreen</a></li>
+            <li><a href="#reader-settings"  data-section="reader" data-scroll="reader-settings">Reading Settings</a></li>
+            <li><a href="#reader-theme"     data-section="reader" data-scroll="reader-theme">&nbsp;&nbsp;Theme Tab</a></li>
+            <li><a href="#reader-text"      data-section="reader" data-scroll="reader-text">&nbsp;&nbsp;Text Tab</a></li>
+            <li><a href="#reader-page"      data-section="reader" data-scroll="reader-page">&nbsp;&nbsp;Page Tab</a></li>
+            <li><a href="#reader-device"    data-section="reader" data-scroll="reader-device">&nbsp;&nbsp;Device Tab</a></li>
+            <li><a href="#reader-statusbar" data-section="reader" data-scroll="reader-statusbar">&nbsp;&nbsp;Status Bar Tab</a></li>
+            <li><a href="#reader-dicts-tab" data-section="reader" data-scroll="reader-dicts-tab">&nbsp;&nbsp;Dictionaries Tab</a></li>
+            <li><a href="#reader-kosync"    data-section="reader" data-scroll="reader-kosync">KOReader Sync</a></li>
+            <li><a href="#reader-peek"      data-section="reader" data-scroll="reader-peek">Peek Mode</a></li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+
+    <div id="nav-footer">
+      <a href="https://github.com/thehijacker/codexa" target="_blank" rel="noopener">GitHub</a>
+      &nbsp;&middot;&nbsp;
+      AGPL-3.0
+    </div>
+  </nav>
+
+  <!-- ── Content ─────────────────────────────────────────────────────────── -->
+  <main id="content">
+
+    <!-- ═══════════════════════════════════════════════════════ About ════ -->
+    <section id="about" class="active">
+      <h1>About Codexa</h1>
+      <p class="section-subtitle">A self-hosted EPUB reader with KOReader sync, OPDS browsing, and offline support</p>
+
+      <p>
+        Codexa is a self-hosted web application for reading EPUB books. It runs as a lightweight
+        Node.js container, requires no cloud account, and keeps all your data on your own server.
+        Open it in any modern browser, install it as a Progressive Web App, or use the dedicated
+        Android and iOS apps.
+      </p>
+
+      <p>
+        I was using Grimmory/Booklore as my ebook collection server and many different devices connected to its 
+        OPDS service and KOReader sync server to sync progress. Sadly some of my epub books were not properly 
+        displayed in Grimmory web reader and also two way Grimmory <-> KOReader sync was not yet working, 
+        so when failing to find alternative web base browser, I decided to develop my own. It started as a 
+        personal project, but grew so much that I would like to share if anyone else might find it useful.
+      </p>
+      <p>
+        Codexa stores everything locally — books, covers, annotations, and reading positions —
+        with optional synchronisation to KOReader devices using the open KOSync protocol.
+      </p>
+
+      <figure>
+        <img src="../screenshots/library.png" alt="Codexa library view showing book covers in a grid">
+        <figcaption>The Codexa library — all your books in one place</figcaption>
+      </figure>
+
+      <h2 id="about-glance">At a Glance</h2>
+      <ul>
+        <li><strong>Single Node.js process</strong> — easy to deploy with Docker in minutes</li>
+        <li><strong>Multi-user with JWT authentication</strong> — per-user libraries</li>
+        <li><strong>Full offline reading</strong> — via a Service Worker cache</li>
+        <li><strong>Built-in KOSync-compatible server</strong> — connect KOReader devices without extra software</li>
+        <li><strong>OPDS catalog browser</strong> — for Calibre-Web, Komga, Kavita, and others</li>
+        <li><strong>Works on any device</strong> — desktop browsers, mobile PWA, Android APK, iOS IPA</li>
+        <li><strong>Optimised for e-ink displays</strong> — BOOX, Kobo, and similar</li>
+      </ul>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════ Features ═══ -->
+    <section id="features">
+      <h1>Features</h1>
+      <p class="section-subtitle">Everything included in Codexa</p>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <h3>&#128214; Reading</h3>
+          <ul>
+            <li><strong>EPUB reader powered by epub.js</strong> — reflowable and fixed layout</li>
+            <li><strong>Paginated layout</strong> — with configurable margins and columns</li>
+            <li><strong>Bookmarks</strong> — with custom labels</li>
+            <li><strong>Highlights</strong> — in four colours (yellow, green, blue, pink) with notes</li>
+            <li><strong>In-book full-text search</strong> — with result navigation</li>
+            <li><strong>StarDict dictionary lookup</strong> — double-click on desktop, long-press on mobile</li>
+            <li><strong>Footnote and endnote popups</strong> — without leaving the page</li>
+            <li><strong>Bionic reading</strong> — bolds word prefixes to guide the eye</li>
+            <li><strong>Two-page spread</strong> — for wider screens</li>
+            <li><strong>Fullscreen mode</strong></li>
+            <li><strong>Auto-hiding toolbar</strong></li>
+          </ul>
+        </div>
+
+        <div class="feature-card">
+          <h3>&#127775; Display &amp; Themes</h3>
+          <ul>
+            <li><strong>7 built-in themes</strong> — Light, Sepia, Dark, Sepia Dark, Midnight, Nord, plus Custom with free color picking</li>
+            <li><strong>E-ink mode</strong> — high-contrast black-and-white for e-ink displays</li>
+            <li><strong>Custom fonts</strong> (TTF/OTF/WOFF/WOFF2) uploaded by admin</li>
+            <li><strong>Extensive text settings</strong> — font, size, line height, letter spacing, indentation, hyphenation</li>
+            <li><strong>Configurable status bar</strong> — with up to 6 overlay slots</li>
+            <li><strong>Screen edge padding</strong> — for curved screens and notches</li>
+          </ul>
+        </div>
+
+        <div class="feature-card">
+          <h3>&#128257; Sync &amp; Progress</h3>
+          <ul>
+            <li><strong>Automatic position saving</strong> — on every device</li>
+            <li><strong>Built-in KOSync-compatible server</strong> — for KOReader devices</li>
+            <li><strong>External KOSync server support</strong> — with conflict resolution</li>
+            <li><strong>Interrupted session recovery banner</strong></li>
+            <li><strong>Reading statistics</strong> — time read, pages turned, sessions, books started/finished</li>
+          </ul>
+        </div>
+
+        <div class="feature-card">
+          <h3>&#128241; Offline &amp; Mobile</h3>
+          <ul>
+            <li><strong>Download any book for offline reading</strong> — via Service Worker cache</li>
+            <li><strong>PWA</strong> — installable on desktop and mobile</li>
+            <li><strong>Android app</strong> — with volume-key navigation, portrait lock, hardware e-ink toggle</li>
+            <li><strong>iOS app</strong> — sideload or TestFlight</li>
+            <li><strong>Responsive layout</strong> — for phones, tablets, and desktops</li>
+          </ul>
+        </div>
+
+        <div class="feature-card">
+          <h3>&#128218; Library</h3>
+          <ul>
+            <li><strong>Multi-user with JWT authentication</strong> — per-user libraries</li>
+            <li><strong>Shelves</strong> — organise books into named collections</li>
+            <li><strong>Online library</strong> — browse OPDS catalogs from Calibre-Web, Komga, Kavita, and more</li>
+            <li><strong>Bulk shelf sync</strong> — from OPDS folder with stale-book detection</li>
+            <li><strong>Series support</strong> — with series name, number, and one-click filter</li>
+            <li><strong>Sort</strong> — by date, title, author, progress, or series</li>
+            <li><strong>Real-time library search</strong></li>
+          </ul>
+        </div>
+
+        <div class="feature-card">
+          <h3>&#128737; Admin</h3>
+          <ul>
+            <li><strong>User management</strong> — view all accounts, delete users</li>
+            <li><strong>Font management</strong> — upload and delete custom fonts for all users</li>
+            <li><strong>Dictionary management</strong> — upload StarDict ZIP archives</li>
+            <li><strong>Registration control</strong> — enable or disable new-user sign-up</li>
+            <li><strong>Refresh book metadata</strong> — re-extract genres, descriptions, and covers from all EPUB files</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="screenshots-grid">
+        <figure>
+          <img src="../screenshots/reader.png" alt="Reader view">
+          <figcaption>Reader</figcaption>
+        </figure>
+        <figure>
+          <img src="../screenshots/e-ink.png" alt="E-ink mode">
+          <figcaption>E-ink Mode</figcaption>
+        </figure>        
+        <figure>
+          <img src="../screenshots/dictionary.png" alt="Dictionary lookup popup">
+          <figcaption>Dictionary</figcaption>
+        </figure>
+        <figure>
+          <img src="../screenshots/opds_browser.png" alt="Online library OPDS browser">
+          <figcaption>Online library OPDS browser</figcaption>
+        </figure>
+        <figure>
+          <img src="../screenshots/library.png" alt="Library view">
+          <figcaption>Library view</figcaption>
+        </figure>
+        <figure>
+          <img src="../screenshots/dark_mode.png" alt="Dark mode">
+          <figcaption>Dark mode</figcaption>
+        </figure>        
+      </div>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════ Installation ═══ -->
+    <section id="installation">
+      <h1>Installation</h1>
+      <p class="section-subtitle">Deploy with Docker or build from source</p>
+
+      <h2 id="inst-docker">Docker (Recommended)</h2>
+
+      <p>The quickest way to run Codexa is with Docker Compose.</p>
+
+      <h3>1. Create your compose file</h3>
+      <div class="code-block">
+        <button class="copy-btn">Copy</button>
+        <pre><code>cp docker-compose.sample.yaml docker-compose.yaml</code></pre>
+      </div>
+
+      <p>Or create <code>docker-compose.yaml</code> with this content:</p>
+
+      <div class="code-block">
+        <button class="copy-btn">Copy</button>
+        <pre><code>services:
+  codexa:
+    image: ghcr.io/thehijacker/codexa:latest
+    container_name: codexa
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - codexa_data:/data
+    environment:
+      JWT_SECRET: "replace_with_a_long_random_secret_string_at_least_64_chars"
+      # CORS_ORIGIN: "https://books.example.com"
+      # PORT: "3000"
+volumes:
+  codexa_data:</code></pre>
+      </div>
+
+      <h3>2. Generate a JWT secret</h3>
+      <p>
+        <code>JWT_SECRET</code> is required and must be at least 64 characters. The server will
+        refuse to start without it. Generate one with either command:
+      </p>
+      <div class="code-block">
+        <button class="copy-btn">Copy</button>
+        <pre><code>node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"</code></pre>
+      </div>
+      <div class="code-block">
+        <button class="copy-btn">Copy</button>
+        <pre><code>openssl rand -hex 64</code></pre>
+      </div>
+      <p>Paste the output into <code>docker-compose.yaml</code> as the value of <code>JWT_SECRET</code>.</p>
+
+      <div class="callout warning">
+        <strong>&#9888; Keep your JWT secret safe</strong>
+        Changing <code>JWT_SECRET</code> will invalidate all active sessions — every user will be
+        logged out. Store it in a password manager or secrets vault.
+      </div>
+
+      <h3>3. Start the container</h3>
+      <div class="code-block">
+        <button class="copy-btn">Copy</button>
+        <pre><code>docker compose up -d</code></pre>
+      </div>
+      <p>Codexa is now running at <strong>http://localhost:3000</strong>. Register the first account — it will automatically become the admin.</p>
+
+      <h2 id="inst-env">Environment Variables</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Variable</th><th>Required</th><th>Default</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>JWT_SECRET</code></td>
+              <td><strong>Yes</strong></td>
+              <td>—</td>
+              <td>Long random string (≥&nbsp;64 chars). Signs session tokens. Changing it logs everyone out.</td>
+            </tr>
+            <tr>
+              <td><code>PORT</code></td>
+              <td>No</td>
+              <td><code>3000</code></td>
+              <td>TCP port the server listens on.</td>
+            </tr>
+            <tr>
+              <td><code>DATA_DIR</code></td>
+              <td>No</td>
+              <td><code>./data</code></td>
+              <td>Path to persistent storage (books, covers, fonts, dictionaries, database).</td>
+            </tr>
+            <tr>
+              <td><code>CORS_ORIGIN</code></td>
+              <td>No</td>
+              <td>same-origin</td>
+              <td>Allowed CORS origin, e.g. <code>https://books.example.com</code>. Only needed when the app is served from a different origin than the API.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="inst-update">Updating</h2>
+      <div class="code-block">
+        <button class="copy-btn">Copy</button>
+        <pre><code>docker compose pull
+docker compose up -d</code></pre>
+      </div>
+      <p>The data volume is preserved across updates. The database schema is migrated automatically on startup.</p>
+
+      <h2 id="inst-manual">Manual Build from Source</h2>
+      <p>Requires <strong>Node.js ≥ 18</strong>.</p>
+      <div class="code-block">
+        <button class="copy-btn">Copy</button>
+        <pre><code>git clone https://github.com/thehijacker/codexa.git
+cd codexa
+cp .env.example .env
+# Edit .env and set JWT_SECRET
+npm install
+npm run build
+npm start</code></pre>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Command</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>npm run build</code></td><td>Bundles and minifies the client-side assets. Run this after every pull.</td></tr>
+            <tr><td><code>npm start</code></td><td>Starts the server. Reads configuration from environment variables or <code>.env</code>.</td></tr>
+            <tr><td><code>npm run dev</code></td><td>Starts with nodemon — auto-restarts on file changes (development only).</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="inst-proxy">Behind a Reverse Proxy</h2>
+      <p>
+        Codexa serves plain HTTP. Put it behind <strong>nginx</strong>, <strong>Caddy</strong>, or
+        <strong>Traefik</strong> to add HTTPS. Set <code>client_max_body_size</code> to at least
+        300&nbsp;MB so large EPUB uploads are not rejected.
+      </p>
+
+      <div class="code-block">
+        <button class="copy-btn">Copy</button>
+        <pre><code>server {
+    listen 443 ssl;
+    server_name books.example.com;
+
+    location / {
+        proxy_pass         http://127.0.0.1:3000;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        client_max_body_size 300M;
+    }
+}</code></pre>
+      </div>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════ Mobile Apps ══ -->
+    <section id="mobile">
+      <h1>Mobile Apps</h1>
+      <p class="section-subtitle">Install Codexa on any phone or tablet</p>
+
+      <h2 id="mobile-pwa">Progressive Web App (PWA)</h2>
+      <p>
+        The easiest way to use Codexa on mobile. No app store needed — install directly from the
+        browser.
+      </p>
+      <ul>
+        <li><strong>Android (Chrome):</strong> tap the install icon in the address bar, or open the browser menu and choose "Add to Home screen".</li>
+        <li><strong>iOS (Safari):</strong> tap the Share button &#9651; → "Add to Home Screen".</li>
+        <li><strong>Desktop (Chrome/Edge):</strong> click the install icon in the address bar.</li>
+      </ul>
+      <p>Once installed, Codexa opens in fullscreen without browser chrome, just like a native app.</p>
+
+      <div class="screenshots-grid">
+        <figure>
+          <img src="../screenshots/mobile/library.jpg" alt="Mobile library view">
+          <figcaption>Mobile library</figcaption>
+        </figure>
+        <figure>
+          <img src="../screenshots/mobile/reader.jpg" alt="Mobile reader">
+          <figcaption>Mobile reader</figcaption>
+        </figure>
+      </div>
+
+      <h2 id="mobile-android">Android APK</h2>
+      <p>
+        The Android APK is a native wrapper that integrates Codexa with hardware features not
+        available in a browser.
+      </p>
+
+      <h3>Installation</h3>
+      <ol class="steps">
+        <li>Download the APK from the <a href="https://github.com/thehijacker/codexa/releases" target="_blank" rel="noopener">GitHub Releases</a> page.</li>
+        <li>On your Android device, go to <strong>Settings → Security</strong> (or <em>Apps → Special app access</em>) and enable <strong>Install from unknown sources</strong> for your browser or file manager.</li>
+        <li>Open the downloaded APK and tap <strong>Install</strong>.</li>
+        <li>Launch Codexa. On first run you will see a URL input screen — enter your Codexa server address (e.g. <code>https://books.example.com</code>).</li>
+      </ol>
+
+      <h3>Changing the Server URL</h3>
+      <p>
+        From the reader, press the hardware back button twice quickly to return to the server
+        selection screen. You can then enter a new URL.
+      </p>
+
+      <h3>E-ink Mode</h3>
+      <p>
+        The URL input screen has an <strong>E-ink mode</strong> toggle. When enabled, Codexa
+        applies a grayscale colour filter system-wide, increases contrast, and disables animations.
+        This setting is saved across restarts.
+      </p>
+
+      <h3>Hardware Features</h3>
+      <ul>
+        <li><strong>Volume keys:</strong> navigate pages with the physical volume up/down buttons (enable in reader Settings → Device).</li>
+        <li><strong>Portrait lock:</strong> prevent screen rotation (Settings → Device).</li>
+        <li><strong>Screen on:</strong> keep the display awake while reading (Settings → Device).</li>
+        <li><strong>Fullscreen:</strong> automatically hides Android navigation and status bars while in the reader.</li>
+      </ul>
+
+      <div class="callout">
+        <strong>Compatibility</strong>
+        The Android app is compatible with older WebView versions and handles known quirks in
+        Chrome&nbsp;83-era WebView found on some e-ink devices.
+      </div>
+
+      <div class="screenshots-grid">
+        <figure>
+          <img src="../screenshots/mobile/eink.jpg" alt="E-ink mode on Android">
+          <figcaption>E-ink mode</figcaption>
+        </figure>
+        <figure>
+          <img src="../screenshots/mobile/dictionary.jpg" alt="Dictionary on mobile">
+          <figcaption>Dictionary on mobile</figcaption>
+        </figure>
+      </div>
+
+      <h2 id="mobile-ios">iOS App</h2>
+      <p>
+        The iOS app is built with Capacitor and wraps the Codexa web app in a native container.
+        Distribution is available via two paths:
+      </p>
+
+      <h3>Path A — Free Sideload (no Apple account fee)</h3>
+      <ol class="steps">
+        <li>Download the <code>.ipa</code> file from the <strong>GitHub Actions artifacts</strong> (available 30 days after each build).</li>
+        <li>Install <a href="https://sideloadly.io" target="_blank" rel="noopener">Sideloadly</a> on Windows or macOS. iTunes drivers are required on Windows.</li>
+        <li>Connect your iPhone/iPad via USB, open Sideloadly, drag in the IPA, and click Start.</li>
+        <li>On the device: go to <strong>Settings → General → VPN &amp; Device Management</strong> and trust the developer certificate.</li>
+      </ol>
+      <div class="callout warning">
+        <strong>&#9888; 7-day expiry</strong>
+        Sideloaded apps signed with a free Apple ID expire after 7 days. Re-sign with Sideloadly
+        or use <strong>AltStore</strong> for automatic renewal over Wi-Fi.
+      </div>
+
+      <h3>Path B — TestFlight / App Store ($99/year)</h3>
+      <p>
+        With an Apple Developer Program membership you can build and distribute via TestFlight or
+        publish to the App Store. The repository includes a Fastlane configuration for automated
+        builds. See the <code>iOS/</code> folder for setup instructions.
+      </p>
+
+      <h3>First Launch</h3>
+      <p>
+        A "Connecting…" splash screen appears briefly. Tap it to enter your Codexa server URL.
+        The app keeps the screen on while reading and hides the iOS status bar for fullscreen
+        content.
+      </p>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ════════════════════════════════════════════════ Data Directory ═══ -->
+    <section id="data-dir">
+      <h1>Data Directory</h1>
+      <p class="section-subtitle">Where Codexa stores everything</p>
+
+      <p>
+        All persistent data lives in a single directory — <code>./data</code> by default, or the
+        path set by the <code>DATA_DIR</code> environment variable. Mount this directory as a
+        Docker volume to preserve data across container updates.
+      </p>
+
+      <div class="folder-tree">
+data/<br>
+&#9500;&#9472;&#9472; codexa.db&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # SQLite database (WAL mode)<br>
+&#9500;&#9472;&#9472; books/<br>
+&#9474;&nbsp;&nbsp; &#9492;&#9472;&#9472; {user_id}/<br>
+&#9474;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &#9492;&#9472;&#9472; {sha256}.epub<br>
+&#9500;&#9472;&#9472; covers/<br>
+&#9474;&nbsp;&nbsp; &#9492;&#9472;&#9472; {sha256}.jpg<br>
+&#9500;&#9472;&#9472; fonts/<br>
+&#9474;&nbsp;&nbsp; &#9492;&#9472;&#9472; {fontname}.ttf / .otf / .woff / .woff2<br>
+&#9492;&#9472;&#9472; dictionaries/<br>
+&nbsp;&nbsp;&nbsp;&nbsp; &#9500;&#9472;&#9472; en-sl/oxford/&nbsp;&nbsp; # StarDict files inside<br>
+&nbsp;&nbsp;&nbsp;&nbsp; &#9492;&#9472;&#9472; merriam-webster/
+      </div>
+
+      <h2>Details</h2>
+
+      <h3>codexa.db</h3>
+      <p>
+        SQLite database running in WAL (Write-Ahead Logging) mode. Stores users, books metadata,
+        reading progress, annotations, bookmarks, settings, and shelf assignments. The schema is
+        migrated automatically on startup — you never need to run manual migrations.
+      </p>
+
+      <h3>books/</h3>
+      <p>
+        EPUB files are stored per-user in subdirectories named by the numeric user ID. Each file
+        is named by its SHA-256 hash, so duplicate uploads are rejected (same content = same hash).
+        The original filename is stored in the database.
+      </p>
+
+      <h3>covers/</h3>
+      <p>
+        Cover images extracted from EPUB metadata during upload. Shared across all users (same
+        book hash → same cover). Served directly by the web server with HTTP caching.
+      </p>
+
+      <h3>fonts/</h3>
+      <p>
+        Custom fonts uploaded by admins. Available to all users in the reader's Text settings.
+        Supported formats: <code>.ttf</code>, <code>.otf</code>, <code>.woff</code>,
+        <code>.woff2</code>.
+      </p>
+
+      <h3>dictionaries/</h3>
+      <p>
+        StarDict dictionary files. Each dictionary lives in its own subdirectory. The naming
+        convention <code>lang-from-lang-to/dict-name/</code> (e.g. <code>en-sl/oxford/</code>)
+        is used to infer source and target languages, but any directory structure is valid.
+        Dictionaries are shared across all users.
+      </p>
+
+      <div class="callout">
+        <strong>Backup tip</strong>
+        To back up everything, copy the entire <code>data/</code> directory. The SQLite database
+        can be backed up live with <code>sqlite3 codexa.db ".backup backup.db"</code>.
+      </div>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════ First Login ══ -->
+    <section id="first-login">
+      <h1>First Login</h1>
+      <p class="section-subtitle">Register the first account and get started</p>
+
+      <p>
+        When you open Codexa for the first time, you will see the login page. No default admin
+        password exists — you must register an account.
+      </p>
+
+      <figure>
+        <img src="../screenshots/register.png" alt="Register">
+        <figcaption>Register a new user</figcaption>
+      </figure>
+
+      <h2 id="login-register">Registering</h2>
+      <ol class="steps">
+        <li>Navigate to your Codexa server URL in a browser.</li>
+        <li>Click <strong>Register</strong> on the login page.</li>
+        <li>Enter a username (3–32 characters, letters, numbers, and underscores only) and a password (minimum 8 characters).</li>
+        <li>Click <strong>Register</strong>. You will be logged in automatically.</li>
+      </ol>
+
+      <div class="callout">
+        <strong>&#11088; First user is the admin</strong>
+        The very first account registered on a fresh Codexa instance is automatically the
+        administrator. The admin account has access to user management, font uploads, dictionary
+        uploads, and the registration toggle. There is no separate admin setup step.
+      </div>
+
+      <h2>Logging In</h2>
+      <p>
+        Enter your username and password on the login page. Sessions last <strong>1 year</strong>.
+        If your session expires, you will be redirected to the login page.
+      </p>
+
+      <figure>
+        <img src="../screenshots/login.png" alt="Login">
+        <figcaption>Login</figcaption>
+      </figure>      
+
+      <h2 id="login-security">Security</h2>
+      <ul>
+        <li>Passwords are hashed with bcrypt before storage — they are never stored in plain text.</li>
+        <li>Login attempts are rate-limited to 10 per 15 minutes per IP address.</li>
+        <li>Sessions use JWT tokens signed with your <code>JWT_SECRET</code>.</li>
+      </ul>
+
+      <h2>Changing Your Password</h2>
+      <p>
+        Go to <strong>Settings → General → Change password</strong>. Enter your new password twice
+        (minimum 8 characters) and click Save.
+      </p>
+
+      <h2>Disabling Registration</h2>
+      <p>
+        After creating all the accounts you need, an admin can disable new-user registration to
+        prevent unauthorised sign-ups. See <a href="#settings" data-section="settings">Settings → Admin</a>.
+      </p>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ Settings ══ -->
+    <section id="settings">
+      <h1>Settings</h1>
+      <p class="section-subtitle">Configure KOReader sync, OPDS servers, dictionaries, and admin options</p>
+
+      <p>
+        Open Settings by by choosing gear icon <strong>Settings</strong> option from the left menu sidebar.
+      </p>
+
+      <figure>
+        <img src="../screenshots/mainsettings.png" alt="Settings panel">
+        <figcaption>Settings panel</figcaption>
+      </figure>
+
+      <h2 id="settings-general">General</h2>
+      <ul>
+        <li>
+          <strong>Auto-open last book:</strong> when enabled, Codexa automatically opens the
+          most recently accessed book when you visit the library. Stored in your browser's
+          local storage.
+        </li>
+        <li>
+          <strong>Change password:</strong> enter a new password (minimum 8 characters) and
+          confirm it, then click Save.
+        </li>
+      </ul>
+
+      <h2 id="settings-kosync">KOReader Sync</h2>
+      <p>
+        Codexa can synchronise your reading position with KOReader devices in two ways: using its
+        built-in sync server, or connecting to an external KOSync server.
+      </p>
+
+      <h3>Built-in KOSync Server</h3>
+      <p>
+        Codexa includes a KOSync-compatible server at <code>/kosync</code>. Enable it with the
+        <strong>Internal KOSync server</strong> toggle. The settings page will show you the URL to
+        enter in your KOReader device.
+      </p>
+      <p>In KOReader:</p>
+      <ol>
+        <li>Go to <strong>Tools → KOReader Sync</strong></li>
+        <li>Set <strong>Custom sync server</strong> to your Codexa URL (e.g. <code>https://books.example.com</code>)</li>
+        <li>Log in with the same username and password you use in Codexa</li>
+      </ol>
+      <p>
+        Reading positions are synced automatically when you open or close a book. The server
+        stores a high-water mark — it only advances your position, never goes backwards.
+      </p>
+
+      <h3>External KOSync Server</h3>
+      <p>
+        You can also connect to a separate KOSync-compatible server (e.g. a shared community
+        server). Enter the server URL, username, and password, then tap <strong>Test
+        connection</strong>. If the test passes, click <strong>Save</strong>.
+      </p>
+      <p>The <strong>Clear</strong> button removes all stored external server credentials.</p>
+
+      <h2 id="settings-opds-srv">OPDS Servers</h2>
+      <p>
+        Add catalog servers that appear in the <a href="#opds" data-section="opds">Online library</a>.
+      </p>
+      <ul>
+        <li>Click <strong>Add OPDS server</strong> to expand the form.</li>
+        <li>Enter a server name, the catalog URL, and optional username and password for protected catalogs.</li>
+        <li>Click <strong>Add server</strong> to save.</li>
+        <li>Each saved server has <strong>Open</strong> (go to Online library), <strong>Edit</strong>, and <strong>Delete</strong> buttons.</li>
+      </ul>
+
+      <h2 id="settings-dicts">Dictionaries</h2>
+      <p>
+        Every user can configure their own dictionary preferences independently — changes
+        here are personal and do not affect other users. The dictionary files themselves
+        are global (installed by an admin and available to everyone), but the order and
+        language labels are stored per account.
+      </p>
+      <ul>
+        <li><strong>Language labels:</strong> set <em>From</em> and <em>To</em> language codes (ISO 639-1, e.g. <code>en</code>, <code>de</code>) for each installed dictionary.</li>
+        <li><strong>Order:</strong> click the up/down arrows to change which dictionary's results appear first during lookup.</li>
+      </ul>
+      <p>Changes take effect immediately in the reader.</p>
+
+      <h2 id="settings-admin">Admin</h2>
+      <p>
+        The Admin section is visible only to the administrator. Admins are identified as the user
+        with the lowest ID (the first account ever registered on this server).
+      </p>
+
+      <h3>Registration</h3>
+      <p>
+        Toggle <strong>Allow new registrations</strong> to enable or disable the registration
+        link on the login page. Disable this after setting up all accounts to prevent
+        unauthorised sign-ups.
+      </p>
+
+      <h3>User Management</h3>
+      <p>
+        Lists all registered users. Click the delete (×) button next to a user to permanently
+        remove their account and all associated books, annotations, and settings.
+      </p>
+
+      <h3>Font Management</h3>
+      <p>
+        Upload custom fonts that will be available to all users in the reader's Text settings.
+        Supported formats: <code>.ttf</code>, <code>.otf</code>, <code>.woff</code>, <code>.woff2</code>.
+        Up to 50 files per upload; maximum 50 MB per file.
+      </p>
+      <p>
+        The reader automatically groups font files into families based on their filename. If you
+        name files using the convention <code>FontName-Weight.ext</code>, all variants appear as a
+        single entry in the font picker and bold/italic are applied automatically:
+      </p>
+      <ul>
+        <li><code>MyFont-Regular.ttf</code></li>
+        <li><code>MyFont-Bold.ttf</code></li>
+        <li><code>MyFont-Italic.ttf</code></li>
+        <li><code>MyFont-BoldItalic.ttf</code></li>
+      </ul>
+      <p>
+        Recognised weight keywords: <code>Thin</code>, <code>ExtraLight</code>,
+        <code>Light</code>, <code>Regular</code>, <code>SemiBold</code>, <code>Bold</code>,
+        <code>ExtraBold</code>, <code>Black</code>. Recognised style keywords:
+        <code>Italic</code>, <code>Oblique</code>. Files sharing the same stem before these
+        keywords are grouped into one family ("MyFont" in the example above).
+      </p>
+
+      <h3>Dictionary Management</h3>
+      <p>
+        Upload a <code>.zip</code> archive containing a StarDict dictionary. The ZIP must contain
+        the <code>.ifo</code>, <code>.idx</code>, and <code>.dict</code> (or <code>.dict.dz</code>)
+        files. Up to 10 ZIPs per upload; maximum 200 MB per ZIP.
+      </p>
+      <p>
+        The ZIP filename (without <code>.zip</code>) becomes a subfolder inside
+        <code>data/dictionaries/</code>, and the archive contents are extracted into it.
+        For example, uploading <code>en-sl-oxford.zip</code> creates
+        <code>data/dictionaries/en-sl-oxford/</code>. The folder name is also used as the
+        dictionary's ID, so naming ZIPs with a language prefix (e.g.
+        <code>en-de-langenscheidt.zip</code>) lets Codexa infer source and target languages
+        automatically.
+      </p>
+      <p>Uploaded dictionaries are immediately available to all users. Click the delete button next to a dictionary to remove it from the server.</p>
+
+      <h3>Refresh Book Metadata</h3>
+      <p>
+        The <strong>↺ Refresh metadata for all books</strong> button re-reads genres, description,
+        cover image, publisher, language, ISBN, and page count directly from every EPUB file on disk
+        and updates the database. Title and author are not overwritten so any manual edits are
+        preserved.
+      </p>
+      <p>
+        Use this after updating books on an OPDS server and re-downloading them, or if books were
+        added to the library before a newer version of Codexa that extracts additional fields (such
+        as genre tags). The same action is also available in the library's
+        <strong>Edit mode</strong> (select the "All Books" tab, enable Edit, then click
+        <strong>↺ Refresh metadata</strong> in the toolbar).
+      </p>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════ Dictionary Lookup ═ -->
+    <section id="dictionary">
+      <h1>Dictionary Lookup</h1>
+      <p class="section-subtitle">Look up words instantly using StarDict dictionaries</p>
+
+      <figure>
+        <img src="../screenshots/dictionary.png" alt="Dictionary lookup popup showing word definition">
+        <figcaption>Dictionary popup in the reader</figcaption>
+      </figure>
+
+      <h2 id="dict-how">How It Works</h2>
+      <p>Dictionary lookup can be triggered in different ways depending on your device:</p>
+      <ul>
+        <li>
+          <strong>Desktop browser — double-click:</strong> double-clicking a word opens the
+          dictionary immediately without any extra steps.
+        </li>
+        <li>
+          <strong>Desktop browser — drag selection:</strong> drag the cursor over a word or phrase
+          to select it. A bottom toolbar appears; click the dictionary icon to look up the
+          selection.
+        </li>
+        <li>
+          <strong>Mobile / touch:</strong> long-press a word to open the bottom toolbar, then tap
+          the dictionary icon.
+        </li>
+      </ul>
+      <figure>
+        <img src="../screenshots/bottom_toolbar.png" alt="Bottom toolbar with dictionary icon">
+        <figcaption>Bottom toolbar — appears on selection (desktop) or long-press (mobile)</figcaption>
+      </figure>
+      <p>
+        A bottom sheet slides up showing all definitions found across your enabled dictionaries.
+        If multiple dictionaries are enabled, each result is labelled with its dictionary name.
+        If no exact match is found, Codexa shows words with similar spelling as suggestions.
+      </p>
+
+      <h2 id="dict-install">Installing Dictionaries</h2>
+      <p>
+        Codexa uses the <strong>StarDict</strong> format. A dictionary consists of at least three
+        files:
+      </p>
+      <ul>
+        <li><code>.ifo</code> — dictionary metadata (name, word count)</li>
+        <li><code>.idx</code> — word index</li>
+        <li><code>.dict</code> or <code>.dict.dz</code> — compressed definitions</li>
+      </ul>
+
+      <h3>Option 1 — Upload a ZIP (admin)</h3>
+      <ol class="steps">
+        <li>Create a ZIP archive containing the StarDict files for one dictionary.</li>
+        <li>Go to <strong>Settings → Admin → Dictionaries</strong>.</li>
+        <li>Click <strong>Upload dictionary ZIP</strong> and select your file.</li>
+        <li>The dictionary is extracted and becomes immediately available to all users.</li>
+      </ol>
+
+      <h3>Option 2 — Place files directly</h3>
+      <p>
+        Copy StarDict files into the <code>data/dictionaries/</code> folder on the server.
+        Arrange them in subdirectories — one subdirectory per dictionary. The naming convention
+        <code>lang-from&#45;lang-to/dict-name/</code> (e.g. <code>en-sl/oxford/</code>) is
+        optional but allows Codexa to infer the dictionary's language.
+      </p>
+      <p>No server restart is required — dictionaries are discovered at lookup time.</p>
+
+      <h2 id="dict-enable">Enabling and Reordering</h2>
+      <ul>
+        <li>
+          <strong>In the reader sidebar</strong> → Dictionaries tab: toggle checkboxes to
+          enable/disable dictionaries for the current session. Use the up/down arrows to change priority.
+        </li>
+        <li>
+          <strong>In Settings → Dictionaries</strong>: set language labels (From/To) and
+          change the default order. Preferences are saved to your account.
+        </li>
+      </ul>
+      <p>Dictionaries higher in the list appear first in the lookup popup.</p>
+
+      <figure>
+        <img src="../screenshots/reader/settings-dicts.png" alt="Dictionary settings">
+        <figcaption>Enable and reorder dictionaries</figcaption>
+      </figure>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════ Online Library ═ -->
+    <section id="opds">
+      <h1>Online Library</h1>
+      <p class="section-subtitle">Browse and import books from any OPDS-compatible catalog</p>
+
+      <figure>
+        <img src="../screenshots/opds_browser.png" alt="Online library OPDS browser showing catalog entries">
+        <figcaption>Online library OPDS browser with catalog navigation</figcaption>
+      </figure>
+
+      <h2 id="opds-start">Getting Started</h2>
+      <p>
+        OPDS (Open Publication Distribution System) is a standard catalog format supported by
+        Calibre-Web, BookOrbit, Booklore, Komga, Kavita, Ubooquity, Bookwyrm, and many other self-hosted 
+        book servers. There are also a number of public OPDS catalogs available online. To browse an OPDS 
+        catalog, you must first add it as a server in Codexa.
+      </p>
+      <ol class="steps">
+        <li>Go to <strong>Settings → OPDS Servers</strong> and add at least one server (name, URL, and optional credentials).</li>
+        <li>Open the <strong>Online library</strong> from the sidebar.</li>
+        <li>Select a server from the left pane to browse its catalog.</li>
+      </ol>
+
+      <h2 id="opds-browse">Browsing</h2>
+      <ul>
+        <li>Navigate folders by clicking on them — a breadcrumb trail shows your location.</li>
+        <li>Book covers and titles are shown in a grid. Click a book to see its details and download options.</li>
+        <li>If the server supports OpenSearch, a search box appears at the top of the catalog pane.</li>
+        <li>Paginated feeds are loaded automatically as you scroll.</li>
+      </ul>
+
+      <h2 id="opds-download">Downloading a Single Book</h2>
+      <p>
+        Click any book in the catalog → click <strong>Add to library</strong>. The EPUB is saved to
+        your Codexa library immediately. Metadata (title, author, cover, series) is extracted
+        automatically.
+      </p>
+
+      <h2 id="opds-sync">Folder Sync to Shelf</h2>
+      <p>
+        Navigate to any folder in the OPDS catalog and click <strong>Sync to Shelf</strong> button on top right side 
+        of the folder icon. This bulk-imports the entire folder into a Codexa shelf, keeping it in sync with the source
+        catalog.
+      </p>
+      <ul>
+        <li>A <strong>pre-flight count</strong> is shown before you confirm — so you know how many books will be downloaded.</li>
+        <li>Progress is streamed in real time. Books already in your library are skipped (no duplicate downloads).</li>
+        <li>Books that were previously synced but are no longer in the catalog are flagged as <strong>stale</strong>.</li>
+        <li>Re-running a sync on the same shelf adds new books and reports removals without deleting anything automatically.</li>
+        <li>
+          Tick <strong>Force redownload all books</strong> before confirming to re-download every
+          book in the folder regardless of whether it already exists in the library. Each file is
+          replaced on disk, its MD5 is recomputed, and all metadata fields (genres, description,
+          cover, language, etc.) are refreshed from the new file. Title and author are not
+          overwritten. Use this after updating book files or metadata on the OPDS server.
+        </li>
+      </ul>
+
+      <div class="callout">
+        <strong>Supported catalog types</strong>
+        Codexa handles both OPDS 1.x (Atom XML) and OPDS 2.x (JSON) catalogs, and resolves
+        relative URLs and authentication automatically.
+      </div>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ Themes ══ -->
+    <section id="themes">
+      <h1>Themes</h1>
+      <p class="section-subtitle">Light, dark, sepia, and e-ink display modes</p>
+
+      <h2 id="themes-reader">Reader Themes</h2>
+      <p>
+        Codexa includes seven reading themes. Select one in <strong>Reader → Settings →
+        Theme</strong>.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Theme</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Light</strong></td><td>White background, dark text — classic day reading.</td></tr>
+            <tr><td><strong>Sepia</strong></td><td>Warm cream background, dark text — easy on the eyes in bright rooms.</td></tr>
+            <tr><td><strong>Dark</strong></td><td>Dark grey background, light text — comfortable in dim light.</td></tr>
+            <tr><td><strong>Sepia Dark</strong></td><td>Warm dark background, light text — combines warmth with low brightness.</td></tr>
+            <tr><td><strong>Midnight</strong></td><td>Pure black background, light text — maximum battery saving on OLED.</td></tr>
+            <tr><td><strong>Nord</strong></td><td>Cool blue-grey palette inspired by the Nord colour scheme.</td></tr>
+            <tr><td><strong>Custom</strong></td><td>Pick your own background and text colour using colour pickers that appear when this theme is selected.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Override Book Styles</h3>
+      <p>
+        Enable <strong>Override book styles</strong> in the Theme tab to force the reader's fonts
+        and colours on books that define their own CSS. Useful for books with hard-coded dark text
+        that doesn't adapt to dark themes.
+      </p>
+
+      <h2 id="themes-eink">E-ink Mode</h2>
+      <p>
+        E-ink mode switches the entire interface to high-contrast black and white, disables colour
+        transitions and shadows, and reduces animations. It is designed for e-ink display devices
+        such as BOOX readers.
+      </p>
+      
+      <figure>
+        <img src="../screenshots/e-ink.png" alt="E-ink mode on a BOOX device">
+        <figcaption>E-ink mode — desktop view</figcaption>
+      </figure>
+      
+      <figure style="max-width: 320px;margin: 0 auto;">
+        <img src="../screenshots/mobile/eink.jpg" alt="E-ink mode on mobile">
+        <figcaption>E-ink mode — mobile</figcaption>
+      </figure>
+
+      <h3>Enabling E-ink Mode</h3>
+      <ul>
+        <li><strong>In the reader:</strong> Settings → Theme tab → enable <em>E-ink mode</em>.</li>
+        <li><strong>Android app:</strong> toggle on the server URL input screen. The setting is persisted across restarts — no need to re-enable after closing the app.</li>
+        <li><strong>From the library:</strong> tap the theme icon in the library header and select <em>E-ink</em>. This switches the library to black and white and also forces the reader into e-ink mode whenever a book is opened.</li>
+      </ul>
+
+      <h2 id="themes-app">App Theme (Library)</h2>
+      <p>
+        The library interface follows the system's light/dark preference automatically. A theme
+        selector in the library header lets you lock it to Light, Dark, or E-ink independently of
+        the system setting. When <strong>E-ink mode</strong> is selected here, the reader
+        automatically opens in e-ink mode as well — no need to configure it separately inside the
+        reader.
+      </p>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ══════════════════════════════════════════════ Supported Languages ═ -->
+    <section id="languages">
+      <h1>Supported Languages</h1>
+      <p class="section-subtitle">The Codexa interface is available in 7 languages</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Language</th><th>Code</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>English</td><td><code>en</code></td><td>Default</td></tr>
+            <tr><td>German</td><td><code>de</code></td><td>Available</td></tr>
+            <tr><td>French</td><td><code>fr</code></td><td>Available</td></tr>
+            <tr><td>Italian</td><td><code>it</code></td><td>Available</td></tr>
+            <tr><td>Spanish</td><td><code>es</code></td><td>Available</td></tr>
+            <tr><td>Portuguese</td><td><code>pt</code></td><td>Available</td></tr>
+            <tr><td>Slovenian</td><td><code>sl</code></td><td>Available</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>How Language is Selected</h2>
+      <p>
+        Codexa detects the preferred language from your browser's <code>Accept-Language</code>
+        header and loads the appropriate locale file automatically. If your browser language is
+        not supported, English is used as the fallback.
+      </p>
+
+      <h2 id="lang-hyphen">Hyphenation Languages</h2>
+      <p>
+        The reader supports automatic word hyphenation for the following languages (configured in
+        Settings → Text → Word hyphenation):
+      </p>
+      <p>
+        Slovenian, English, German, French, Italian, Spanish, Portuguese, Dutch, Polish, Czech,
+        Croatian, Slovak, Russian, Ukrainian
+      </p>
+      <p>
+        Hyphenation dictionaries are selected per-book. If a book's language metadata matches one
+        of the supported languages, it is pre-selected automatically.
+      </p>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ════════════════════════════════════════════════ Uploading Books ══ -->
+    <section id="upload">
+      <h1>Uploading Books</h1>
+      <p class="section-subtitle">Add EPUB files to your library</p>
+
+      <h2>Accepted Format</h2>
+      <p>
+        Codexa supports <strong>EPUB</strong> files only (<code>.epub</code>). Maximum file size
+        is <strong>300&nbsp;MB</strong> per upload.
+      </p>
+
+      <h2 id="upload-methods">Upload Methods</h2>
+
+      <h3>File Picker</h3>
+      <ol class="steps">
+        <li>Open the library.</li>
+        <li>Click the <strong>Upload</strong> button (&#8679; icon) in the toolbar.</li>
+        <li>Select one or more <code>.epub</code> files from your device.</li>
+        <li>The files are uploaded, metadata is extracted, and covers are generated automatically.</li>
+      </ol>
+
+      <h3>Drag and Drop</h3>
+      <p>
+        Drag one or more <code>.epub</code> files from your file manager and drop them anywhere
+        on the library page. A drop overlay appears to confirm the action.
+      </p>
+
+      <h3>From Online Library</h3>
+      <p>
+        Navigate to a book in the <a href="#opds" data-section="opds">Online Library</a> and click
+        <strong>Add to library</strong>. The book is saved directly to your library.
+      </p>
+
+      <h3>OPDS Folder Sync</h3>
+      <p>
+        Use <strong>Sync to Shelf</strong> in the OPDS browser to bulk-import an entire catalog
+        folder. See <a href="#opds" data-section="opds">Online library</a> for details.
+      </p>
+
+      <h2>Duplicate Detection</h2>
+      <p>
+        Codexa computes a SHA-256 hash of each uploaded EPUB. If the same file content already
+        exists in your library, the upload is rejected with a friendly message — no duplicates
+        are stored.
+      </p>
+
+      <h2 id="upload-metadata">Metadata Extraction</h2>
+      <p>The following metadata is extracted automatically from the EPUB:</p>
+      <ul>
+        <li>Title, author</li>
+        <li>Cover image</li>
+        <li>Series name and number</li>
+        <li>Description, publisher, language, ISBN</li>
+        <li>Genre tags, page count</li>
+      </ul>
+      <p>
+        If a book is missing genres or other fields (for example because it was uploaded before a
+        newer version of Codexa), use <strong>Settings → Admin → ↺ Refresh metadata for all
+        books</strong> to re-extract everything from the EPUB files on disk.
+      </p>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════════ Library ══ -->
+    <section id="library">
+      <h1>Library</h1>
+      <p class="section-subtitle">Browse, search, and organise your book collection</p>
+
+      <div class="screenshots-grid">
+        <figure>
+          <img src="../screenshots/library.png" alt="Library grid view with book covers">
+          <figcaption>Library grid</figcaption>
+        </figure>
+        <figure>
+          <img src="../screenshots/library_search.png" alt="Library search results">
+          <figcaption>Real-time search</figcaption>
+        </figure>
+      </div>
+
+      <h2>Browsing</h2>
+      <p>
+        Books are shown as a grid of covers. Below each cover the title, author, series (if any),
+        and a reading progress bar are displayed.
+      </p>
+      <p>
+        <strong>Desktop (mouse):</strong> hover over a cover to reveal the action buttons. Click
+        the cover or any empty area on the card to open the reader directly.<br>
+        <strong>Touch:</strong> a single tap reveals the action buttons. A second tap on the card
+        opens the reader.
+      </p>
+      <p>The action buttons that appear on each card are:</p>
+      <ul>
+        <li><strong>👁 Cover preview</strong> — shows the full-size cover image in a popup (only shown when the book has a cover).</li>
+        <li><strong>ℹ Info</strong> — opens the book details dialog with metadata, shelves, KOSync status, and quick actions.</li>
+        <li><strong>Download / Delete offline</strong> — caches the EPUB locally for offline reading, or removes it from the local cache if already downloaded. A ✓ badge on the cover indicates a book is cached.</li>
+        <li><strong>Read</strong> — opens the book in the reader immediately, resuming from the last position.</li>
+      </ul>
+      <p>
+        A <strong>Peek</strong> button is also permanently visible in the bottom-right corner of
+        every cover (shown on hover on desktop, always visible on touch). Peek opens the book
+        without saving your reading position — useful for a quick preview.
+      </p>
+      <p>
+        A <strong>⋮ quick menu</strong> is available at the bottom-right corner of every book
+        card. Click or tap it to open a compact popup with the same four actions — Read, Peek,
+        Info, and Download/Remove offline — without needing to hover over the cover first. This
+        is particularly useful on touch devices where the hover actions are not always easy to
+        reach.
+      </p>
+
+      <h2 id="lib-search">Search</h2>
+      <p>
+        The search bar at the top of the library filters books in real time by title and author.
+        Results update as you type — no need to press Enter.
+      </p>
+
+      <h2 id="lib-sort">Sort Order</h2>
+      <p>Click the sort menu (&#9776;) in the library toolbar to change the sort order:</p>
+      <ul>
+        <li><strong>Recently Added</strong> — newest uploads first (default)</li>
+        <li><strong>Last Opened</strong> — most recently read books first</li>
+        <li><strong>Title</strong> — alphabetical by book title</li>
+        <li><strong>Author</strong> — alphabetical by author name</li>
+        <li><strong>Progress</strong> — sort by reading percentage</li>
+        <li><strong>Series</strong> — group by series name and number</li>
+      </ul>
+
+      <h2>Density Toggle</h2>
+      <p>
+        Click the density button (&#9638;) to cycle through three cover sizes: compact (more books
+        per row), normal, and large. Your preference is saved.
+      </p>
+
+      <h2 id="lib-tabs">Library Shelf Tabs</h2>
+      <p>
+        The sidebar shows three built-in views at the top of the Shelves section:
+      </p>
+      <ul>
+        <li><strong>All Books</strong> — every book in your library.</li>
+        <li><strong>Currently Reading</strong> — books you have opened at least once, not yet at 100%.</li>
+        <li><strong>Downloaded</strong> — books cached for offline reading.</li>
+      </ul>
+
+      <h2 id="lib-edit">Edit Mode</h2>
+      <p>
+        Click the <strong>Edit</strong> button to enter edit mode. In edit mode you can:
+      </p>
+      <ul>
+        <li>Select multiple books by tapping their covers.</li>
+        <li>Assign selected books to one or more shelves.</li>
+        <li>Delete selected books (with confirmation).</li>
+      </ul>
+      <p>Click <strong>Done</strong> to exit edit mode.</p>
+
+      <h2 id="lib-stats">Reading Statistics</h2>
+      <p>
+        Codexa tracks your reading activity per book and in aggregate. Statistics include time
+        read, pages turned, reading sessions, books started, and books finished. Access per-book
+        statistics from the <a href="#book-details" data-section="book-details">Book Details</a>
+        dialog → Reading tab.
+      </p>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ Shelves ═ -->
+    <section id="shelves">
+      <h1>Shelves</h1>
+      <p class="section-subtitle">Organise your books into named collections</p>
+
+      <p>
+        Shelves are custom collections that appear in the left sidebar. Use them to group books
+        by genre, reading list, project, or any organisation that suits you.
+      </p>
+
+      <h2 id="shelf-create">Creating a Shelf</h2>
+      <ol class="steps">
+        <li>In the sidebar, find the <strong>Shelves</strong> heading.</li>
+        <li>Click the <strong>+</strong> icon next to it.</li>
+        <li>Enter a name for the shelf and press Enter or click Save.</li>
+      </ol>
+
+      <h2 id="shelf-add">Adding Books to a Shelf</h2>
+      <ul>
+        <li>
+          <strong>From edit mode:</strong> click <strong>Edit</strong> in the library toolbar,
+          select the books you want to add, then click <strong>Add to Shelf</strong> and choose
+          the target shelf.
+        </li>
+        <li>
+          <strong>From book details:</strong> open the
+          <a href="#book-details" data-section="book-details">Book Details</a> dialog →
+          <strong>Shelves</strong> tab → toggle the shelf checkboxes.
+        </li>
+      </ul>
+
+      <h2>Editing and Deleting Shelves</h2>
+      <p>
+        Hover over a shelf name in the sidebar to reveal the <strong>edit (&#9998;)</strong> and
+        <strong>delete (&#215;)</strong> buttons. Deleting a shelf removes the shelf but does
+        not delete the books in it.
+      </p>
+
+      <h2 id="shelf-sync">OPDS Folder Sync</h2>
+      <p>
+        Any shelf can be linked to an OPDS catalog folder. When you run
+        <strong>Sync to Shelf</strong> from the OPDS browser, the selected folder's books are
+        downloaded and added to a shelf with that name. Re-running the sync:
+      </p>
+      <ul>
+        <li>Downloads new books that appeared in the catalog since the last sync.</li>
+        <li>Skips books already in your library (duplicate detection by file hash).</li>
+        <li>Reports books that were removed from the catalog (stale books) — you decide whether to keep or remove them.</li>
+      </ul>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════ Offline Reading ═ -->
+    <section id="offline">
+      <h1>Offline Reading</h1>
+      <p class="section-subtitle">Read your books without an internet connection</p>
+
+      <figure>
+        <img src="../screenshots/reader/offline.png" alt="Offline reading indicator">
+        <figcaption>Offline indicator in the reader</figcaption>
+      </figure>
+
+      <h2 id="offline-how">How It Works</h2>
+      <p>
+        Codexa uses a <strong>Service Worker</strong> to cache files in your browser. There are
+        two separate caches:
+      </p>
+      <ul>
+        <li>
+          <strong>App shell cache</strong> — the HTML, CSS, JavaScript, and fonts that make up
+          the Codexa interface. This is cached automatically on your first visit, so the app
+          loads without a network connection even if you haven't downloaded any books.
+        </li>
+        <li>
+          <strong>Book cache</strong> — EPUB files that you explicitly download for offline use.
+          Each book is stored individually and can be removed without affecting other cached books.
+        </li>
+      </ul>
+
+      <h2 id="offline-download">Downloading a Book for Offline Use</h2>
+      <ol class="steps">
+        <li>Tap a book cover in the library to open its details.</li>
+        <li>Click <strong>Download for offline reading</strong>.</li>
+        <li>Progress is shown in the dialog. When complete, the book is available offline.</li>
+      </ol>
+
+      <h2 id="offline-reading">Reading Offline</h2>
+      <p>
+        When your device has no network connection, the library automatically switches to showing
+        only downloaded books. All reader features work normally offline:
+      </p>
+      <ul>
+        <li>Bookmarks and annotations are stored in IndexedDB (on-device database).</li>
+        <li>Reading progress is saved locally and synced to the server when you come back online.</li>
+        <li>Dictionary lookups work for dictionaries that are served from your server (offline only if the server is reachable or cached).</li>
+      </ul>
+
+      <h2>What Happens When You Come Back Online</h2>
+      <ul>
+        <li>Reading progress is automatically pushed to the KOSync server.</li>
+        <li>OPDS catalog data refreshes.</li>
+        <li>New books uploaded to the server appear in the library.</li>
+      </ul>
+
+      <h2>Removing a Downloaded Book</h2>
+      <p>
+        Open the book's details dialog and click <strong>Remove from device</strong>. The EPUB is
+        removed from the local cache but remains in your server library.
+      </p>
+      <p>
+        You can also view all downloaded books in the <strong>Downloaded</strong> shelf in the
+        library sidebar.
+      </p>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════ Book Details ═══ -->
+    <section id="book-details">
+      <h1>Book Details</h1>
+      <p class="section-subtitle">View metadata, manage shelves, and access sync options</p>
+
+      <figure>
+        <img src="../screenshots/book_info.png" alt="Book details dialog with tabs">
+        <figcaption>Book details dialog</figcaption>
+      </figure>
+
+      <p>
+        Open the book details dialog by tapping the <strong>ℹ Info</strong> button on a book card.
+        It has four tabs and five quick-action buttons at the top.
+      </p>
+
+      <h2 id="details-actions">Quick Actions</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Button</th><th>Action</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Read</strong></td><td>Open the book in the reader, restoring your last position.</td></tr>
+            <tr><td><strong>Peek</strong></td><td>Open in read-only mode — your reading position is not saved. Useful for previewing a book without advancing your progress.</td></tr>
+            <tr><td><strong>Download</strong></td><td>Download the EPUB file to your device (Save As dialog).</td></tr>
+            <tr><td><strong>Offline</strong></td><td>Cache the book for offline reading (or remove from cache).</td></tr>
+            <tr><td><strong>Delete</strong></td><td>Permanently delete the book from your library (with confirmation).</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="details-tab">Details Tab</h2>
+      <p>Shows the book's full metadata:</p>
+      <ul>
+        <li>Cover image</li>
+        <li>Title, author</li>
+        <li>Series name and number</li>
+        <li>Tags / genres</li>
+        <li>Publisher, publication language, ISBN</li>
+        <li>File size, date added to library</li>
+        <li>Current reading progress (percentage and last position)</li>
+        <li>Description (from EPUB metadata)</li>
+      </ul>
+
+      <h2 id="details-shelves">Shelves Tab</h2>
+      <p>
+        A list of all your shelves with checkboxes. Toggle a shelf to add or remove this book
+        from it. Changes are saved immediately.
+      </p>
+
+      <figure>
+        <img src="../screenshots/book_shelves.png" alt="Book details dialog with shelves tab">
+        <figcaption>Book details shelves dialog</figcaption>
+      </figure>
+
+      <h2 id="details-kosync">KOSync Tab</h2>
+      <p>Shows the reading progress last received from your KOReader device:</p>
+      <ul>
+        <li>Current position (CFI) and percentage</li>
+        <li>Device name and sync timestamp</li>
+      </ul>
+      <p><strong>KOSync hash override:</strong> KOReader identifies books by an MD5 hash of the
+      file. If your Codexa EPUB and KOReader's copy are slightly different (e.g. different editions),
+      the hashes won't match. Enter the MD5 hash from KOReader here to link them manually.</p>
+      <p><strong>Re-download from OPDS:</strong> if this book was originally imported from an
+      OPDS source, you can force-download the latest version from that source URL.</p>
+
+      <figure>
+        <img src="../screenshots/book_kosync.png" alt="Book details dialog with KOSync tab">
+        <figcaption>Book details KOSync dialog</figcaption>
+      </figure>
+
+      <h2 id="details-reading">Reading Tab</h2>
+      <ul>
+        <li>Last read position and percentage</li>
+        <li>Total reading time and number of sessions</li>
+        <li>Annotation (highlight + note) count</li>
+        <li>Bookmark count</li>
+      </ul>
+
+      <figure>
+        <img src="../screenshots/book_reading.png" alt="Book details dialog with Reading tab">
+        <figcaption>Book details Reading dialog</figcaption>
+      </figure>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ Reader ══ -->
+    <section id="reader">
+      <h1>Reader</h1>
+      <p class="section-subtitle">Everything available inside the Codexa EPUB reader</p>
+
+      <div class="screenshots-grid">
+        <figure>
+          <img src="../screenshots/reader/overview.png" alt="Reader interface overview">
+          <figcaption>Reader overview</figcaption>
+        </figure>
+        <figure>
+          <img src="../screenshots/reader/navigation.png" alt="Navigation tap zones">
+          <figcaption>Tap zones</figcaption>
+        </figure>
+      </div>
+
+      <h2>Interface Overview</h2>
+      <p>The reader has three main areas:</p>
+      <ul>
+        <li><strong>Header bar</strong> — buttons for TOC, bookmarks, highlights, search, jump, settings, fullscreen, and back to library. Can be set to auto-hide while reading.</li>
+        <li><strong>Reading area</strong> — the book content rendered by epub.js. The left and right edges are tap/click zones for page navigation.</li>
+        <li><strong>Status bar</strong> — configurable overlay slots at the top and bottom of the screen showing page numbers, progress, time estimates, and more.</li>
+      </ul>
+
+      <h2 id="reader-nav">Navigation</h2>
+
+      <h3>Tap / Click</h3>
+      <ul>
+        <li><strong>Right half of the screen</strong> → next page</li>
+        <li><strong>Left half of the screen</strong> → previous page</li>
+      </ul>
+      <p>The centre of the screen is reserved for text selection and dictionary lookups.</p>
+
+      <h3>Swipe (touch)</h3>
+      <ul>
+        <li>Swipe <strong>left</strong> → next page</li>
+        <li>Swipe <strong>right</strong> → previous page</li>
+      </ul>
+
+      <h3>Keyboard</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Key</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr><td><kbd>→</kbd> / <kbd>Space</kbd> / <kbd>Page Down</kbd></td><td>Next page</td></tr>
+            <tr><td><kbd>←</kbd> / <kbd>Page Up</kbd></td><td>Previous page</td></tr>
+            <tr><td><kbd>K</kbd></td><td>Toggle Table of Contents</td></tr>
+            <tr><td><kbd>I</kbd></td><td>Toggle Search</td></tr>
+            <tr><td><kbd>S</kbd></td><td>Toggle Settings</td></tr>
+            <tr><td><kbd>F</kbd></td><td>Toggle fullscreen</td></tr>
+            <tr><td><kbd>Esc</kbd></td><td>Close open panel — or return to library</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Mouse Wheel</h3>
+      <p>Enable mouse-wheel page turning in <strong>Settings → Device → Mouse wheel navigation</strong>.</p>
+
+      <h3>Volume Keys (Android App)</h3>
+      <p>Enable in <strong>Settings → Device → Volume key navigation</strong>. Swap the direction with <strong>Swap volume key direction</strong>.</p>
+
+      <h2 id="reader-toc">Table of Contents</h2>
+      <figure>
+        <img src="../screenshots/reader/toc.png" alt="Table of contents sidebar">
+        <figcaption>Table of contents</figcaption>
+      </figure>
+      <p>
+        Press <kbd>K</kbd> or tap the TOC button (&#9776;) in the header. The current chapter is
+        highlighted. Tap any chapter to jump to it — the sidebar closes automatically.
+      </p>
+
+      <h2 id="reader-bookmarks">Bookmarks</h2>
+      <figure>
+        <img src="../screenshots/reader/bookmarks.png" alt="Bookmarks sidebar">
+        <figcaption>Bookmarks panel</figcaption>
+      </figure>
+      <ul>
+        <li>Tap the <strong>Bookmarks</strong> button (&#128278;) — the badge shows the count.</li>
+        <li>Click <strong>+</strong> to save your current position. The bookmark is labelled with the chapter title by default.</li>
+        <li>Tap any bookmark to jump to it; a Back / Accept button pair appears so you can return or confirm.</li>
+        <li>Rename a bookmark with the pencil icon; delete with &#215;.</li>
+        <li>Bookmarks are stored per user and available on all devices.</li>
+      </ul>
+
+      <h2 id="reader-annot">Highlights &amp; Annotations</h2>
+      <div class="screenshots-grid">
+        <figure>
+          <img src="../screenshots/reader/annotation-toolbar.png" alt="Annotation toolbar after text selection">
+          <figcaption>Annotation toolbar</figcaption>
+        </figure>
+        <figure>
+          <img src="../screenshots/reader/annotations-sidebar.png" alt="Annotations list sidebar">
+          <figcaption>Annotations list</figcaption>
+        </figure>
+      </div>
+
+      <h3>Creating a Highlight</h3>
+      <ol class="steps">
+        <li>Select text by pressing and holding (mobile) or clicking and dragging (desktop).</li>
+        <li>The annotation toolbar appears above or below the selection.</li>
+        <li>Tap a colour button (yellow, green, blue, pink) to save the highlight.</li>
+      </ol>
+
+      <h3>Adding a Note</h3>
+      <p>
+        After selecting text, tap the pencil (&#9998;) button in the toolbar. Type your note
+        (up to 1&nbsp;000 characters) and click <strong>Save</strong>.
+      </p>
+
+      <h3>Viewing All Annotations</h3>
+      <p>
+        Tap the <strong>Highlights</strong> button in the header to open the annotations sidebar.
+        All highlights are listed in reading order with colour indicator, highlighted text, and
+        any attached note. Tap an entry to jump to its position.
+      </p>
+
+      <h3>Editing or Deleting a Highlight</h3>
+      <p>
+        Tap an existing highlight in the text. An edit sheet slides up from the bottom showing
+        the highlighted text, a colour picker, an edit note button, and a delete button.
+      </p>
+
+      <h3>Dictionary Lookup from Selection</h3>
+      <p>
+        After selecting text, tap the magnifying glass (&#128269;) button in the toolbar to look
+        up the selection without saving a highlight.
+      </p>
+
+      <h2 id="reader-search">In-Book Search</h2>
+      <figure>
+        <img src="../screenshots/reader/search.png" alt="In-book search panel">
+        <figcaption>Search panel</figcaption>
+      </figure>
+      <p>
+        Press <kbd>I</kbd> or tap the search button. Type a word or phrase and press Enter.
+        Results are grouped by chapter with surrounding context. Tap any result to jump to it.
+        A Back / Accept button pair lets you return to your original position or confirm the jump.
+      </p>
+
+      <h2 id="reader-dict">Dictionary Lookup</h2>
+      <figure>
+        <img src="../screenshots/reader/dictionary.png" alt="Dictionary definition popup">
+        <figcaption>Dictionary popup</figcaption>
+      </figure>
+      <p>
+        <strong>Desktop:</strong> double-click a word to open the dictionary directly. To look up
+        a selection, drag to select it and tap the dictionary icon in the bottom toolbar.<br>
+        <strong>Mobile:</strong> long-press a word to open the bottom toolbar, then tap the
+        dictionary icon. A bottom sheet shows definitions from all enabled dictionaries.
+      </p>
+
+      <h2 id="reader-footnotes">Footnotes</h2>
+      <figure>
+        <img src="../screenshots/reader/footnote.png" alt="Footnote popup">
+        <figcaption>Inline footnote popup</figcaption>
+      </figure>
+      <p>
+        Tap any footnote or endnote marker. The note content appears in a popup at the bottom of
+        the screen — you don't need to leave your reading position. Tap &#215; or outside the
+        popup to dismiss.
+      </p>
+
+      <h2 id="reader-progress">Reading Progress &amp; Session Recovery</h2>
+      <p>
+        Your reading position is saved automatically as you read. If you close the browser or app
+        mid-chapter, a <strong>resume banner</strong> appears the next time you open the library.
+        Tap <strong>Resume</strong> to jump back, or <strong>Dismiss</strong> to ignore it.
+      </p>
+
+      <h2 id="reader-jump">Jump to Position</h2>
+      <figure>
+        <img src="../screenshots/reader/jump-pct.png" alt="Jump to position slider">
+        <figcaption>Jump to position</figcaption>
+      </figure>
+      <p>
+        Tap the percentage button (%) in the header. Drag the slider to any position. Chapter
+        markers on the slider show chapter boundaries. Use the Previous / Next chapter buttons
+        to jump to adjacent chapters.
+      </p>
+
+      <h2 id="reader-fullscreen">Fullscreen Mode</h2>
+      <p>
+        Press <kbd>F</kbd> or tap the fullscreen button (&#9634;) to hide all browser chrome.
+        Press <kbd>F</kbd> again or <kbd>Esc</kbd> to exit. A small exit button also appears
+        in the corner.
+      </p>
+
+      <h2 id="reader-settings">Reading Settings</h2>
+      <figure>
+        <img src="../screenshots/reader/settings.png" alt="Reader settings panel with tabs">
+        <figcaption>Settings panel (⚙ button or S key)</figcaption>
+      </figure>
+      <p>
+        Press <kbd>S</kbd> or tap the settings button (&#9881;). Settings are saved globally and
+        apply to all books. Use <strong>Reset for this book</strong> at the top of the panel to
+        clear any per-book overrides.
+      </p>
+
+      <h3 id="reader-theme">Theme Tab</h3>
+      <figure>
+        <img src="../screenshots/reader/settings-theme.png" alt="Theme settings tab">
+        <figcaption>Theme settings</figcaption>
+      </figure>
+      <ul>
+        <li><strong>Theme:</strong> Light, Sepia, Dark, Sepia Dark, Midnight, Nord, Custom. Selecting <em>Custom</em> reveals a background colour picker and a text colour picker.</li>
+        <li><strong>Override book styles:</strong> forces the reader's fonts and colours on books with their own CSS.</li>
+        <li><strong>E-ink mode:</strong> high-contrast black-and-white for e-ink displays.</li>
+        <li><strong>Page gap shadow:</strong> thin shadow along the book spine in two-page spread mode.</li>
+      </ul>
+
+      <h3 id="reader-text">Text Tab</h3>
+      <figure>
+        <img src="../screenshots/reader/settings-text.png" alt="Text settings tab">
+        <figcaption>Text settings</figcaption>
+      </figure>
+      <ul>
+        <li><strong>Font:</strong> system fonts + any custom fonts uploaded by an admin.</li>
+        <li><strong>Font size:</strong> 12–36 px.</li>
+        <li><strong>Line spacing:</strong> 1.0–3.0.</li>
+        <li><strong>Letter spacing:</strong> 0–10 px.</li>
+        <li><strong>Paragraph indentation:</strong> toggle + depth slider (0.5–4 em).</li>
+        <li><strong>Paragraph spacing:</strong> 0–3 em extra space between paragraphs.</li>
+        <li><strong>Chapter heading spacing:</strong> compresses whitespace before headings.</li>
+        <li><strong>Hide empty lines:</strong> collapses blank paragraphs.</li>
+        <li><strong>Left-align text:</strong> disables CSS justification.</li>
+        <li><strong>Word hyphenation:</strong> automatic hyphenation at line breaks; language-aware.</li>
+        <li><strong>Bionic reading:</strong> bolds the first ~40% of each word to guide the eye.</li>
+      </ul>
+
+      <h3 id="reader-page">Page Tab</h3>
+      <figure>
+        <img src="../screenshots/reader/settings-page.png" alt="Page layout settings tab">
+        <figcaption>Page settings</figcaption>
+      </figure>
+      <ul>
+        <li><strong>Page layout:</strong> Single page or Two pages (spread — side-by-side like an open book).</li>
+        <li><strong>Margins:</strong> horizontal margin between text and screen edge (0–120 px).</li>
+        <li><strong>Auto-hide toolbar:</strong> hides the header while reading; reveal by moving the pointer to the top or tapping the top edge.</li>
+        <li><strong>Screen edge padding:</strong> insets for each side to avoid curved edges and notches.</li>
+      </ul>
+
+      <h3 id="reader-device">Device Tab</h3>
+      <figure>
+        <img src="../screenshots/reader/settings-device.png" alt="Device settings tab">
+        <figcaption>Device settings</figcaption>
+      </figure>
+      <ul>
+        <li><strong>Keep screen on:</strong> prevents sleep using the browser WakeLock API (requires HTTPS).</li>
+        <li><strong>Mouse wheel navigation:</strong> scroll wheel turns pages.</li>
+        <li><strong>Portrait lock:</strong> locks orientation to portrait.</li>
+        <li><strong>Volume key navigation</strong> <em>(Android app only):</em> hardware volume buttons turn pages.</li>
+        <li><strong>Swap volume key direction</strong> <em>(Android app only):</em> reverses which button goes forward.</li>
+        <li><strong>Skip progress check on open:</strong> opens the book from the beginning instead of the last position.</li>
+        <li><strong>Skip auto-save on close:</strong> prevents position from being saved when leaving the reader.</li>
+      </ul>
+
+      <h3 id="reader-statusbar">Status Bar Tab</h3>
+      <figure>
+        <img src="../screenshots/reader/settings-statusbar.png" alt="Status bar settings tab">
+        <figcaption>Status bar settings</figcaption>
+      </figure>
+      <p>
+        Place information overlays in up to six positions around the reading area: top-left,
+        top-centre, top-right, bottom-left, bottom-centre, bottom-right.
+      </p>
+      <div class="code-block">
+        <pre><code>[ top-left ]   [ top-centre ]   [ top-right ]
+─────────────────────────────────────────────  ← separator (optional)
+
+         [ book text ]
+
+─────────────────────────────────────────────  ← separator (optional)
+[ bot-left ]   [ bot-centre ]   [ bot-right ]</code></pre>
+      </div>
+      <p>Available information items:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Item</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td>Chapter page (X/Y)</td><td>Current page and total pages in the current chapter</td></tr>
+            <tr><td>Book page (X/Y)</td><td>Absolute page number across the whole book</td></tr>
+            <tr><td>Pages left in chapter</td><td>Remaining pages until the end of the chapter</td></tr>
+            <tr><td>Pages left in book</td><td>Remaining pages in the entire book</td></tr>
+            <tr><td>Chapter progress %</td><td>Percentage through the current chapter</td></tr>
+            <tr><td>Book progress %</td><td>Percentage through the entire book</td></tr>
+            <tr><td>Time to end of chapter</td><td>Estimated time to finish the chapter (from your reading speed)</td></tr>
+            <tr><td>Time to end of book</td><td>Estimated time to finish the book</td></tr>
+            <tr><td>Current time</td><td>System clock</td></tr>
+            <tr><td>Book title</td><td>Title of the current book</td></tr>
+            <tr><td>Book author</td><td>Author of the current book</td></tr>
+            <tr><td>Chapter title</td><td>Title of the current chapter</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Additional options: <strong>Book progress bar</strong> and <strong>Chapter progress bar</strong>
+        (thin lines at top or bottom), separator lines above/below the status area.
+      </p>
+      <figure>
+        <img src="../screenshots/reader/statusbar.png" alt="Status bar overlays in action">
+        <figcaption>Status bar overlays</figcaption>
+      </figure>
+
+      <h3 id="reader-dicts-tab">Dictionaries Tab</h3>
+      <figure>
+        <img src="../screenshots/reader/settings-dicts.png" alt="Dictionaries settings tab">
+        <figcaption>Dictionary settings</figcaption>
+      </figure>
+      <p>
+        Lists all installed dictionaries with their word count. Toggle each on/off, and use the
+        up/down arrows to change lookup priority. Admins see an additional Upload button.
+      </p>
+
+      <h2 id="reader-kosync">KOReader Sync</h2>
+      <p>
+        Two tap areas in the bottom corners of the reading screen trigger a manual sync:
+      </p>
+      <ul>
+        <li><strong>Bottom-left corner</strong> — pull the latest position from the sync server.</li>
+        <li><strong>Bottom-right corner</strong> — push your current position to the sync server.</li>
+      </ul>
+      <p>
+        If the server position differs from your local position (e.g. you read on another device),
+        a <strong>conflict resolution dialog</strong> asks which position to use:
+        <em>Stay here</em> or <em>Jump to X%</em>.
+      </p>
+
+      <h2 id="reader-peek">Peek Mode</h2>
+      <p>
+        Open a book in Peek mode (from the
+        <a href="#book-details" data-section="book-details">Book Details</a> dialog) to read
+        without saving your position. Useful for reviewing a book without advancing your progress
+        tracker.
+      </p>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+  </main>
+</div>
+
+<script src="js/docs.js"></script>
+</body>
+</html>

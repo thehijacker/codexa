@@ -184,6 +184,7 @@ html[data-lib-theme="eink"] .nav-icon-delete            { content: url('/images/
 html[data-lib-theme="eink"] .nav-icon-download          { content: url('/images/download_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-read              { content: url('/images/read_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-peek              { content: url('/images/peek_bw.svg'); }
+html[data-lib-theme="eink"] .nav-icon-zoom              { content: url('/images/zoom_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-save              { content: url('/images/save_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-search            { content: url('/images/search_bw.svg'); }
 html[data-lib-theme="eink"] .nav-icon-edit              { content: url('/images/edit_bw.svg'); }
@@ -587,9 +588,10 @@ html[data-lib-theme="eink"] .nav-icon-density-large   { content: url('/images/de
 }
 /* Mobile: show actions when card is tapped (JS toggles this class) */
 .book-card.tapped .book-card-actions { display: flex; }
-/* Read button: invert SVG icon to white on the dark overlay background */
-.book-card-actions .read-btn .nav-icon { filter: brightness(0) invert(1); }
-/* E-ink: light button bg so black read_bw.svg is visible; undo the invert */
+/* Read/zoom buttons: invert SVG icon to white on the dark overlay background */
+.book-card-actions .read-btn .nav-icon,
+.book-card-actions .cover-preview-btn .nav-icon { filter: brightness(0) invert(1); }
+/* E-ink: light button bg so black _bw.svg is visible; undo the invert */
 html[data-lib-theme="eink"] .book-card-actions .btn-icon,
 .sidebar-layout[data-lib-theme="eink"] .book-card-actions .btn-icon {
   background: rgba(255, 255, 255, 0.92);
@@ -603,7 +605,9 @@ html[data-lib-theme="eink"] .book-card-actions .btn-icon:hover,
   border-color: #111;
 }
 html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
-.sidebar-layout[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon { filter: none; }
+html[data-lib-theme="eink"] .book-card-actions .cover-preview-btn .nav-icon,
+.sidebar-layout[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
+.sidebar-layout[data-lib-theme="eink"] .book-card-actions .cover-preview-btn .nav-icon { filter: none; }
 
 /* ── Empty state ────────────────────────────────────────────────────────────── */
 .empty-state {
@@ -1385,9 +1389,10 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
 }
 .imt-reading-summary { font-size: .83rem; color: var(--color-text-muted); margin-bottom: .4rem; }
 .imt-session-list { display: flex; flex-direction: column; gap: 0; margin-bottom: .5rem; border: 1px solid var(--color-border); border-radius: var(--radius); overflow: hidden; }
-.imt-session-header { display: grid; grid-template-columns: 1fr auto auto; gap: .5rem; align-items: center; padding: .25rem .5rem; background: var(--color-surface2); font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--color-text-muted); }
-.imt-session-row { display: grid; grid-template-columns: 1fr auto auto; gap: .5rem; align-items: center; padding: .3rem .5rem; font-size: .82rem; border-top: 1px solid var(--color-border); }
+.imt-session-header { display: grid; grid-template-columns: 1fr auto auto; gap: .5rem; align-items: start; padding: .25rem .5rem; background: var(--color-surface2); font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--color-text-muted); }
+.imt-session-row { display: grid; grid-template-columns: 1fr auto auto; gap: .5rem; align-items: start; padding: .3rem .5rem; font-size: .82rem; border-top: 1px solid var(--color-border); }
 .imt-session-date { color: var(--color-text); }
+.imt-session-time { display: block; font-size: .74rem; color: var(--color-text-muted); margin-top: .1rem; }
 .imt-session-dur  { font-weight: 600; white-space: nowrap; }
 .imt-session-pages { color: var(--color-text-muted); font-size: .78rem; white-space: nowrap; min-width: 3.5rem; text-align: right; }
 .imt-reading-row {
@@ -1665,6 +1670,138 @@ html[data-lib-theme="eink"] .book-card-actions .read-btn .nav-icon,
   margin-bottom: 1rem;
   font-size: .85rem;
   color: var(--color-text-muted);
+}
+
+/* Cover area wrapper — positions badge and peek button relative to the cover */
+.book-cover-area { position: relative; }
+
+/* Peek button — always-visible small icon at the bottom-right of the cover */
+.book-card-peek-btn {
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.60);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity .15s;
+  z-index: 2;
+  text-decoration: none;
+}
+.book-card-peek-btn .nav-icon { filter: brightness(0) invert(1); width: 14px; height: 14px; }
+.book-card:hover .book-card-peek-btn,
+.book-card.tapped .book-card-peek-btn { opacity: 1; }
+html[data-lib-theme="eink"] .book-card-peek-btn,
+.sidebar-layout[data-lib-theme="eink"] .book-card-peek-btn {
+  background: rgba(255, 255, 255, 0.90);
+  border-color: rgba(0, 0, 0, 0.55);
+}
+html[data-lib-theme="eink"] .book-card-peek-btn .nav-icon,
+.sidebar-layout[data-lib-theme="eink"] .book-card-peek-btn .nav-icon { filter: none; }
+
+/* Three-dots context-menu trigger on book card */
+.book-card-menu-btn {
+  position: absolute;
+  bottom: .3rem;
+  right: .3rem;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  border: none;
+  border-radius: 4px;
+  font-size: 17px;
+  line-height: 1;
+  letter-spacing: 0;
+  cursor: pointer;
+  padding: 0 0 2px 0;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  transition: color var(--transition);
+  z-index: 4;
+}
+.book-card-menu-btn:hover { color: #fff; }
+html[data-lib-theme="day"] .book-card-menu-btn,
+html[data-lib-theme="eink"] .book-card-menu-btn,
+.sidebar-layout[data-lib-theme="day"] .book-card-menu-btn,
+.sidebar-layout[data-lib-theme="eink"] .book-card-menu-btn {
+  color: rgba(0, 0, 0, 0.6);
+  text-shadow: none;
+}
+html[data-lib-theme="day"] .book-card-menu-btn:hover,
+html[data-lib-theme="eink"] .book-card-menu-btn:hover,
+.sidebar-layout[data-lib-theme="day"] .book-card-menu-btn:hover,
+.sidebar-layout[data-lib-theme="eink"] .book-card-menu-btn:hover { color: #000; }
+@media (prefers-color-scheme: light) {
+  html:not([data-lib-theme]) .book-card-menu-btn { color: rgba(0, 0, 0, 0.6); text-shadow: none; }
+  html:not([data-lib-theme]) .book-card-menu-btn:hover { color: #000; }
+}
+
+/* Card context-menu popup */
+.book-card-menu-popup {
+  position: fixed;
+  min-width: 158px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: .45rem;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .4);
+  overflow: hidden;
+  z-index: 9000;
+  transform-origin: bottom right;
+  animation: bcm-open .14s cubic-bezier(0.2, 0, 0, 1.15);
+}
+.book-card-menu-popup.no-anim { animation: none; }
+@keyframes bcm-open {
+  from { opacity: 0; transform: scale(.82); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.bcm-item {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  width: 100%;
+  padding: .48rem .75rem;
+  font-size: .85rem;
+  color: var(--color-text);
+  text-decoration: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  text-align: left;
+  font-family: inherit;
+}
+.bcm-item + .bcm-item { border-top: 1px solid var(--color-border); }
+.bcm-item:hover:not(:disabled) { background: var(--color-surface2); }
+.bcm-item:disabled { opacity: .45; cursor: default; }
+.bcm-icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  /* dark bg by default — invert SVG to white */
+  filter: brightness(0) invert(1);
+}
+.bcm-icon-char {
+  width: 15px;
+  height: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+/* Light themes: icons are dark, no invert needed */
+html[data-lib-theme="day"] .bcm-icon,
+html[data-lib-theme="eink"] .bcm-icon { filter: none; }
+@media (prefers-color-scheme: light) {
+  html:not([data-lib-theme]) .bcm-icon { filter: none; }
 }
 
 /* Offline badge on book card cover */

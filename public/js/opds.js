@@ -363,6 +363,13 @@ function openSyncModal(folderUrl, folderTitle) {
           <label for="sync-limit">${t('opds.sync_limit_label')}</label>
           <input type="number" id="sync-limit" min="1" max="9999" placeholder="${t('opds.sync_limit_placeholder')}" style="width:140px" />
         </div>
+        <div style="display:flex;align-items:flex-start;gap:.6rem;margin:.75rem 0 .1rem">
+          <input type="checkbox" id="sync-force" style="margin-top:.18rem;flex-shrink:0">
+          <label for="sync-force" style="font-size:.85rem;cursor:pointer">
+            <span style="font-weight:600">${t('opds.sync_force_label')}</span>
+            <span style="display:block;font-size:.78rem;color:var(--color-text-muted);margin-top:.15rem">${t('opds.sync_force_hint')}</span>
+          </label>
+        </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" id="sync-modal-cancel">${t('common.cancel')}</button>
           <button class="btn btn-primary"   id="sync-modal-confirm">${t('opds.btn_sync_confirm')}</button>
@@ -415,6 +422,7 @@ function openSyncModal(folderUrl, folderTitle) {
     if (!shelfName) return;
     const limitVal  = backdrop.querySelector('#sync-limit').value.trim();
     const limit     = limitVal ? parseInt(limitVal, 10) : null;
+    const force     = backdrop.querySelector('#sync-force').checked;
 
     // Switch to progress phase
     backdrop.querySelector('#sync-form').hidden = true;
@@ -428,6 +436,7 @@ function openSyncModal(folderUrl, folderTitle) {
       token:     localStorage.getItem('br_token') || '',
     });
     if (limit && limit > 0) params.set('limit', limit);
+    if (force) params.set('force', '1');
 
     const es = new EventSource(`/api/opds/sync-sse?${params.toString()}`);
     let total = 0;
@@ -466,9 +475,11 @@ function openSyncModal(folderUrl, folderTitle) {
         es.close();
         reloadShelves();
         reloadLibrary();
-        const summary = msg.errors
-          ? t('opds.sync_done_errors', { added: msg.added, skipped: msg.skipped, errors: msg.errors })
-          : t('opds.sync_done', { added: msg.added, skipped: msg.skipped });
+        const summary = msg.refreshed
+          ? t('opds.sync_done_force', { added: msg.added, refreshed: msg.refreshed, errors: msg.errors || 0 })
+          : msg.errors
+            ? t('opds.sync_done_errors', { added: msg.added, skipped: msg.skipped, errors: msg.errors })
+            : t('opds.sync_done', { added: msg.added, skipped: msg.skipped });
         if (msg.staleBooks && msg.staleBooks.length > 0) {
           const stale = msg.staleBooks;
           close();

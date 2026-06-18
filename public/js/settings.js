@@ -477,6 +477,19 @@ function deleteAdminUser(id, username) {
   );
 }
 
+document.getElementById('btn-reextract-all')?.addEventListener('click', async () => {
+  const btn = document.getElementById('btn-reextract-all');
+  setButtonLoading(btn, true);
+  try {
+    const result = await apiFetch('/books/reextract-all', { method: 'POST' });
+    toast.success(t('library.toast_reextract_done', { updated: result.updated, total: result.total }));
+  } catch (err) {
+    toast.error(t('common.error_msg', { msg: err.message }));
+  } finally {
+    setButtonLoading(btn, false, t('settings.btn_reextract_all'));
+  }
+});
+
 btnSaveReg?.addEventListener('click', async () => {
   setButtonLoading(btnSaveReg, true, t('settings.btn_saving'));
   try {

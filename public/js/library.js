@@ -23,6 +23,9 @@ let selectedBooks       = new Set();
 let seriesFilter        = null; // active series name filter
 let sortBeforeSeriesFilter = null; // sort value saved before auto-switching to series_asc
 
+// ── Card context-menu state ───────────────────────────────────────────────────
+let _activeCardMenu = null; // { popup, onOutsideClick, onEsc }
+
 // ── Offline state ─────────────────────────────────────────────────────────────
 let isOfflineMode    = false;
 let offlineBooks     = [];        // IDB snapshot used when server is unreachable
@@ -207,13 +210,16 @@ function renderGrid(list) {
     if (selectedBooks.has(book.id)) card.classList.add('selected');
 
     card.innerHTML = `
-      ${cover}
-      ${isDownloaded ? '<div class="book-offline-badge" title="Offline available">✓</div>' : ''}
+      <div class="book-cover-area">
+        ${cover}
+        ${isDownloaded ? '<div class="book-offline-badge" title="Offline available">✓</div>' : ''}
+        <a class="book-card-peek-btn" href="/readerv4.html?id=${book.id}&peek=1" title="${t('library.btn_peek')}"><img src="/images/peek.svg" class="nav-icon nav-icon-peek" alt="${t('library.btn_peek')}"></a>
+      </div>
       <label class="book-card-checkbox-wrap" title="${t('library.btn_cover_select')}">
         <input type="checkbox" class="book-card-checkbox" ${selectedBooks.has(book.id) ? 'checked' : ''} />
       </label>
       <div class="book-card-actions">
-        ${book.cover_path ? `<button class="btn-icon cover-preview-btn" title="${t('library.btn_cover_preview')}" data-id="${book.id}">👁</button>` : ''}
+        ${book.cover_path ? `<button class="btn-icon cover-preview-btn" title="${t('library.btn_cover_preview')}" data-id="${book.id}"><img src="/images/zoom.svg" class="nav-icon nav-icon-zoom" alt=""></button>` : ''}
         <button class="btn-icon info-btn"  title="${t('library.btn_cover_info')}" data-id="${book.id}">ℹ</button>
         ${offlineBtn}
         <button class="btn-icon read-btn"  title="${t('library.btn_read')}" data-id="${book.id}"><img src="/images/read.svg" class="nav-icon nav-icon-read" alt=""></button>
@@ -226,7 +232,8 @@ function renderGrid(list) {
           <div class="book-progress-fill" style="width:${pct}%"></div>
         </div>
         <div class="book-progress-text">${pct > 0 ? t('library.pct_read', { n: pct }) : t('library.not_started')}</div>
-      </div>`;
+      </div>
+      <button class="book-card-menu-btn" data-id="${book.id}" aria-label="More options">⋮</button>`;
 
     const checkbox = card.querySelector('.book-card-checkbox');
 
@@ -235,9 +242,15 @@ function renderGrid(list) {
       toggleBookSelect(book.id, checkbox.checked);
     });
 
+    card.querySelector('.book-card-menu-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      openCardMenu(book, e.currentTarget);
+    });
+
     card.addEventListener('click', e => {
       if (e.target.closest('.read-btn') || e.target.closest('.info-btn') ||
-          e.target.closest('.cover-preview-btn') || e.target.closest('.book-card-checkbox-wrap')) return;
+          e.target.closest('.cover-preview-btn') || e.target.closest('.book-card-checkbox-wrap') ||
+          e.target.closest('.book-card-peek-btn') || e.target.closest('.book-card-menu-btn')) return;
       if (editMode) {
         const newChecked = !checkbox.checked;
         checkbox.checked = newChecked;
@@ -409,6 +422,125 @@ function openBulkAssignModal() {
   });
 }
 
+// ── Card context menu (three-dots button) ─────────────────────────────────────
+function closeCardMenu() {
+  if (!_activeCardMenu) return;
+  const { popup, onOutsideClick, onEsc } = _activeCardMenu;
+  popup.remove();
+  document.removeEventListener('click', onOutsideClick, true);
+  document.removeEventListener('keydown', onEsc);
+  _activeCardMenu = null;
+}
+
+function openCardMenu(book, btn) {
+  closeCardMenu();
+
+  const isEink        = document.documentElement.dataset.libTheme === 'eink';
+  const isDownloaded  = downloadedIds.has(book.id);
+  const isDownloading = downloadingIds.has(book.id);
+
+  let offlineItem = '';
+  if (isOfflineSupported && !isOfflineMode) {
+    if (isDownloading) {
+      offlineItem = `<button class="bcm-item" disabled><span class="spinner spinner-sm"></span>${t('library.downloading')}</button>`;
+    } else if (isDownloaded) {
+      offlineItem = `<button class="bcm-item bcm-offline-delete"><img src="/images/delete.svg" class="nav-icon bcm-icon nav-icon-delete" alt="">${t('library.btn_delete_offline')}</button>`;
+    } else {
+      offlineItem = `<button class="bcm-item bcm-offline-download"><img src="/images/download.svg" class="nav-icon bcm-icon nav-icon-download" alt="">${t('library.btn_download_offline')}</button>`;
+    }
+  }
+
+  const popup = document.createElement('div');
+  popup.className = 'book-card-menu-popup' + (isEink ? ' no-anim' : '');
+  popup.innerHTML = `
+    <button class="bcm-item bcm-read">
+      <img src="/images/read.svg" class="nav-icon bcm-icon nav-icon-read" alt="">
+      ${t('library.btn_read')}
+    </button>
+    <a class="bcm-item" href="/readerv4.html?id=${book.id}&peek=1">
+      <img src="/images/peek.svg" class="nav-icon bcm-icon nav-icon-peek" alt="">
+      ${t('library.btn_peek')}
+    </a>
+    <button class="bcm-item bcm-info">
+      <span class="bcm-icon-char">ℹ</span>
+      ${t('library.btn_cover_info')}
+    </button>
+    ${offlineItem}
+  `;
+  document.body.appendChild(popup);
+
+  // Position: right-align popup to button, open upward by default
+  const rect   = btn.getBoundingClientRect();
+  const popupH = popup.offsetHeight;
+  const enoughRoomAbove = rect.top >= popupH + 6;
+  popup.style.right = (window.innerWidth - rect.right) + 'px';
+  if (enoughRoomAbove) {
+    popup.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+  } else {
+    popup.style.top           = (rect.bottom + 4) + 'px';
+    popup.style.transformOrigin = 'top right';
+  }
+
+  // Item handlers
+  popup.querySelector('.bcm-read').addEventListener('click', () => {
+    sessionStorage.setItem('br_last_shelf', String(currentShelfId));
+    sessionStorage.setItem('br_last_search', document.getElementById('search-input')?.value || '');
+    closeCardMenu();
+    window.location.href = `/readerv4.html?id=${book.id}`;
+  });
+
+  popup.querySelector('.bcm-info').addEventListener('click', () => {
+    closeCardMenu();
+    openInfoModal(book);
+  });
+
+  popup.querySelector('.bcm-offline-download')?.addEventListener('click', async () => {
+    closeCardMenu();
+    downloadingIds.add(book.id);
+    applyFilter();
+    try {
+      await downloadBook(book, getToken());
+      downloadedIds.add(book.id);
+      toast.success(t('library.toast_downloaded'));
+      updateDownloadedCount(downloadedIds.size);
+    } catch (err) {
+      console.error('[offline] download failed:', err.message);
+      toast.error(t('library.toast_download_err'));
+    } finally {
+      downloadingIds.delete(book.id);
+      applyFilter();
+    }
+  });
+
+  popup.querySelector('.bcm-offline-delete')?.addEventListener('click', () => {
+    closeCardMenu();
+    confirmDialog(
+      t('library.btn_delete_offline'),
+      async () => {
+        await deleteDownload(book.id);
+        downloadedIds.delete(book.id);
+        toast.success(t('library.toast_deleted_offline'));
+        updateDownloadedCount(downloadedIds.size);
+        applyFilter();
+      },
+      t('library.btn_delete_offline'),
+      true
+    );
+  });
+
+  // Close on outside click (capture phase so card stopPropagation doesn't block it)
+  const onOutsideClick = (e) => {
+    if (!popup.contains(e.target) && e.target !== btn) closeCardMenu();
+  };
+  const onEsc = (e) => { if (e.key === 'Escape') closeCardMenu(); };
+  _activeCardMenu = { popup, onOutsideClick, onEsc };
+  // Defer so this same click event doesn't immediately trigger the outside-click handler
+  setTimeout(() => {
+    document.addEventListener('click', onOutsideClick, true);
+    document.addEventListener('keydown', onEsc);
+  }, 0);
+}
+
 // ── Cover preview overlay ────────────────────────────────────────────────────
 function openCoverPreview(book) {
   if (!book.cover_path) return;
@@ -449,7 +581,8 @@ async function openInfoModal(book) {
   const progressPct = Math.round((book.percentage || 0) * 100);
 
   // ── HTML helpers ─────────────────────────────────────────────────────────────
-  const fmtDate = (ts) => ts ? new Date(ts * 1000).toLocaleDateString() : '—';
+  const fmtDate    = (ts) => ts ? new Date(ts * 1000).toLocaleDateString() : '—';
+  const fmtClock   = (ts) => ts ? new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '?';
   const fmtTime = (secs) => {
     if (!secs) return '0m';
     const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60);
@@ -489,6 +622,9 @@ async function openInfoModal(book) {
           <div class="info-modal-actions">
             <a class="imt-action-btn imt-btn-read" href="/readerv4.html?id=${fullBook.id}" title="${t('library.btn_read')}"><img src="/images/read.svg" class="nav-icon nav-icon-read" alt="${t('library.btn_read')}"></a>
             <a class="imt-action-btn" href="/readerv4.html?id=${fullBook.id}&peek=1" title="${t('library.btn_peek')}"><img src="/images/peek.svg" class="nav-icon nav-icon-peek" alt="${t('library.btn_peek')}"></a>
+            ${isOfflineSupported && !isOfflineMode ? (downloadedIds.has(fullBook.id)
+              ? `<button class="imt-action-btn" id="info-modal-offline" title="${t('library.btn_delete_offline')}"><img src="/images/delete.svg" class="nav-icon nav-icon-delete" alt="${t('library.btn_delete_offline')}"></button>`
+              : `<button class="imt-action-btn" id="info-modal-offline" title="${t('library.btn_download_offline')}"><img src="/images/download.svg" class="nav-icon nav-icon-download" alt="${t('library.btn_download_offline')}"></button>`) : ''}
             ${isOfflineMode ? '' : `<a class="imt-action-btn" href="/api/books/${fullBook.id}/file?download=1&token=${token}" download title="${t('library.btn_download')}"><img src="/images/download.svg" class="nav-icon nav-icon-download" alt="${t('library.btn_download')}"></a>`}
             ${isOfflineMode ? '' : `<button class="imt-action-btn imt-delete-btn" id="info-modal-delete" title="${t('library.btn_del_book')}"><img src="/images/delete.svg" class="nav-icon nav-icon-delete" alt="${t('library.btn_del_book')}"></button>`}
           </div>
@@ -630,6 +766,40 @@ async function openInfoModal(book) {
       `${t('library.confirm_del_book', { title: escHtml(fullBook.title) })}`,
       () => deleteBook(fullBook.id)
     );
+  });
+
+  backdrop.querySelector('#info-modal-offline')?.addEventListener('click', async () => {
+    if (downloadedIds.has(fullBook.id)) {
+      close();
+      confirmDialog(
+        t('library.btn_delete_offline'),
+        async () => {
+          await deleteDownload(fullBook.id);
+          downloadedIds.delete(fullBook.id);
+          toast.success(t('library.toast_deleted_offline'));
+          updateDownloadedCount(downloadedIds.size);
+          applyFilter();
+        },
+        t('library.btn_delete_offline'),
+        true
+      );
+    } else {
+      downloadingIds.add(fullBook.id);
+      applyFilter();
+      try {
+        await downloadBook(fullBook, getToken());
+        downloadedIds.add(fullBook.id);
+        toast.success(t('library.toast_downloaded'));
+        updateDownloadedCount(downloadedIds.size);
+      } catch (err) {
+        console.error('[offline] download failed:', err.message);
+        toast.error(t('library.toast_download_err'));
+      } finally {
+        downloadingIds.delete(fullBook.id);
+        applyFilter();
+        close();
+      }
+    }
   });
 
   // ── Details tab handlers ──────────────────────────────────────────────────────
@@ -855,7 +1025,7 @@ async function openInfoModal(book) {
             </div>
             ${sessions.map(r => `
               <div class="imt-session-row">
-                <span class="imt-session-date">${fmtDate(r.start_ts)}</span>
+                <span class="imt-session-date">${fmtDate(r.start_ts)}<span class="imt-session-time">${fmtClock(r.start_ts)} – ${fmtClock(r.end_ts)}</span></span>
                 <span class="imt-session-dur">${fmtTime((r.end_ts || r.start_ts) - r.start_ts)}</span>
                 <span class="imt-session-pages">${r.pages_nav ? `${r.pages_nav} ${t('library.session_pages_abbr')}` : '—'}</span>
               </div>`).join('')}

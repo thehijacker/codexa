@@ -1509,9 +1509,9 @@ input[type="range"]::-moz-range-thumb {
   z-index: 3;
 }
 /* top separator: sits just below the top status bar text */
-.sb-sep-top    { top:    calc(var(--sb-font-size, 11px) + 12px + var(--edge-pad-top,    0px)); }
+.sb-sep-top    { top:    calc(var(--sb-font-size, 11px) + 17px + var(--edge-pad-top,    0px)); }
 /* bottom separator: mirror of top — same distance above the bottom bar as top sep is below it */
-.sb-sep-bottom { bottom: calc(var(--sab) + var(--sb-font-size, 11px) + 9px + var(--edge-pad-bottom, 0px)); }
+.sb-sep-bottom { bottom: calc(var(--sab) + var(--sb-font-size, 11px) + 14px + var(--edge-pad-bottom, 0px)); }
 /* Progress bars */
 .sb-prog-bar {
   position: absolute;

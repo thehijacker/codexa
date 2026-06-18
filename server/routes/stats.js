@@ -42,17 +42,21 @@ router.post('/chapter', (req, res) => {
   res.status(201).json({ success: true });
 });
 
+// A session counts as real reading only when the user navigated at least 2 pages
+// and spent at least 60 seconds — filters out quick open/close testing behaviour.
+const REAL_SESSION = 'end_ts IS NOT NULL AND pages_nav >= 2 AND (end_ts - start_ts) >= 60';
+
 // GET /api/stats — aggregate stats for the current user
 router.get('/', (req, res) => {
   const db  = getDb();
   const uid = req.user.id;
 
   const sessions = db.prepare(
-    'SELECT COUNT(*) as total, SUM(CASE WHEN end_ts IS NOT NULL THEN end_ts - start_ts ELSE 0 END) as total_secs, SUM(pages_nav) as total_pages FROM reading_sessions WHERE user_id = ? AND end_ts IS NOT NULL'
+    `SELECT COUNT(*) as total, SUM(end_ts - start_ts) as total_secs, SUM(pages_nav) as total_pages FROM reading_sessions WHERE user_id = ? AND ${REAL_SESSION}`
   ).get(uid);
 
   const avgRow = db.prepare(
-    'SELECT AVG(end_ts - start_ts) as avg_secs FROM reading_sessions WHERE user_id = ? AND end_ts IS NOT NULL AND (end_ts - start_ts) > 0'
+    `SELECT AVG(end_ts - start_ts) as avg_secs FROM reading_sessions WHERE user_id = ? AND ${REAL_SESSION}`
   ).get(uid);
 
   const booksStarted = db.prepare(
@@ -68,11 +72,11 @@ router.get('/', (req, res) => {
   const topBooks = db.prepare(
     `SELECT b.id, b.title, b.author, b.cover_path,
             COUNT(rs.id) as session_count,
-            SUM(CASE WHEN rs.end_ts IS NOT NULL THEN rs.end_ts - rs.start_ts ELSE 0 END) as total_secs,
+            SUM(rs.end_ts - rs.start_ts) as total_secs,
             MAX(rs.start_ts) as last_read
      FROM reading_sessions rs
      JOIN books b ON b.id = rs.book_id
-     WHERE rs.user_id = ?
+     WHERE rs.user_id = ? AND ${REAL_SESSION}
      GROUP BY rs.book_id
      ORDER BY total_secs DESC
      LIMIT 5`
@@ -95,7 +99,7 @@ router.get('/sessions/:bookId', (req, res) => {
   const rows = db.prepare(`
     SELECT start_ts, end_ts, pages_nav
     FROM reading_sessions
-    WHERE user_id = ? AND book_id = ? AND end_ts IS NOT NULL
+    WHERE user_id = ? AND book_id = ? AND ${REAL_SESSION}
     ORDER BY start_ts DESC LIMIT 50
   `).all(req.user.id, req.params.bookId);
   res.json(rows);

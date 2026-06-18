@@ -290,6 +290,7 @@ let _isOnline       = navigator.onLine; // kept in sync by online/offline events
 let pendingNavDirection = null; // 'next' or 'prev' tracking for chapter jump corrections
 let pendingWasChapterEnd = true;  // whether goNext() was called from the last page
 let deferredNextPending  = false; // true while a mid-repagination NEXT is deferred
+let _autoAdvancePending  = false; // true while a stuck-page auto-advance is in flight
 let isReady = false;          // true only after initial position is fully displayed
 let openCfi = '';             // CFI at the moment the book was first ready — used to skip no-op kosync pushes
 let tocFlatItems = [];
@@ -315,6 +316,7 @@ let _editingAnnotationId = null;      // id of annotation being edited in note e
 let _pendingNoteColor = 'yellow';     // color selected in note editor before save
 const WORD_HIGHLIGHT_LINGER_MS = 500; // how long the press-highlight lingers after a dialog closes
 let _clearHlTimer = null;
+let _annotToolbarTimer = null; // guards against mouseup firing before dblclick on desktop
 // Reading statistics tracking
 let statsSessionId = null;            // active reading_sessions.id
 let sessionPageCount = 0;             // page navigation events in current session
@@ -350,14 +352,19 @@ let currentEndPage   = 0;     // right-page number in two-page mode (0 in single
 let currentChapTotal = 0;     // total pages in current chapter
 let currentIsTwoPage = false; // true when two pages are visible simultaneously
 let chapPageCache    = {};    // { [spineIndex]: totalPages } accumulated as chapters are visited
+let chapOffsetCache  = {};    // { [spineIndex]: maxSkipOffset } loaded lazily from localStorage
 let currentLocsKey   = '';    // cache key for current column mode (reset on rendition restart)
+let _epubChapPage    = 0;    // epub.js raw displayed.page (before skip-offset correction)
+let _chapDisplayOffset = 0;  // columns skipped by epub.js that we hide: display = epub - offset
 let lastLocation     = null;  // last location object from updateProgress
 // Reading speed tracking: each entry is a { time } recorded on every page turn
 let speedSamples     = [];    // up to 25 recent samples
 
 // Space reserved at the bottom of the rendition so the status bar never overlaps text.
 // Must match the value used in book.renderTo() — kept here so all resize calls share it.
-const RENDITION_BOTTOM_RESERVE = 32;
+// 40px (was 32) gives a comfortable gap above the bottom separator on all devices including
+// older Android WebViews that may not perfectly honour epub.js column height constraints.
+const RENDITION_BOTTOM_RESERVE = 40;
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const readerLayout   = document.querySelector('.reader-layout');
@@ -419,7 +426,7 @@ function loadPrefs() {
     const legacyRevealPx = typeof saved.headerRevealZone === 'number' ? saved.headerRevealZone : null;
     const legacyBtnPx = typeof saved.headerButtonSize === 'number' ? saved.headerButtonSize : null;
     const btnBase = window.matchMedia('(max-width: 640px)').matches ? 44 : 36;
-    return {
+    const merged = {
       ...DEFAULT_PREFS,
       ...saved,
       headerRevealZonePct: saved.headerRevealZonePct ?? (
@@ -443,6 +450,8 @@ function loadPrefs() {
         clockFormat:     sb.clockFormat || DEFAULT_STATUS_BAR.clockFormat,
       },
     };
+    if (localStorage.getItem('br_library_theme') === 'eink') merged.eink = true;
+    return merged;
   } catch { return { ...DEFAULT_PREFS, statusBar: { ...DEFAULT_STATUS_BAR } }; }
 }
 
@@ -924,6 +933,7 @@ body {
   color:          ${theme.text} !important;
   padding-left:   ${prefs.margin}px !important;
   padding-right:  ${prefs.margin}px !important;
+  padding-top:    36px !important;
   padding-top:    max(2rem, 36px) !important;
   padding-bottom: 0px !important;
   margin:         0 !important;
@@ -1460,6 +1470,7 @@ function attachIframeDictionary(contents) {
 
   if (!coarsePointer) {
     doc.addEventListener('dblclick', (e) => {
+      clearTimeout(_annotToolbarTimer); _annotToolbarTimer = null;
       const sel = win.getSelection?.();
       const selText = sel?.toString().trim();
       const word = selText ? selText.split(/\s+/)[0] : getWordAtPoint(e.clientX, e.clientY);
@@ -1657,7 +1668,10 @@ function attachIframeAnnotation(contents) {
       try { cfiRange = contents.cfiFromRange(sel.getRangeAt(0)); } catch { return; }
     }
     if (!cfiRange) return;
-    window.parent.postMessage({ type: 'annotation-select', cfiRange, text }, '*');
+    clearTimeout(_annotToolbarTimer);
+    _annotToolbarTimer = setTimeout(() => {
+      window.parent.postMessage({ type: 'annotation-select', cfiRange, text }, '*');
+    }, 300);
   }
   doc.addEventListener('mouseup', onSelectionEnd);
   doc.addEventListener('touchend', () => setTimeout(() => onSelectionEnd(), 50));
@@ -2205,7 +2219,10 @@ function computeSlot(ids) {
 
 // Update all overlay slots from current state
 function updateStatusBar(location) {
-  const startPage  = location?.start?.displayed?.page  ?? 0;
+  const epubStartPage = location?.start?.displayed?.page  ?? 0;
+  _epubChapPage = epubStartPage; // always track epub.js raw page before offset correction
+  // Apply cumulative skip offset so page display stays sequential after epub.js overshoots
+  const startPage  = epubStartPage > 0 ? epubStartPage - _chapDisplayOffset : 0;
   const totalPages = location?.start?.displayed?.total ?? 0;
   const endPage    = location?.end?.displayed?.page    ?? 0;
   const isTwoPage  = startPage > 0 && endPage > 0 && endPage !== startPage;
@@ -2222,6 +2239,23 @@ function updateStatusBar(location) {
   currentIsTwoPage = isTwoPage;
   if (stableTotal > 0) chapPageCache[currentSpineIndex] = stableTotal;
 
+  // Load per-chapter skip offset from localStorage on first access.
+  // This lets the total denominator show the correct value from page 1 on
+  // re-entry (once the offset is known from a prior navigation).
+  if (!(currentSpineIndex in chapOffsetCache) && currentBook?.file_hash) {
+    try {
+      const _lsKey = `br_chapoff_${currentBook.file_hash}_${currentSpineIndex}`;
+      const _lsVal = localStorage.getItem(_lsKey);
+      chapOffsetCache[currentSpineIndex] = _lsVal != null ? (parseInt(_lsVal, 10) || 0) : 0;
+      console.log(`[skip-cache] load spineIdx=${currentSpineIndex} ls="${_lsVal}" → cached=${chapOffsetCache[currentSpineIndex]}`);
+    } catch { chapOffsetCache[currentSpineIndex] = 0; }
+  }
+  const _offsetForTotal = Math.max(_chapDisplayOffset, chapOffsetCache[currentSpineIndex] || 0);
+  const _displayTotal   = stableTotal > 0 ? Math.max(stableTotal - _offsetForTotal, startPage) : 0;
+  if (_offsetForTotal > 0 || _chapDisplayOffset > 0) {
+    console.log(`[skip-cache] total: raw=${stableTotal} dispOff=${_chapDisplayOffset} cached=${chapOffsetCache[currentSpineIndex]||0} → display=${_displayTotal}`);
+  }
+
   const pos = prefs.statusBar.positions;
   // In two-page mode, chapterPage is always placed at the outermost slots
   // (tl/tr for top, bl/br for bottom), honouring only the row (top vs bottom)
@@ -2233,8 +2267,8 @@ function updateStatusBar(location) {
   const cpIconSrc = STAT_ICON['chapterPage'];
   const cpImg     = (cpIconSrc && prefs.statusBar.showIcons['chapterPage'] !== false)
                     ? sbIconHtml(cpIconSrc) + '\u202F' : '';
-  const leftVal   = startPage > 0 ? cpImg + startPage + '/' + stableTotal : '';
-  const rightVal  = endPage   > 0 ? cpImg + endPage   + '/' + stableTotal : '';
+  const leftVal   = startPage > 0 ? cpImg + startPage + '/' + _displayTotal : '';
+  const rightVal  = endPage   > 0 ? cpImg + endPage   + '/' + _displayTotal : '';
 
   // ── Top row ──────────────────────────────────────────────────────────────
   if (chapInTop) {
@@ -2512,13 +2546,13 @@ function applyProgressBarLayout() {
     sbBookProg.style.display = bookCfg.show ? '' : 'none';
     sbBookProg.style.height  = bookCfg.thickness + 'px';
     sbBookProg.style.top     = bookCfg.position === 'top'    ? 'var(--edge-pad-top, 0px)'    : 'auto';
-    sbBookProg.style.bottom  = bookCfg.position === 'bottom' ? 'calc(env(safe-area-inset-bottom, 0px) + var(--edge-pad-bottom, 0px))' : 'auto';
+    sbBookProg.style.bottom  = bookCfg.position === 'bottom' ? 'calc(var(--sab, 0px) + var(--edge-pad-bottom, 0px))' : 'auto';
   }
 
   if (sbChapProg) {
     sbChapProg.style.display = chapCfg.show ? '' : 'none';
     sbChapProg.style.height  = chapCfg.thickness + 'px';
-    const edgeVar   = chapCfg.position === 'top' ? 'var(--edge-pad-top, 0px)' : 'calc(env(safe-area-inset-bottom, 0px) + var(--edge-pad-bottom, 0px))';
+    const edgeVar   = chapCfg.position === 'top' ? 'var(--edge-pad-top, 0px)' : 'calc(var(--sab, 0px) + var(--edge-pad-bottom, 0px))';
     const chapOffset = bothSame
       ? `calc(${edgeVar} + ${bookCfg.thickness + 1}px)`
       : edgeVar;
@@ -3709,8 +3743,16 @@ function renderStatusSlots() {
 
   const cpIconSrc = STAT_ICON['chapterPage'];
   const cpIcon    = (cpIconSrc && prefs.statusBar.showIcons['chapterPage'] !== false) ? sbIconHtml(cpIconSrc) + '\u202F' : '';
-  const leftVal  = currentChapPage > 0 ? cpIcon + currentChapPage + '/' + currentChapTotal : '';
-  const rightVal = currentEndPage  > 0 ? cpIcon + currentEndPage  + '/' + currentChapTotal : '';
+  if (!(currentSpineIndex in chapOffsetCache) && currentBook?.file_hash) {
+    try {
+      const saved = localStorage.getItem(`br_chapoff_${currentBook.file_hash}_${currentSpineIndex}`);
+      chapOffsetCache[currentSpineIndex] = saved != null ? (parseInt(saved, 10) || 0) : 0;
+    } catch { chapOffsetCache[currentSpineIndex] = 0; }
+  }
+  const _rsOffsetForTotal = Math.max(_chapDisplayOffset, chapOffsetCache[currentSpineIndex] || 0);
+  const _rsDisplayTotal   = currentChapTotal > 0 ? Math.max(currentChapTotal - _rsOffsetForTotal, currentChapPage) : 0;
+  const leftVal  = currentChapPage > 0 ? cpIcon + currentChapPage + '/' + _rsDisplayTotal : '';
+  const rightVal = currentEndPage  > 0 ? cpIcon + currentEndPage  + '/' + _rsDisplayTotal : '';
 
   if (chapInTop) {
     const tlOther = computeSlot(pos.tl.filter(id => id !== 'chapterPage'));
@@ -4330,6 +4372,8 @@ function initSettingsUi() {
 
 // ── Progress ──────────────────────────────────────────────────────────────────
 function updateProgress(location) {
+  const wasAutoAdvance = _autoAdvancePending;
+  _autoAdvancePending = false;
   const cfi = location?.start?.cfi;
   let pct   = 0;
   if (cfi && book.locations?.length() > 0) {
@@ -4390,9 +4434,17 @@ function updateProgress(location) {
   if (isReady) lastLocation = location;
   if (isReady && currentBook && (cfi || pct > 0)) scheduleDebouncedSync();
   trackReadingSpeed();
+  const _prevChapPage  = currentChapPage; // display page before updateStatusBar mutates it
+  const _prevEpubPage  = _epubChapPage;   // epub.js raw page before updateStatusBar mutates it
+  // Reset skip offset whenever we cross into a new chapter (each chapter reindexes from 1)
+  if (isReady && href && oldChapterHref && href !== oldChapterHref) {
+    _chapDisplayOffset = 0;
+    _epubChapPage      = 0;
+  }
   updateStatusBar(location);
   scheduleBionicPrefetchAround(location);
 
+  const _wasNavDir = pendingNavDirection; // capture before the if/else clears it
   if (
     pendingNavDirection === 'next' &&
     isReady &&
@@ -4412,6 +4464,66 @@ function updateProgress(location) {
     }
   } else {
     pendingNavDirection = null;
+  }
+
+  // Use raw epub.js page for stuck/skip detection — _prevEpubPage is the epub page before
+  // this navigation, startPage is the epub page reported by the new location.
+  const startPage = location?.start?.displayed?.page ?? 0;
+
+  // Stuck-page auto-advance: same epub page returned after NEXT → fire another next().
+  // wasAutoAdvance prevents an infinite loop if the follow-up next() is also stuck.
+  if (
+    _wasNavDir === 'next' &&
+    href === oldChapterHref &&
+    isReady &&
+    startPage > 0 &&
+    startPage === _prevEpubPage &&
+    !wasAutoAdvance
+  ) {
+    _autoAdvancePending = true;
+    pendingNavDirection = 'next';
+    console.log(`[nav] auto-advance | stuck p=${startPage} → next()`);
+    rendition.next();
+  }
+
+  // Skip-fix (NEXT): epub.js jumped >1 column forward (image-induced overshoot).
+  // Accumulate the hidden columns in _chapDisplayOffset so the status bar stays
+  // sequential. updateStatusBar() reads _chapDisplayOffset on every call, so calling
+  // it again after updating the offset is enough to re-render the corrected number.
+  if (
+    _wasNavDir === 'next' &&
+    href === oldChapterHref &&
+    isReady &&
+    _prevEpubPage > 0 &&
+    startPage > _prevEpubPage + 1 &&
+    !wasAutoAdvance
+  ) {
+    _chapDisplayOffset += startPage - _prevEpubPage - 1;
+    // Persist max observed offset for this chapter so re-entry shows correct total
+    const _newMaxOff = Math.max(chapOffsetCache[currentSpineIndex] || 0, _chapDisplayOffset);
+    if (_newMaxOff > (chapOffsetCache[currentSpineIndex] || 0)) {
+      chapOffsetCache[currentSpineIndex] = _newMaxOff;
+      try {
+        localStorage.setItem(`br_chapoff_${currentBook?.file_hash}_${currentSpineIndex}`, _newMaxOff);
+        console.log(`[skip-cache] saved spineIdx=${currentSpineIndex} off=${_newMaxOff}`);
+      } catch {}
+    }
+    console.log(`[nav] skip-fix | epub ${_prevEpubPage}→${startPage} off=${_chapDisplayOffset} → show p=${startPage - _chapDisplayOffset}`);
+    updateStatusBar(location);
+  }
+
+  // Skip-fix (PREV): epub.js jumped >1 column backward (crossing a previously-skipped
+  // boundary). Shrink _chapDisplayOffset to mirror the forward correction in reverse.
+  if (
+    _wasNavDir === 'prev' &&
+    href === oldChapterHref &&
+    isReady &&
+    _prevEpubPage > 0 &&
+    _prevEpubPage - startPage > 1
+  ) {
+    _chapDisplayOffset = Math.max(0, _chapDisplayOffset - (_prevEpubPage - startPage - 1));
+    console.log(`[nav] skip-fix-prev | epub ${_prevEpubPage}→${startPage} off=${_chapDisplayOffset} → show p=${startPage - _chapDisplayOffset}`);
+    updateStatusBar(location);
   }
 }
 
@@ -4894,7 +5006,10 @@ function getLocsCacheKey() {
 }
 
 async function startRendition(displayCfi = null) {
-  chapPageCache  = {};
+  chapPageCache      = {};
+  chapOffsetCache    = {};
+  _epubChapPage      = 0;
+  _chapDisplayOffset = 0;
   currentLocsKey = getLocsCacheKey();
   // On small screens always force single-page, regardless of user preference.
   // On Android, use a higher minSpreadWidth (1200px) because e-ink devices such as
@@ -4942,26 +5057,29 @@ async function startRendition(displayCfi = null) {
     // emitting another 'relocated'. Poll after a short settle window and sync the
     // status bar if the internal page moved — prevents misleading page-number jumps
     // on the next user-initiated NEXT press.
-    setTimeout(() => {
+    const _repaginateCheck = (label) => {
       if (!isReady) return;
       const loc = rendition?.currentLocation?.();
       const p = loc?.start?.displayed?.page;
       // Only apply FORWARD corrections: unloaded images produce a stale layout
-      // where displayed.page is lower than the true position. Letting a backward
-      // correction through would corrupt currentEndPage and cause goNext() to
-      // trigger its mid-repagination defer, making one swipe appear to skip a page.
-      if (p && p > currentChapPage) {
+      // where displayed.page is lower than the true position.
+      // Compare against _epubChapPage (the raw epub page) so a skip-fix correction
+      // that reduced currentChapPage below p does NOT trigger a spurious re-update.
+      if (p && p > _epubChapPage) {
+        const prevDisplay = currentChapPage;
+        const prevEpub    = _epubChapPage;
+        updateStatusBar(loc); // sets _epubChapPage = p, currentChapPage = p - _chapDisplayOffset
         console.log(
-          `[nav] repaginate | ${currentChapPage}→${p}/${currentChapTotal}` +
+          `[nav] repaginate@${label} | epub ${prevEpub}→${p} show ${prevDisplay}→${currentChapPage}/${currentChapTotal}` +
           ` chap="${currentHref?.split('/').pop()}"`
         );
-        currentChapPage  = p;
-        currentEndPage   = loc.end?.displayed?.page ?? currentEndPage;
-        currentChapTotal = Math.max(loc.start?.displayed?.total ?? 0, currentChapTotal);
-        if (chapPageCache[currentSpineIndex] < currentChapTotal) chapPageCache[currentSpineIndex] = currentChapTotal;
-        updateStatusBar(loc);
       }
-    }, 180);
+    };
+    setTimeout(() => _repaginateCheck('180ms'), 180);
+    // Slow WebViews (e-ink Android) can take >180ms for column layout to settle
+    // after navigation. A second poll at 600ms catches stale same-page relocations
+    // that the 180ms poll misses — only fires if page still hasn't advanced.
+    setTimeout(() => _repaginateCheck('600ms'), 600);
   });
 
   rendition.on('relocated', updateProgress);
@@ -5382,8 +5500,11 @@ async function resizeRenditionToViewer() {
   }
   const pctBeforeResize = currentPct;
   const cfiBeforeResize = currentCfi;
-  chapPageCache    = {};
-  currentChapTotal = 0;
+  chapPageCache      = {};
+  chapOffsetCache    = {};
+  _epubChapPage      = 0;
+  _chapDisplayOffset = 0;
+  currentChapTotal   = 0;
   rendition.resize(epubViewer.clientWidth, Math.max(200, epubViewer.clientHeight - RENDITION_BOTTOM_RESERVE));
   if (isReady && pctBeforeResize > 0 && book.locations?.length() > 0) {
     await seekToPercentage(pctBeforeResize);
@@ -5672,9 +5793,12 @@ function initHeaderFit() {
   const header = document.querySelector('.reader-header');
   if (!header) return;
 
-  const MAX = 36, MIN = 22;
-
   function fit() {
+    // Use the user's preferred button size as the ceiling so the icon size slider
+    // actually affects icons — without this, MAX was hardcoded to 36 and would
+    // override whatever applyHeaderButtonSize() set on the root element.
+    const userPx = Math.round(getHeaderButtonBasePx() * (prefs.headerButtonScalePct ?? 100) / 100);
+    const MAX = Math.max(userPx, 22), MIN = 22;
     const btns = [...header.querySelectorAll('.btn-icon')]
       .filter(b => getComputedStyle(b).display !== 'none');
     const n = btns.length;

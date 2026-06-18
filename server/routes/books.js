@@ -232,8 +232,30 @@ router.patch('/:id/file', async (req, res) => {
     const destPath = path.join(destDir, book.file_hash + '.epub');
     fs.renameSync(tmpPath, destPath);
 
-    db.prepare('UPDATE books SET file_hash_md5 = ?, kosync_hash = ? WHERE id = ?').run(newMd5, '', book.id);
-    res.json({ file_hash_md5: newMd5 });
+    // Re-extract all metadata from the new file so genres, description, etc. stay current.
+    // Title and author are intentionally preserved in case the user edited them manually.
+    const meta = extractEpubMetadata(destPath, COVERS_DIR, book.file_hash);
+    db.prepare(`UPDATE books SET
+      file_hash_md5 = ?, kosync_hash = '',
+      cover_path  = ?,
+      description = CASE WHEN ? != '' THEN ? ELSE description END,
+      publisher   = CASE WHEN ? != '' THEN ? ELSE publisher   END,
+      language    = CASE WHEN ? != '' THEN ? ELSE language    END,
+      isbn        = CASE WHEN ? != '' THEN ? ELSE isbn        END,
+      genres      = CASE WHEN ? != '' THEN ? ELSE genres      END,
+      pages       = CASE WHEN ? > 0   THEN ? ELSE pages       END
+    WHERE id = ?`).run(
+      newMd5,
+      meta.cover_path,
+      meta.description || '', meta.description || '',
+      meta.publisher   || '', meta.publisher   || '',
+      meta.language    || '', meta.language    || '',
+      meta.isbn        || '', meta.isbn        || '',
+      meta.genres      || '', meta.genres      || '',
+      meta.pages       || 0,  meta.pages       || 0,
+      book.id
+    );
+    res.json({ file_hash_md5: newMd5, cover_path: meta.cover_path });
   } catch (err) {
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     console.error('[books] replace file error:', err.message);
