@@ -266,6 +266,30 @@ export class CXReader {
     this._fireRelocated();
   }
 
+  // Navigate to the page containing range (character-exact, for search results).
+  // Call AFTER goToSpineItem() so the chapter is rendered and the paginator is at spread 0.
+  scrollToRange(range) {
+    if (!range || !this._paginator) return;
+    this._paginator.goToRange(range);
+    this._fireRelocated();
+  }
+
+  // Seek to the page within the CURRENT chapter that best matches pct (0..1).
+  // Used at open-time to restore within-chapter position from the saved percentage, since
+  // CXReader CFIs are chapter-level only and cannot encode a page number.
+  // Formula: pct = (spineIdx + (page-1)/pageCount) / spineTotal  →  solve for page.
+  seekToPercent(pct) {
+    if (!this._book || !this._paginator) return;
+    const total     = this._book.spine.length;
+    const pageCount = this._paginator.pageCount;
+    if (total <= 0 || pageCount <= 1) return;
+    const page0 = (pct * total - this._spineIdx) * pageCount; // 0-based fractional page
+    const target = Math.max(1, Math.min(pageCount, Math.round(page0) + 1));
+    if (target === this._paginator.currentPage) return;
+    this._paginator.goToPage(target);
+    this._fireRelocated();
+  }
+
   // Re-init paginator at the current page without firing cx-relocated.
   // Used when the viewport inset changes after the first render (status bars measured).
   reinitPaginator() {

@@ -13,7 +13,7 @@
 const LANG_KEY  = 'br_lang';
 const FALLBACK  = 'sl';
 // Bump this when locale files change to bust the localStorage cache
-const CACHE_VER = '20260618001';
+const CACHE_VER = '20260619001';
 const CACHE_VER_KEY = 'br_strings_ver';
 // New keys added in a release — stale localStorage caches missing these are refetched
 const LOCALE_SENTINEL_KEY = 'reader.sb_current_time';

@@ -320,6 +320,18 @@ const bionicPrefetchInFlight = new Set();
 let bookmarksCache = [];              // loaded bookmarks for current book
 let preBookmarkCfi = null;            // position before a bookmark jump (for back/accept)
 let preAnnotationCfi = null;          // position before an annotation jump (for back/accept)
+
+// Clear both bookmark and annotation pre-jump states + hide their buttons.
+// Called before starting a new bookmark/annotation jump so at most one pair of
+// back/accept buttons is ever visible at once.
+function _clearNavPreJumps() {
+  preBookmarkCfi  = null;
+  preAnnotationCfi = null;
+  if (bookmarkBackBtn)    { bookmarkBackBtn.style.display    = 'none'; }
+  if (bookmarkAcceptBtn)  { bookmarkAcceptBtn.style.display  = 'none'; }
+  if (annotationBackBtn)  { annotationBackBtn.style.display  = 'none'; }
+  if (annotationAcceptBtn){ annotationAcceptBtn.style.display = 'none'; }
+}
 let annotationsCache = [];            // loaded annotations for current book
 let _pendingAnnotation = null;        // {cfiRange, text} waiting for color/note pick
 let _editingAnnotationId = null;      // id of annotation being edited in note editor
@@ -2117,7 +2129,9 @@ function renderAnnotationList() {
       </div>
       <button class="annotation-delete-btn btn-icon-sm" title="${t('reader.annotation_delete')}">🗑</button>`;
     item.querySelector('.annotation-item-body').addEventListener('click', () => {
-      if (!preAnnotationCfi && currentCfi) {
+      // Clear any existing bookmark/annotation back+accept buttons first.
+      _clearNavPreJumps();
+      if (currentCfi) {
         preAnnotationCfi = currentCfi;
         annotationBackBtn.style.display   = '';
         annotationAcceptBtn.style.display = '';
@@ -3245,6 +3259,11 @@ function clearSearchHighlights() {
       });
     } catch { /* ignore */ }
   }
+  // Also clear from the CXReader iframe (if a search highlight was applied there)
+  const cxDoc = _cxReader?._renderer?.iframe?.contentDocument;
+  if (cxDoc) {
+    cxDoc.querySelectorAll('mark.br-hl').forEach(m => m.replaceWith(cxDoc.createTextNode(m.textContent)));
+  }
 }
 
 // Highlight the last searched query in the current rendered iframe by wrapping
@@ -3344,6 +3363,87 @@ async function jumpToSearchResult(cfi, href, query) {
   }
 }
 
+// Walk body text nodes to find the one that contains character offset `targetOffset`.
+// Returns { node, innerOffset } or null. Uses the body's ownerDocument so it works inside
+// iframes. All text nodes are walked (no script/style exclusion) to match body.textContent
+// offsets used during search — the link-interceptor script is always appended last, so any
+// offset found in the original book text maps correctly.
+function _cxFindNodeAtOffset(body, targetOffset) {
+  const walker = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT, null);
+  let pos = 0;
+  let node;
+  while ((node = walker.nextNode())) {
+    const len = node.textContent.length;
+    if (pos + len > targetOffset) return { node, innerOffset: targetOffset - pos };
+    pos += len;
+  }
+  return null;
+}
+
+// Highlight all occurrences of query in the CXReader iframe by wrapping matched text nodes in
+// <mark class="br-hl">. Same approach as applyDomSearchHighlight() for epub.js. Works perfectly
+// without bionic reading; with bionic ON some matches may miss (text nodes are split by word).
+function _cxApplySearchHighlight(body, query) {
+  if (!body || !query) return;
+  const doc   = body.ownerDocument;
+  const reEsc = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re    = new RegExp(`(${reEsc})`, 'gi');
+  // Remove any stale marks first
+  doc.querySelectorAll('mark.br-hl').forEach(m => m.replaceWith(doc.createTextNode(m.textContent)));
+  // Walk text nodes (skip script/style) and wrap matches
+  const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
+    acceptNode: n => n.parentElement?.closest('script,style') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+  });
+  const hits = [];
+  let node;
+  while ((node = walker.nextNode())) {
+    if (re.test(node.textContent)) { hits.push(node); re.lastIndex = 0; }
+  }
+  hits.forEach(textNode => {
+    if (!textNode.parentNode) return;
+    const parts = textNode.textContent.split(re);
+    if (parts.length <= 1) return;
+    const frag = doc.createDocumentFragment();
+    parts.forEach((part, pi) => {
+      if (pi % 2 === 0) {
+        if (part) frag.appendChild(doc.createTextNode(part));
+      } else {
+        const mark = doc.createElement('mark');
+        mark.className = 'br-hl';
+        mark.textContent = part;
+        frag.appendChild(mark);
+      }
+    });
+    textNode.replaceWith(frag);
+  });
+}
+
+async function jumpToSearchResultCX(spineIdx, textOffset, query) {
+  if (!_cxReader) return;
+  if (!preSearchCfi && currentCfi) {
+    preSearchCfi = currentCfi;
+    searchBackBtn.style.display   = '';
+    searchAcceptBtn.style.display = '';
+  }
+  closePanels();
+  clearSearchHighlights();
+  await _cxReader.goToSpineItem(spineIdx);
+  // After render the paginator is at spread 0 (body.style.transform === ''), so client rects
+  // are in natural body-x coordinates — exactly what goToRange needs.
+  const body = _cxReader._renderer?.iframe?.contentDocument?.body;
+  if (!body) return;
+  const hit = _cxFindNodeAtOffset(body, textOffset);
+  if (!hit) return;
+  const doc = body.ownerDocument;
+  const range = doc.createRange();
+  const maxOff = hit.node.textContent.length;
+  range.setStart(hit.node, Math.min(hit.innerOffset, maxOff));
+  range.setEnd(hit.node, Math.min(hit.innerOffset + 1, maxOff));
+  _cxReader.scrollToRange(range);
+  // Apply highlight marks after scrolling — marks are inline so they won't affect column layout
+  _cxApplySearchHighlight(body, query);
+}
+
 async function runSearchCX(query) {
   if (!_cxReader) { searchStatusEl.textContent = ''; return; }
   const spine = _cxReader.spine;
@@ -3368,20 +3468,13 @@ async function runSearchCX(query) {
         const excerpt = (start > 0 ? '…' : '') + text.slice(start, end).trim() + (end < text.length ? '…' : '');
         total++;
         const chapterLabel = chapterLabelFromHref(item.href) || item.href.split('/').pop();
-        const capturedHref = item.href;
+        const capturedSpineIdx = i;
+        const capturedOffset   = idx;
         const div = document.createElement('div');
         div.className = 'search-result';
         div.innerHTML = `<div class="search-result-chapter">${esc(chapterLabel)}</div>` +
                         `<div class="search-result-excerpt">${highlightExcerpt(excerpt, query)}</div>`;
-        div.addEventListener('click', () => {
-          if (!preSearchCfi && currentCfi) {
-            preSearchCfi = currentCfi;
-            searchBackBtn.style.display   = '';
-            searchAcceptBtn.style.display = '';
-          }
-          closePanels();
-          void _cxReader?.goToHref(capturedHref);
-        });
+        div.addEventListener('click', () => void jumpToSearchResultCX(capturedSpineIdx, capturedOffset, query));
         searchResultsEl.appendChild(div);
         pos = idx + query.length;
       }
@@ -4827,6 +4920,7 @@ function scheduleProgressSave() {
 async function seekToPercentage(targetPct) {
   if (prefs.experimentalReader && _cxReader) {
     await _cxReader.goToPct(targetPct);
+    _cxReader.seekToPercent(targetPct); // fine-tune to exact page within the chapter
     return;
   }
   if (!book.locations?.length()) return;
@@ -6171,8 +6265,10 @@ function renderBookmarkList() {
     // Click on info → jump (save position so user can go back / accept)
     item.querySelector('.bookmark-info').addEventListener('click', () => {
       if (!bm.cfi) return;
-      // Save current position for back button, same pattern as search navigation
-      if (!preBookmarkCfi && currentCfi) {
+      // Clear any existing bookmark/annotation back+accept buttons first — clicking a new
+      // jump item implicitly accepts the previous position, so only one pair shows at a time.
+      _clearNavPreJumps();
+      if (currentCfi) {
         preBookmarkCfi = currentCfi;
         bookmarkBackBtn.style.display   = '';
         bookmarkAcceptBtn.style.display = '';
@@ -7156,6 +7252,9 @@ async function init() {
         // CXReader: navigate by percentage — most reliable since DocFragment data can be
         // stale/mismatched from earlier sessions. Percentage scales linearly over spine count.
         await _cxReader.goToPct(syncTarget.percentage);
+        // goToPct only resolves to chapter level (page 1); fine-tune to the exact page
+        // within the chapter using the percentage formula.
+        _cxReader.seekToPercent(syncTarget.percentage);
       } else
       try {
         // Any DocFragment-based xpointer — navigate to the correct spine item directly.
@@ -7211,6 +7310,11 @@ async function init() {
           if (book.locations.length() > 0) await seekToPercentage(syncTarget.percentage);
         }
       } catch (e) { console.warn('[kosync] navigate failed:', e.message); }
+    } else if (prefs.experimentalReader && _cxReader && localProgress?.percentage > 0) {
+      // CXReader, no sync jump: the chapter was already opened (from the saved CFI) but
+      // CXReader CFIs are chapter-level only — the page within the chapter is carried by the
+      // percentage. seekToPercent() back-computes the target page and jumps there directly.
+      _cxReader.seekToPercent(localProgress.percentage);
     } else if (startCfiIsEpubcfi && localProgress?.percentage != null && book.locations.length() > 0) {
       // No sync navigation occurred.  The CFI display in startRendition snaps to the page
       // containing the saved element but can land a few pages behind when the CFI has a

@@ -189,6 +189,17 @@ export class ColumnPaginator {
     return this.goToPage(Math.max(0, col) + 1);
   }
 
+  // Navigate to the spread containing range (used for search result jumps).
+  // Uses the first client rect of the range so the position is character-exact — precise even
+  // for a long paragraph that spans many pages (goToElement would only find the paragraph start).
+  goToRange(range) {
+    const rects = range.getClientRects();
+    if (!rects.length) return this.goToPage(1);
+    const x = rects[0].left;
+    const col = Math.round((x - this._padL) / this._colAdvance);
+    return this.goToPage(Math.max(0, col) + 1);
+  }
+
   // ── Private ───────────────────────────────────────────────────────────────────
 
   _spreadIndex() { return Math.floor((this._currentPage - 1) / this._cols); }
