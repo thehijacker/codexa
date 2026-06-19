@@ -474,6 +474,20 @@
             <label class="toggle"><input type="checkbox" id="header-btn-fullscreen-toggle"><span class="toggle-slider"></span></label>
           </div>
         </div>
+        <div class="setting-row">
+          <div class="setting-row-inline">
+            <div>
+              <div class="setting-label" data-i18n="reader.sb_flow_reader">Classic reader (epub.js)</div>
+              <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_flow_reader_hint">
+                Switch to the original epub.js reader engine. The book reloads on toggle.
+              </div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="experimental-reader-toggle" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
       </div><!-- /.settings-tab-pane[theme] -->
 
       <!-- TAB: Text -->
@@ -1044,6 +1058,7 @@
         </div>
       </div><!-- /.settings-tab-pane[dicts] -->
 
+
     </div><!-- /.settings-body -->
   </div><!-- /#settings-panel -->
 
@@ -1144,7 +1159,7 @@
   <!-- JSZip must be loaded before epub.js -->
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/localforage@1.10.0/dist/localforage.min.js"></script>
-  <script type="module" src="/js/reader_v4.js?v=br-v78"></script>
+  <script type="module" src="/js/reader_v4.js?v=br-v101"></script>
   <script src="/js/sw-register.js"></script>
 </body>
 </html>

@@ -601,5 +601,7 @@
   "library.density_large": "Grande",
   "reader.sb_online": "Connessione",
   "reader.sb_online_yes": "Online",
-  "reader.sb_offline_yes": "Offline"
+  "reader.sb_offline_yes": "Offline",
+  "reader.sb_flow_reader": "Lettore classico (epub.js)",
+  "reader.sb_flow_reader_hint": "Usa il motore epub.js originale. Il libro viene ricaricato all'attivazione."
 }

@@ -4,7 +4,7 @@ import { t, initI18n, applyTranslations, getCurrentLang } from './i18n.js';
 import ePub from './flow/index.js';
 import { isBookDownloaded, downloadBook, fetchOfflineBookFile, getBookMeta, saveBookMeta } from './offline.js';
 
-const READER_BUILD = 'br-v78';
+const READER_BUILD = 'br-v82';
 const _i18nReady = initI18n();
 console.log('[codexa] reader build', READER_BUILD);
 
@@ -251,6 +251,7 @@ const DEFAULT_PREFS = {
   hyphenation:    false,         // CSS hyphens: auto inside epub iframe
   hyphenLang:     '',           // empty = keep book's own lang attr; else override e.g. 'en'
   bionicReading:  false,        // emphasize word prefixes for easier scanning
+  experimentalReader: true,     // use CXReader (column paginator) — false falls back to epub.js
   pageGapShadow:  false,        // show epub.js center-spine box-shadow in two-page mode
   dictionaries:   [],           // enabled dict IDs in priority order; null = all disabled; empty = use all
   dictionaryOrder: [],          // all dict IDs in user's display order (including disabled ones)
@@ -275,6 +276,15 @@ const DEFAULT_PREFS = {
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let book, rendition;
+let _cxReader       = null;  // CXReader instance (when experimentalReader is on)
+let _epubArrayBuffer = null; // raw EPUB bytes, set before startRendition()
+let _cxKbdIframe    = null;  // iframe that currently has keyboard handlers attached
+let _cxDictIframe   = null;  // iframe that currently has dictionary handlers attached
+let _cxLinkHandler  = null;  // window message handler for in-book link clicks
+let _cxViewerPadTop = 0;     // measured overlap of top status bar over epub-viewer (px)
+let _cxViewerPadBot = 0;     // measured overlap of bottom status bar over epub-viewer (px)
+let _cxViewerPaddingSet = false; // true after the first post-render inset measurement
+let _cxTouchNavIframe = null; // iframe that currently has touch-nav handlers attached
 let currentBook  = null;
 let prefs        = loadPrefs();
 let currentCfi   = '';
@@ -817,10 +827,6 @@ function fontFamilyFromFilename(f) {
     .replace(/[-_]/g, ' ')
     .trim();
 }
-function fontFormatFromExt(f) {
-  const e = f.split('.').pop().toLowerCase();
-  return { ttf: 'truetype', otf: 'opentype', woff: 'woff', woff2: 'woff2' }[e] || 'truetype';
-}
 function fontWeightFromFilename(f) {
   const l = f.toLowerCase();
   if (l.includes('thin'))       return '100';
@@ -858,9 +864,15 @@ async function loadCustomFonts() {
     const cssLines = [];
     Object.entries(families).forEach(([family, ffiles]) => {
       ffiles.forEach(f => {
+        // No format() hint: it's inferred from the file extension, but renamed/repackaged
+        // fonts often have an extension that doesn't match their actual sfnt data, and a
+        // wrong format() makes browsers silently drop the whole @font-face (the font then
+        // never applies and falls back to Georgia). Omitting it lets the engine sniff the
+        // bytes. Absolute origin URL so it also resolves inside CXReader's blob: iframe,
+        // whose document origin can be opaque on Android WebView.
         cssLines.push(`@font-face {
   font-family: "${family}";
-  src: url("/user-fonts/${encodeURIComponent(f)}") format("${fontFormatFromExt(f)}");
+  src: url("${location.origin}/user-fonts/${encodeURIComponent(f)}");
   font-weight: ${fontWeightFromFilename(f)};
   font-style: ${fontStyleFromFilename(f)};
 }`);
@@ -924,8 +936,8 @@ h1, h2, h3, h4, h5, h6 {
   font-family: ${prefs.fontFamily} !important;
 }` : '';
 
-  return `
-${fontFaceCSS}
+  return `${fontFaceCSS}
+/* cx-fonts-end */
 html {
   background: ${theme.bg} !important;
 }
@@ -957,6 +969,7 @@ img {
   margin-right: auto !important;
   mix-blend-mode: multiply !important;
 }
+figure { background: transparent !important; background-color: transparent !important; }
 ${prefs.eink ? buildEinkCss(theme) : ''}
 ${prefs.paraIndent ? `p { text-indent: ${(prefs.paraIndentSize / 10).toFixed(1)}em !important; }` : 'p { text-indent: 0 !important; }'}
 ${prefs.paraSpacing > 0 ? `p { margin-bottom: ${(prefs.paraSpacing / 10).toFixed(1)}em !important; }` : ''}
@@ -968,7 +981,9 @@ ${prefs.chapHeadSpacing ? `h1,h2,h3,h4,h5,h6 { margin: 0.2em 0 !important; paddi
 [class*="heading"],[class*="chapter-head"],[class*="chapterHead"],[class*="chapHead"],[class*="title-block"],[class*="titleBlock"] { height:auto !important; min-height:0 !important; padding-top:0 !important; padding-bottom:0 !important; margin-top:0 !important; margin-bottom:0 !important; }
 div:has(>h1),div:has(>h2),div:has(>h3),div:has(>h4) { height:auto !important; min-height:0 !important; padding-top:0 !important; padding-bottom:0 !important; margin-top:0 !important; margin-bottom:0 !important; }` : ''}
 ${prefs.compactBlankLines ? `p:empty, p[data-br-blank] { display: none !important; margin: 0 !important; padding: 0 !important; }` : ''}
-${prefs.hyphenation ? 'html, body, p, li { hyphens: auto !important; }' : 'html, body, p, li { hyphens: none !important; }'}
+${prefs.hyphenation
+  ? 'html, body, p, li { -webkit-hyphens: auto !important; hyphens: auto !important; }'
+  : 'html, body, p, li { -webkit-hyphens: none !important; hyphens: none !important; }'}
 p, li, blockquote { orphans: 1 !important; widows: 1 !important; }
 /* annotation highlights — rendered as <mark> in the epub DOM */
 mark.annot-hl { cursor: pointer; border-radius: 2px; color: inherit; padding: 0; }
@@ -1015,6 +1030,11 @@ mark.br-press-hl {
 function injectIntoContents(contents) {
   if (!contents?.document) return;
   const doc = contents.document;
+  // Copy xml:lang → lang when lang is absent: Chrome ignores xml:lang for hyphens:auto
+  if (prefs.hyphenation && !doc.documentElement.lang && !prefs.hyphenLang) {
+    const xmlLang = doc.documentElement.getAttribute('xml:lang');
+    if (xmlLang) doc.documentElement.lang = xmlLang;
+  }
   // Apply hyphenation lang override on the iframe's <html> element
   if (prefs.hyphenation && prefs.hyphenLang) {
     doc.documentElement.lang = prefs.hyphenLang;
@@ -1064,6 +1084,11 @@ function collapseBlankParagraphs(doc) {
 }
 
 function reapplyStyles() {
+  if (prefs.experimentalReader && _cxReader) {
+    _cxMeasureViewerInset(); // re-measure in case status bar height changed with new settings
+    _cxReader.reapplyCss(buildEpubCss());
+    return;
+  }
   if (!rendition) return;
   try {
     const contents = rendition.getContents();
@@ -1455,10 +1480,15 @@ function attachIframeDictionary(contents) {
   doc.addEventListener('touchcancel', () => { clearTimeout(pressTimer); pressTimer = null; }, { passive: true });
 
   if (coarsePointer && !isIOS) {
-    doc.addEventListener('selectionchange', () => {
+    // Fire dict lookup on pointer release, not during drag. selectionchange fires continuously
+    // while the user drags to select text (triggering lookup mid-drag); mouseup/touchend only
+    // fires when the user stops, which is the moment they expect the lookup.
+    const _onSelEnd = () => {
       clearTimeout(selectionTimer);
       selectionTimer = setTimeout(triggerSelectionLookup, 120);
-    });
+    };
+    doc.addEventListener('mouseup', _onSelEnd);
+    doc.addEventListener('touchend', _onSelEnd, { passive: true });
   }
 
   doc.addEventListener('contextmenu', (e) => {
@@ -1471,6 +1501,9 @@ function attachIframeDictionary(contents) {
 
   if (!coarsePointer) {
     doc.addEventListener('dblclick', (e) => {
+      // Skip if the mouse button is still held — user is double-click-dragging to extend a
+      // selection, not looking up a word. Let mouseup → annotation toolbar handle that case.
+      if (e.buttons & 1) return;
       clearTimeout(_annotToolbarTimer); _annotToolbarTimer = null;
       const sel = win.getSelection?.();
       const selText = sel?.toString().trim();
@@ -1791,6 +1824,10 @@ function clearPressHighlight() {
     } catch { /* ignore */ }
     try { c.window?.getSelection?.()?.removeAllRanges?.(); } catch { /* ignore */ }
   };
+  if (prefs.experimentalReader && _cxReader?.iframe?.contentDocument) {
+    clean({ document: _cxReader.iframe.contentDocument, window: _cxReader.iframe.contentWindow });
+    return;
+  }
   try {
     const contents = rendition?.getContents?.();
     if (contents?.length) { contents.forEach(clean); return; }
@@ -1814,6 +1851,13 @@ function scheduleClearPressHighlight() {
 // silently fails to reach the correct page in spread/paginated mode (error stays inside
 // epub.js's rAF queue, so the catch block never fires).
 async function navigateToCfi(cfi) {
+  if (prefs.experimentalReader && _cxReader) {
+    await _cxReader.goToCfi(cfi);
+    // After chapter renders, scroll to the specific annotation page if there is one
+    const ann = annotationsCache.find(a => a.cfi === cfi);
+    if (ann) _cxReader.scrollToAnnotation(ann.id);
+    return;
+  }
   const startCfi = cfiRangeToStart(cfi);
   if (book.locations?.length() > 0) {
     const pct = book.locations.percentageFromCfi(startCfi) ?? book.locations.percentageFromCfi(cfi);
@@ -1912,6 +1956,17 @@ function injectAnnotationsIntoContents(contents) {
 
 // Re-apply annotation marks into all currently loaded views (e.g. after loadAnnotations)
 function reapplyAnnotations() {
+  if (prefs.experimentalReader && _cxReader) {
+    const iframe = _cxReader.iframe;
+    if (iframe?.contentDocument) {
+      injectAnnotationsIntoContents({
+        document: iframe.contentDocument,
+        sectionIndex: _cxReader.spineIdx,
+        range: () => null,
+      });
+    }
+    return;
+  }
   try {
     const contents = rendition?.getContents?.();
     if (contents?.length) { contents.forEach(injectAnnotationsIntoContents); return; }
@@ -2220,6 +2275,11 @@ function computeSlot(ids) {
 
 // Update all overlay slots from current state
 function updateStatusBar(location) {
+  // CXReader owns the status bar via cx-relocated (it sets currentChapPage/EndPage/Total and
+  // currentIsTwoPage from exact pagination). updateStatusBar() derives those from an epub.js
+  // location; in CX mode that location is always null, so running it would clobber the correct
+  // CX values with zeros. Just re-render the already-correct CX state (clock/battery/etc.).
+  if (prefs.experimentalReader && _cxReader) { renderStatusSlots(); return; }
   const epubStartPage = location?.start?.displayed?.page ?? 0;
   const epubEndPage   = location?.end?.displayed?.page   ?? 0;
   _epubChapPage    = epubStartPage; // always track epub.js raw page before offset correction
@@ -2498,6 +2558,14 @@ function applyEdgePadding() {
       rendition.resize(epubViewer.clientWidth, Math.max(200, epubViewer.clientHeight - RENDITION_BOTTOM_RESERVE));
     }, 30);
   }
+  // For CXReader: re-measure how much the status bars overlap the viewer (their position
+  // shifts when edge-pad vars change), then re-apply the iframe inset and repaginate.
+  if (_cxReader) {
+    setTimeout(() => {
+      _cxMeasureViewerInset();
+      _cxReader.reapplyCss(buildEpubCss());
+    }, 30);
+  }
 }
 
 // Apply CSS variables for status bar font/size/style
@@ -2585,11 +2653,23 @@ function buildChapterMarkers() {
   const container = document.getElementById('sb-chap-markers');
   if (!container) return;
   container.innerHTML = '';
-  // Only top-level TOC entries (depth 0) — no need to mark every sub-section
-  const topLevel = tocFlatItems.filter(t => t.depth === 0);
+
+  // Pick the depth with the most entries — this selects the "chapter" level rather than
+  // a handful of top-level parts or front-matter entries. Example: a book with 5 depth-0
+  // items (Cover, Half Title…) and 14 depth-1 items (Introduction, Chapter 1…) will
+  // correctly use depth 1 as the chapter granularity for markers.
+  const depthCounts = new Map();
+  tocFlatItems.forEach(t => depthCounts.set(t.depth, (depthCounts.get(t.depth) || 0) + 1));
+  let bestDepth = 0, bestCount = 0;
+  for (const [d, c] of depthCounts) { if (c > bestCount) { bestCount = c; bestDepth = d; } }
+  let topLevel = tocFlatItems.filter(t => t.depth === bestDepth);
+  if (topLevel.length < 2) topLevel = [...tocFlatItems];
   if (topLevel.length < 2) return;
-  const spineItems = book?.spine?.spineItems || [];
-  const spineTotal = spineItems.length || 1;
+
+  // CXReader spine for index-ratio fallback when epub.js locations aren't available
+  const cxSpine    = _cxReader?._book?.spine;
+  const epubSpine  = book?.spine?.spineItems || [];
+  const spineTotal = (cxSpine?.length || epubSpine.length) || 1;
 
   topLevel.forEach(({ href }, i) => {
     if (i === 0) return; // first chapter starts at 0% — no marker needed
@@ -2603,12 +2683,25 @@ function buildChapterMarkers() {
         pct = book.locations.percentageFromCfi(`epubcfi(${spineItem.cfiBase}!/4/1:0)`);
       }
     }
-    // Fallback: spine-index ratio (no locations needed)
+    // Fallback: spine-index ratio using whichever spine is available
     if (pct == null) {
-      const idx = spineItems.findIndex(s => {
-        const sh = (s.href || '').split('#')[0];
-        return sh === hrefBase || sh.endsWith('/' + hrefBase.split('/').pop());
-      });
+      let idx = -1;
+      if (cxSpine?.length) {
+        const hrefLow  = hrefBase.toLowerCase();
+        const hrefFile = hrefLow.split('/').pop();
+        idx = cxSpine.findIndex(s => {
+          // Prefer absPath (fully resolved) for matching; fall back to raw href
+          const sh = (s.absPath || s.href || '').split('#')[0].toLowerCase();
+          return sh === hrefLow || sh.split('/').pop() === hrefFile;
+        });
+      }
+      if (idx < 0 && epubSpine.length) {
+        const hrefFile = hrefBase.split('/').pop();
+        idx = epubSpine.findIndex(s => {
+          const sh = (s.href || '').split('#')[0];
+          return sh === hrefBase || sh.endsWith('/' + hrefFile);
+        });
+      }
       if (idx > 0) pct = idx / spineTotal;
     }
 
@@ -2694,7 +2787,11 @@ document.getElementById('header-sensor').addEventListener('touchend', (e) => {
 }, { passive: false });
 document.getElementById('header-sensor').addEventListener('click', () => {
   if (!prefs.autoHideHeader) return;
-  revealHeader();
+  if (readerLayout.classList.contains('header-peek')) {
+    forceHideAutoHeader();
+  } else {
+    revealHeader();
+  }
 });
 
 // Capture-phase guard: swallow any click that lands on the header within
@@ -2748,6 +2845,10 @@ function buildTocRecursive(toc, depth, fragment) {
           ? (anchor && depth > 1 ? `${spineItem.href}#${anchor}` : spineItem.href)
           : item.href;
         console.log(`[nav] TOC | depth=${depth} anchor="${anchor||''}" target=${JSON.stringify(displayTarget)}`);
+        if (prefs.experimentalReader && _cxReader) {
+          await _cxReader.goToHref(displayTarget || item.href);
+          return;
+        }
         try {
           await rendition.display(displayTarget);
           const loc = rendition?.currentLocation?.();
@@ -2769,7 +2870,8 @@ function buildTocRecursive(toc, depth, fragment) {
 
     fragment.appendChild(btn);
     tocFlatItems.push({ label: item.label, href: item.href, depth, button: btn });
-    if (item.subitems?.length) buildTocRecursive(item.subitems, depth + 1, fragment);
+    const sub = item.subitems ?? item.children;
+    if (sub?.length) buildTocRecursive(sub, depth + 1, fragment);
   });
 }
 
@@ -2801,6 +2903,16 @@ function updateActiveTocItem(href) {
     if (active) anyActive = true;
   });
   if (!anyActive) {
+    // CXReader range fallback: activate the last TOC entry whose spine index ≤ currentSpineIndex
+    if (prefs?.experimentalReader && _cxReader) {
+      const rangeItem = _cxRangeActiveToc();
+      if (rangeItem) {
+        tocFlatItems.forEach(({ href: ih, button }) => {
+          button.classList.toggle('active', ih === rangeItem.href);
+        });
+        return;
+      }
+    }
     console.warn('[toc-debug] NO MATCH for spine href:', href,
       '| base:', base,
       '\nTOC hrefs:', tocFlatItems.map(t => t.href).join(' | '));
@@ -2830,7 +2942,14 @@ function chapterLabelFromHref(href) {
   // 3. Filename-only exact match (same file, different directory structure)
   const base = n.split('/').pop();
   match = tocFlatItems.find(({ href: ih }) => base && norm(ih).split('/').pop() === base);
-  return match?.label || '';
+  if (match) return match.label;
+  // 4. CXReader range-based: last TOC entry whose spine index ≤ currentSpineIndex.
+  //    Handles EPUBs where TOC only marks chapter starts and many spine items have no entry.
+  if (prefs?.experimentalReader && _cxReader) {
+    const rangeMatch = _cxRangeActiveToc();
+    if (rangeMatch) return rangeMatch.label;
+  }
+  return '';
 }
 
 function tocHrefNorm(h) {
@@ -2840,6 +2959,36 @@ function tocHrefNorm(h) {
     .replace(/_split_\d+(\.\w+)$/, '$1')
     .toLowerCase()
     .replace(/^\//, '');
+}
+
+// CXReader: resolve a TOC href to a 0-based spine index using the live CXReader spine list.
+function _cxTocToSpineIdx(tocHref) {
+  if (!_cxReader) return -1;
+  const norm = h => decodeURIComponent(h || '').split('#')[0].toLowerCase();
+  const tBase = norm(tocHref).split('/').pop();
+  const spine = _cxReader.spine;
+  for (let i = 0; i < spine.length; i++) {
+    const sh = norm(spine[i].href);
+    if (sh === norm(tocHref) || sh.split('/').pop() === tBase) return i;
+  }
+  return -1;
+}
+
+// CXReader: find the TOC item that "owns" the current spine position (range-based: last TOC
+// entry whose spine index is ≤ currentSpineIndex). Handles EPUBs where TOC only lists major
+// chapter starts and many spine items have no direct TOC entry.
+function _cxRangeActiveToc() {
+  if (!_cxReader || !tocFlatItems.length) return null;
+  let best = null;
+  let bestIdx = -1;
+  for (const item of tocFlatItems) {
+    const si = _cxTocToSpineIdx(item.href);
+    if (si >= 0 && si <= currentSpineIndex && si > bestIdx) {
+      bestIdx = si;
+      best = item;
+    }
+  }
+  return best;
 }
 
 function findCurrentTopLevelChapIdx() {
@@ -2883,7 +3032,12 @@ function findCurrentTopLevelChapIdx() {
 }
 
 async function navigateToTocChapter(target) {
-  if (!target?.href || !rendition) return;
+  if (!target?.href) return;
+  if (prefs.experimentalReader && _cxReader) {
+    await _cxReader.goToHref(target.href);
+    return;
+  }
+  if (!rendition) return;
   const [hrefBase, anchor] = (target.href || '').split('#');
   const spineItem = findSpineItemForHref(hrefBase);
   const displayTarget = spineItem?.index != null
@@ -3190,6 +3344,58 @@ async function jumpToSearchResult(cfi, href, query) {
   }
 }
 
+async function runSearchCX(query) {
+  if (!_cxReader) { searchStatusEl.textContent = ''; return; }
+  const spine = _cxReader.spine;
+  const lowerQuery = query.toLowerCase();
+  let total = 0;
+  for (let i = 0; i < spine.length; i++) {
+    if (searchAbort.aborted) return;
+    const item = spine[i];
+    searchStatusEl.textContent = t('reader.search_progress', { n: i + 1, total: spine.length });
+    try {
+      const html = await fetch(item.blobUrl).then(r => r.text());
+      if (searchAbort.aborted) return;
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const text = doc.body?.textContent || '';
+      const lowerText = text.toLowerCase();
+      let pos = 0;
+      while (pos < lowerText.length && total < 200) {
+        const idx = lowerText.indexOf(lowerQuery, pos);
+        if (idx < 0) break;
+        const start = Math.max(0, idx - 60);
+        const end   = Math.min(text.length, idx + query.length + 60);
+        const excerpt = (start > 0 ? '…' : '') + text.slice(start, end).trim() + (end < text.length ? '…' : '');
+        total++;
+        const chapterLabel = chapterLabelFromHref(item.href) || item.href.split('/').pop();
+        const capturedHref = item.href;
+        const div = document.createElement('div');
+        div.className = 'search-result';
+        div.innerHTML = `<div class="search-result-chapter">${esc(chapterLabel)}</div>` +
+                        `<div class="search-result-excerpt">${highlightExcerpt(excerpt, query)}</div>`;
+        div.addEventListener('click', () => {
+          if (!preSearchCfi && currentCfi) {
+            preSearchCfi = currentCfi;
+            searchBackBtn.style.display   = '';
+            searchAcceptBtn.style.display = '';
+          }
+          closePanels();
+          void _cxReader?.goToHref(capturedHref);
+        });
+        searchResultsEl.appendChild(div);
+        pos = idx + query.length;
+      }
+    } catch { /* spine item unreadable — skip */ }
+  }
+  if (searchAbort.aborted) return;
+  if (total === 0) {
+    searchStatusEl.textContent = t('reader.search_none');
+  } else {
+    const n = total >= 200 ? total + '+' : total;
+    searchStatusEl.textContent = total === 1 ? t('reader.search_count_1') : total < 5 ? t('reader.search_count_2_4', { n }) : t('reader.search_count', { n });
+  }
+}
+
 async function runSearch(query) {
   searchResultsEl.innerHTML = '';
   searchStatusEl.textContent = t('reader.search_running');
@@ -3197,6 +3403,11 @@ async function runSearch(query) {
   const abort = { aborted: false };
   searchAbort.aborted = true;   // abort any previous search
   searchAbort = abort;
+
+  if (prefs.experimentalReader && _cxReader) {
+    await runSearchCX(query);
+    return;
+  }
 
   // Collect all spine sections
   const sections = [];
@@ -3399,8 +3610,11 @@ async function showDictPopup(word) {
     // User has an explicit selection — respect it, no language filter
     enabled = prefs.dictionaries;
   } else {
-    // Default state: apply language filter based on book's source language
-    const bookLang = normalizeBookLang(currentBook?.language);
+    // Default state: apply language filter based on book's source language.
+    // CXReader parses dc:language directly from the EPUB; use it as the primary source since
+    // the server-side currentBook.language can be empty for books not yet indexed.
+    const rawLang = (_cxReader && _cxReader._book?.metadata?.language) || currentBook?.language;
+    const bookLang = normalizeBookLang(rawLang);
     const allIds   = dicts.map(d => d.id);
     if (bookLang) {
       const matched = dicts
@@ -3409,6 +3623,11 @@ async function showDictPopup(word) {
       enabled = matched.length ? matched : allIds; // fallback to all if no tagged match
     } else {
       enabled = allIds; // unknown book language — use all
+    }
+    // Sort enabled list by the user's preferred dictionary order
+    if (prefs.dictionaryOrder?.length) {
+      const orderMap = new Map(prefs.dictionaryOrder.map((id, i) => [id, i]));
+      enabled = [...enabled].sort((a, b) => (orderMap.get(a) ?? 9999) - (orderMap.get(b) ?? 9999));
     }
   }
 
@@ -3705,6 +3924,8 @@ function syncSettingsUi() {
   if (hypLangEl) { hypLangEl.value = prefs.hyphenLang; hypLangEl.closest('.setting-row').style.display = prefs.hyphenation ? '' : 'none'; }
   const bionicEl = document.getElementById('bionic-reading-toggle');
   if (bionicEl) bionicEl.checked = prefs.bionicReading;
+  const expReaderEl = document.getElementById('experimental-reader-toggle');
+  if (expReaderEl) expReaderEl.checked = !prefs.experimentalReader;
   const pgShadowEl = document.getElementById('page-gap-shadow-toggle');
   if (pgShadowEl) pgShadowEl.checked = prefs.pageGapShadow;
   const fnbEl = document.getElementById('float-nav-btn-toggle');
@@ -3753,7 +3974,9 @@ function renderStatusSlots() {
       chapOffsetCache[currentSpineIndex] = saved != null ? (parseInt(saved, 10) || 0) : 0;
     } catch { chapOffsetCache[currentSpineIndex] = 0; }
   }
-  const _rsOffsetForTotal = Math.max(_chapDisplayOffset, chapOffsetCache[currentSpineIndex] || 0);
+  // The skip-offset is an epub.js artifact (it hides columns epub.js silently skips). CXReader
+  // paginates exactly, so its chapter total must never be reduced by a (possibly stale) offset.
+  const _rsOffsetForTotal = prefs.experimentalReader ? 0 : Math.max(_chapDisplayOffset, chapOffsetCache[currentSpineIndex] || 0);
   const _rsDisplayTotal   = currentChapTotal > 0 ? Math.max(currentChapTotal - _rsOffsetForTotal, currentEndPage) : 0;
   const leftVal  = currentChapPage > 0 ? cpIcon + currentChapPage + '/' + _rsDisplayTotal : '';
   const rightVal = currentEndPage  > 0 ? cpIcon + currentEndPage  + '/' + _rsDisplayTotal : '';
@@ -4109,6 +4332,9 @@ function initSettingsUi() {
   document.getElementById('margin-slider').addEventListener('input', (e) => {
     prefs.margin = parseInt(e.target.value);
     document.getElementById('margin-value').textContent = prefs.margin + 'px';
+    // CXReader two-column mode: update the inter-column gap before re-applying CSS so
+    // _initPaginator uses the new gap (it's set via setLayout, not derived from CSS).
+    if (_cxReader) _cxReader.setLayout({ columnGap: prefs.margin * 2 });
     reapplyStyles();
     // Margins in paginated mode are controlled via epub.js gap (not body padding).
     // gap = margin * 2 → epub.js sets body padding-left/right = gap/2 = margin.
@@ -4255,6 +4481,11 @@ function initSettingsUi() {
     saveBionicReloadState();
     location.reload();
   });
+  document.getElementById('experimental-reader-toggle')?.addEventListener('change', (e) => {
+    prefs.experimentalReader = !e.target.checked;
+    persistPrefs();
+    location.reload();
+  });
   document.getElementById('page-gap-shadow-toggle')?.addEventListener('change', (e) => {
     prefs.pageGapShadow = e.target.checked;
     applyPageShadow(); persistPrefs();
@@ -4352,7 +4583,9 @@ function initSettingsUi() {
     btn.addEventListener('click', async () => {
       prefs.spread = btn.dataset.spread;
       syncSettingsUi(); persistPrefs();
-      if (rendition) {
+      if (prefs.experimentalReader && _cxReader) {
+        _cxSyncLayout();            // re-paginate CXReader in place (no rendition to restart)
+      } else if (rendition) {
         const savedCfi = currentCfi;
         rendition.destroy();
         await startRendition(savedCfi);
@@ -4592,7 +4825,12 @@ function scheduleProgressSave() {
 // cfiFromPercentage returns range CFIs that display() mishandles, so we
 // jump close then advance with next() until percentage matches.
 async function seekToPercentage(targetPct) {
+  if (prefs.experimentalReader && _cxReader) {
+    await _cxReader.goToPct(targetPct);
+    return;
+  }
   if (!book.locations?.length()) return;
+  if (!rendition) return;
   const jumpCfi = book.locations.cfiFromPercentage(targetPct);
   let safeCfi = jumpCfi;
   if (prefs.bionicReading && jumpCfi) {
@@ -5020,13 +5258,209 @@ window.addEventListener('online', () => {
 
 function isMobileScreen() { return window.innerWidth < 640; }
 
-function getLocsCacheKey() {
+// True when the reader should show two side-by-side columns: spread enabled, not a phone-width
+// screen, and the viewer is wide enough. Shared by epub.js (locs cache key) and CXReader.
+function cxWantsTwoCol() {
   const w = epubViewer?.clientWidth || window.innerWidth;
-  const isTwoCol = prefs.spread === 'auto' && !isMobileScreen() && w >= 800;
-  return `br_locs_${currentBook.file_hash}_${isTwoCol ? '2' : '1'}col`;
+  return prefs.spread === 'auto' && !isMobileScreen() && w >= 800;
+}
+
+function getLocsCacheKey() {
+  return `br_locs_${currentBook.file_hash}_${cxWantsTwoCol() ? '2' : '1'}col`;
+}
+
+// Push the current column-mode decision into the live CXReader (re-paginates if needed).
+function _cxSyncLayout() {
+  if (!prefs.experimentalReader || !_cxReader) return;
+  _cxReader.setLayout({ twoColumn: cxWantsTwoCol(), columnGap: prefs.margin * 2 });
+}
+
+function _cxRelocatedHandler(e) {
+  const { spineIndex, href, page, pageCount, endPage, twoColumn } = e.detail;
+  currentSpineIndex = spineIndex;
+  currentHref       = href;
+  currentChapPage   = page;
+  currentEndPage    = endPage ?? page;
+  currentChapTotal  = pageCount;
+  currentIsTwoPage  = !!twoColumn;
+  currentCfi = _cxReader?.makeCfi() || '';
+  currentPct = _cxReader?.makePct() || 0;
+  if (currentPct > 0) lastKnownGoodPct = currentPct;
+  // Feed the chapter page-count cache so bookPage / timeLeftBook estimates improve over time
+  if (pageCount > 0) chapPageCache[spineIndex] = pageCount;
+  console.log(`[CXReader] relocated spine=${spineIndex} page=${page}/${pageCount} pct=${(currentPct*100).toFixed(1)}%`);
+  trackReadingSpeed();
+  renderStatusSlots();
+  updateActiveTocItem(href);
+  // First cx-relocated: status bars now have content → measure real inset and reinit
+  // paginator so page boundaries reflect the visible area (not the full viewer height).
+  if (!_cxViewerPaddingSet && _cxReader) {
+    _cxViewerPaddingSet = true;
+    _cxMeasureViewerInset();
+    if (_cxViewerPadTop > 0 || _cxViewerPadBot > 0) {
+      _cxReader.reinitPaginator();
+      // Re-sync ALL page vars (not just the total) from the inset-corrected paginator, and
+      // refresh the cache, so the very first page shows the right page/total immediately.
+      currentChapPage  = _cxReader.page;
+      currentEndPage   = _cxReader.endPage;
+      currentChapTotal = _cxReader.pageCount;
+      if (currentChapTotal > 0) chapPageCache[spineIndex] = currentChapTotal;
+      renderStatusSlots();
+    }
+  }
+  if (isReady && currentPct > 0) saveProgress(currentCfi, currentPct);
+  _attachCxKbd(_cxReader?.iframe);
+  _attachCxDict(_cxReader?.iframe);
+  _attachCxTouchNav(_cxReader?.iframe);
+}
+
+function _attachCxKbd(iframe) {
+  if (!iframe?.contentWindow || iframe === _cxKbdIframe) return;
+  _cxKbdIframe = iframe;
+  iframe.contentWindow.addEventListener('keydown', (e) => {
+    if (IFRAME_NAV_KEYS.has(e.key)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') goPrev();
+      else goNext();
+      return;
+    }
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, bubbles: true }));
+  }, true);
+  iframe.contentWindow.addEventListener('wheel', (e) => {
+    if (!prefs.mouseWheelNav) return;
+    document.dispatchEvent(new CustomEvent('br-wheel', { detail: { deltaY: e.deltaY } }));
+  }, { passive: true });
+}
+
+// Returns a spine-level CFI for the current CXReader chapter.
+// Used as cfiFromRange() shim — enough for annotation routing; text search finds the exact position.
+function _cxMakeCfi() {
+  const n = ((_cxReader?.spineIdx ?? 0) + 1) * 2;
+  return `epubcfi(/6/${n}!/4/2/1:0)`;
+}
+
+// Called from CXReader.onBeforePaginate — injects bionic/annotations BEFORE paginator
+// measures scrollHeight so that DOM changes from bionic wrapping are already in place.
+function _cxApplyHooks(iframe) {
+  if (!iframe?.contentDocument) return;
+  injectIntoContents({
+    document: iframe.contentDocument,
+    window: iframe.contentWindow,
+    sectionIndex: _cxReader?.spineIdx ?? 0,
+    cfiFromRange: _cxMakeCfi,
+    range: () => null,
+  });
+}
+
+// Attach dictionary, annotation-select, and footnote handlers to a CXReader iframe (once per iframe).
+function _attachCxDict(iframe) {
+  if (!iframe?.contentDocument || iframe === _cxDictIframe) return;
+  _cxDictIframe = iframe;
+  const shim = {
+    document: iframe.contentDocument,
+    window: iframe.contentWindow,
+    sectionIndex: _cxReader?.spineIdx ?? 0,
+    cfiFromRange: _cxMakeCfi,
+    range: () => null,
+  };
+  attachIframeDictionary(shim);
+  attachIframeAnnotation(shim);
+}
+
+// Forward swipe/tap touch events from inside the CXReader iframe to the parent handlers.
+// attachIframeTouchNav expects a view-like object with contents.window and element.
+function _attachCxTouchNav(iframe) {
+  if (!iframe?.contentWindow || iframe === _cxTouchNavIframe) return;
+  _cxTouchNavIframe = iframe;
+  attachIframeTouchNav({ contents: { window: iframe.contentWindow }, element: iframe });
+}
+
+// Measure how many px each status bar overlaps the epub-viewer, store in module vars.
+// Called AFTER renderStatusSlots() so the bars have real content and non-zero height.
+function _cxMeasureViewerInset() {
+  const viewer = document.getElementById('epub-viewer');
+  if (!viewer) return;
+  const vr  = viewer.getBoundingClientRect();
+  const top = document.getElementById('sb-top');
+  const bot = document.getElementById('sb-bottom');
+  _cxViewerPadTop = top ? Math.max(0, Math.ceil(top.getBoundingClientRect().bottom - vr.top) + 8) : 0;
+  _cxViewerPadBot = bot ? Math.max(0, Math.ceil(vr.bottom - bot.getBoundingClientRect().top) + 14) : 0;
+}
+
+// Apply measured inset directly to the iframe element so the paginator's clientHeight
+// reflects only the visible area. Must be called before paginator.init() measures height.
+function _cxApplyIframeInset(iframe) {
+  if (!iframe) return;
+  const inset = _cxViewerPadTop + _cxViewerPadBot;
+  iframe.style.marginTop = _cxViewerPadTop > 0 ? `${_cxViewerPadTop}px` : '';
+  iframe.style.height    = inset > 0 ? `calc(100% - ${inset}px)` : '100%';
+}
+
+async function startCXRendition(displayCfi = null) {
+  rendition = null;
+  _cxViewerPaddingSet = false;
+  _cxViewerPadTop = 0;
+  _cxViewerPadBot = 0;
+  _cxTouchNavIframe = null;
+  const viewer = document.getElementById('epub-viewer');
+  viewer.innerHTML = '';
+
+  // Remove any old cx-relocated listener before attaching a fresh one
+  viewer.removeEventListener('cx-relocated', _cxRelocatedHandler);
+
+  // Destroy any previous CXReader instance before creating a new one
+  if (_cxReader) { try { _cxReader.destroy(); } catch {} _cxReader = null; }
+
+  viewer.addEventListener('cx-relocated', _cxRelocatedHandler);
+
+  // Intercept in-book <a> clicks posted from the iframe via postMessage
+  if (_cxLinkHandler) window.removeEventListener('message', _cxLinkHandler);
+  _cxLinkHandler = (e) => {
+    if (e.data?.type !== 'cx-link' || !prefs.experimentalReader || !_cxReader) return;
+    void _cxReader.goToHref(e.data.href);
+  };
+  window.addEventListener('message', _cxLinkHandler);
+
+  try {
+    const { CXReader } = await import('./cxreader/index.js');
+    _cxReader = new CXReader();
+    _cxReader.onBeforePaginate = (iframe) => { _cxApplyIframeInset(iframe); _cxApplyHooks(iframe); };
+
+    await _cxReader.open(_epubArrayBuffer);
+    if (_cxReader.toc?.length) { buildToc(_cxReader.toc); buildChapterMarkers(); }
+
+    // Determine start spine index from saved CFI (e.g. epubcfi(/6/18!/...))
+    let _cxStartIdx = 0;
+    if (displayCfi) {
+      const _m = String(displayCfi).match(/^epubcfi\(\/6\/(\d+)!/);
+      if (_m) _cxStartIdx = Math.max(0, Math.floor(parseInt(_m[1], 10) / 2) - 1);
+    }
+
+    // Choose single/two-column BEFORE the first render so page counts are correct from page 1.
+    _cxReader.setLayout({ twoColumn: cxWantsTwoCol(), columnGap: prefs.margin * 2 });
+
+    const readerCss = buildEpubCss();
+    await _cxReader.renderChapter(_cxStartIdx, viewer, readerCss);
+
+    console.log('[CXReader] chapter 0 rendered');
+  } catch (err) {
+    console.error('[CXReader] startCXRendition failed:', err);
+    const errEl = document.createElement('div');
+    errEl.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:var(--color-text-muted);padding:2rem;text-align:center';
+    errEl.textContent = 'CXReader error: ' + (err.message || err);
+    viewer.appendChild(errEl);
+  }
+
+  isReady = true;
 }
 
 async function startRendition(displayCfi = null) {
+  if (prefs.experimentalReader) {
+    await startCXRendition(displayCfi);
+    return;
+  }
+  _cxViewerPadTop = _cxViewerPadBot = 0; // reset inset when switching to epub.js
   // One-time migration: clear chapter skip-offset caches written by the old buggy
   // 2-column detection code, which counted normal 2-column advances as skips, inflating
   // the offset on desktop. Version '2' marks the corrected detection logic.
@@ -5160,6 +5594,12 @@ function goNext() {
   if (deferredNextPending) return;
   if (_navThrottle()) return;
 
+  if (prefs.experimentalReader && _cxReader) {
+    sessionPageCount++;
+    void _cxReader.next();
+    return;
+  }
+
   const _lL        = rendition?.currentLocation?.();
   const _liveEnd   = _lL?.end?.displayed?.page;
   const _liveTotal = _lL?.start?.displayed?.total;
@@ -5201,6 +5641,13 @@ function goNext() {
 function goPrev() {
   if (_navThrottle()) return;
   deferredNextPending = false;
+
+  if (prefs.experimentalReader && _cxReader) {
+    sessionPageCount++;
+    void _cxReader.prev();
+    return;
+  }
+
   console.log(`[nav] PREV | page=${currentChapPage}/${currentChapTotal}`);
   pendingNavDirection = 'prev';
   sessionPageCount++;
@@ -5297,9 +5744,10 @@ function attachIframeTouchNav(view) {
   }, { passive: false });
 
   win.addEventListener('touchmove', (e) => {
-    // Never call preventDefault during text selection — it kills Android drag handles.
+    // Block browser back/forward gesture for horizontal swipes, but never during text
+    // selection — preventDefault kills Android drag handles when a range is active.
     const sel = win.getSelection?.();
-    if (touchTextMode || _selectSuppressNav || (sel && !sel.isCollapsed)) return;
+    if (_selectSuppressNav || (sel && !sel.isCollapsed)) return;
     const dx = Math.abs(e.touches[0].clientX + iframeOffX - touchStartX);
     const dy = Math.abs(e.touches[0].clientY + iframeOffY - touchStartY);
     if (dx > 8 && dx > dy) e.preventDefault();
@@ -5576,6 +6024,8 @@ window.addEventListener('resize', debounce(() => {
     r.style.setProperty('--sab', '0px');
     r.style.setProperty('--layout-h', window.innerHeight + 'px');
   }
+  // CXReader has no epub.js rendition — re-evaluate column mode and re-paginate directly.
+  if (prefs.experimentalReader && _cxReader) { _cxSyncLayout(); return; }
   void resizeRenditionToViewer();
 }, 300));
 
@@ -6109,6 +6559,7 @@ document.getElementById('btn-search-back').addEventListener('click', async () =>
   searchBackBtn.style.display   = 'none';
   searchAcceptBtn.style.display = 'none';
   if (prefs.autoHideHeader) forceHideAutoHeader();
+  if (prefs.experimentalReader && _cxReader) { await _cxReader.goToCfi(cfi); return; }
   await rendition.display(cfi);
 });
 document.getElementById('btn-search-accept').addEventListener('click', () => {
@@ -6126,6 +6577,7 @@ document.getElementById('btn-bookmark-back').addEventListener('click', async () 
   bookmarkBackBtn.style.display   = 'none';
   bookmarkAcceptBtn.style.display = 'none';
   if (prefs.autoHideHeader) forceHideAutoHeader();
+  if (prefs.experimentalReader && _cxReader) { await _cxReader.goToCfi(cfi); return; }
   await rendition.display(cfi);
 });
 document.getElementById('btn-bookmark-accept').addEventListener('click', () => {
@@ -6143,6 +6595,7 @@ document.getElementById('btn-annotation-back').addEventListener('click', async (
   annotationBackBtn.style.display   = 'none';
   annotationAcceptBtn.style.display = 'none';
   if (prefs.autoHideHeader) forceHideAutoHeader();
+  if (prefs.experimentalReader && _cxReader) { await _cxReader.goToCfi(cfi); return; }
   await rendition.display(cfi);
 });
 document.getElementById('btn-annotation-accept').addEventListener('click', () => {
@@ -6520,6 +6973,19 @@ async function init() {
   console.log('[reader] fonts loading (non-blocking)...');
   loadCustomFonts().then(() => {
     console.log('[reader] fonts loaded, count:', customFonts.length);
+    // If user has never changed the font (still at factory default 'Georgia, serif') and
+    // Bookerly is available, default to it. Only runs once — persistPrefs() saves the choice.
+    if (customFonts.length && prefs.fontFamily === DEFAULT_PREFS.fontFamily) {
+      const bookerly = customFonts.find(f => f.label.toLowerCase() === 'bookerly');
+      if (bookerly) {
+        prefs.fontFamily = bookerly.value;
+        persistPrefs();
+      }
+    }
+    // Re-apply styles to inject @font-face declarations into the active reader frame
+    // (needed when fonts finish loading after the initial render)
+    if (_cxReader || rendition) reapplyStyles();
+    populateFontSelect();
   }).catch(err => {
     console.warn('[reader] fonts failed:', err?.message);
   });
@@ -6546,6 +7012,7 @@ async function init() {
 
   try {
     loadingMsg.textContent = t('reader.loading_open');
+    _epubArrayBuffer = arrayBuffer;
     console.log('[reader] creating ePub book object...');
     book = ePub(arrayBuffer);
     console.log('[reader] ePub book created');
@@ -6643,7 +7110,7 @@ async function init() {
     console.log('[reader] startRendition:', startCfi?.slice(0, 60) ?? 'null');
     await startRendition(startCfi);
     // Capture the page-start CFI epub.js actually rendered.
-    {
+    if (rendition) {
       const loc = rendition.currentLocation();
       if (loc?.start?.cfi) currentCfi = loc.start.cfi;
       if (loc?.start?.percentage != null) currentPct = loc.start.percentage;
@@ -6685,6 +7152,11 @@ async function init() {
     // which is why the CFI correction loop below runs after this call.
     const syncTarget = (prefs.skipOpenProgressCheck || skipOpenSync || isPeekMode) ? null : await syncOnOpen(localProgress);
     if (syncTarget?.percentage != null) {
+      if (prefs.experimentalReader && _cxReader) {
+        // CXReader: navigate by percentage — most reliable since DocFragment data can be
+        // stale/mismatched from earlier sessions. Percentage scales linearly over spine count.
+        await _cxReader.goToPct(syncTarget.percentage);
+      } else
       try {
         // Any DocFragment-based xpointer — navigate to the correct spine item directly.
         // External reader percentages use a different scale than epub.js locations, so
@@ -6703,13 +7175,13 @@ async function init() {
             if (paraMatch) {
               const guessCfi = `epubcfi(/6/${(spineIdx + 1) * 2}!/4/${parseInt(paraMatch[1]) * 2})`;
               console.log('[kosync] trying best-effort CFI', guessCfi);
-              try { await rendition.display(guessCfi); navigated = true; } catch { navigated = false; }
+              try { await rendition?.display(guessCfi); navigated = true; } catch { navigated = false; }
             }
             if (!navigated) {
               console.log('[kosync] navigating to spine item', spineIdx, spineItem.href, '(chapter start — no position recovery yet)');
               console.log('[kosync] NOTE: bionic is', prefs.bionicReading ? 'ON' : 'OFF', '— will seek by pct after display if bionic');
-              await rendition.display(spineItem.href);
-              const locAfterNav = rendition.currentLocation();
+              await rendition?.display(spineItem.href);
+              const locAfterNav = rendition?.currentLocation();
               console.log('[kosync] after display(href) cfi:', locAfterNav?.start?.cfi?.slice(0,80), 'pct:', ((locAfterNav?.start?.percentage||0)*100).toFixed(2)+'%');
               if (prefs.bionicReading && book.locations.length() > 0) {
                 console.log('[kosync] bionic ON — doing seekToPercentage(', (syncTarget.percentage*100).toFixed(2)+'%', ') after chapter nav');
@@ -6748,11 +7220,11 @@ async function init() {
       // chapter-reload artifact that caused the old seekToPercentage to overshoot.
       const targetPct = localProgress.percentage;
       for (let i = 0; i < 15; i++) {
-        const loc2 = rendition.currentLocation();
+        const loc2 = rendition?.currentLocation();
         const cur2 = book.locations.percentageFromCfi(loc2?.start?.cfi || '') || 0;
         if (cur2 >= targetPct - 0.005) break;
         console.log('[pos] CFI undershoot +1 page', (cur2*100).toFixed(2)+'% → target', (targetPct*100).toFixed(2)+'%');
-        await rendition.next();
+        await rendition?.next();
       }
     }
 
@@ -6761,7 +7233,7 @@ async function init() {
     // that happened above (seekToPercentage / sync jump) may not have updated
     // currentCfi/currentPct yet — read them directly from the rendition now.
     {
-      const loc = rendition.currentLocation();
+      const loc = rendition?.currentLocation();
       if (loc?.start?.cfi) currentCfi = loc.start.cfi;
       if (book.locations?.length() > 0) {
         // Locations already generated (cached) — most accurate
@@ -6794,7 +7266,7 @@ async function init() {
     _kosyncWarnedThisSession = false;
     // Jump to a specific CFI if provided via ?jumpcfi= URL param (bookmarks/annotations deep-link)
     const _jumpCfi = params.get('jumpcfi');
-    if (_jumpCfi) {
+    if (_jumpCfi && rendition) {
       try { await rendition.display(decodeURIComponent(_jumpCfi)); } catch { /* invalid CFI — stay at current pos */ }
     }
     // Peek mode: always notify user that progress is not saved
@@ -6814,7 +7286,7 @@ async function init() {
     }
     // Immediately render correct pctBook (and other stats) into the status bar.
     // Without this, pctBook stays 0% until the next relocated event or 30s clock tick.
-    updateStatusBar(rendition.currentLocation());
+    updateStatusBar(rendition?.currentLocation());
   } catch (err) {
     _rafStop = true;
     console.error('[reader]', err);

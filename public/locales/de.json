@@ -602,5 +602,7 @@
   "library.density_large": "Groß",
   "reader.sb_online": "Verbindung",
   "reader.sb_online_yes": "Online",
-  "reader.sb_offline_yes": "Offline"
+  "reader.sb_offline_yes": "Offline",
+  "reader.sb_flow_reader": "Klassischer Reader (epub.js)",
+  "reader.sb_flow_reader_hint": "Wechselt zur ursprünglichen epub.js-Engine. Das Buch wird beim Umschalten neu geladen."
 }
