@@ -2,7 +2,6 @@ package com.codexa.reader
 
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -288,15 +287,26 @@ class MainActivity : AppCompatActivity() {
                 fileChooserCallback?.onReceiveValue(null)
                 fileChooserCallback = filePathCallback
 
-                val intent = fileChooserParams?.createIntent()
-                if (intent == null) {
-                    fileChooserCallback = null
-                    return false
-                }
+                val baseIntent = fileChooserParams?.createIntent()
+                    ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                        type = "*/*"
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                    }
+
+                // Wrap with createChooser so the system picker always appears even when
+                // the specific MIME types (epub, cbz, ttf…) aren't registered on the device.
+                // Without this, ACTION_GET_CONTENT can silently resolve to nothing on some
+                // Android 10+ devices / OEM launchers, giving the appearance that the tap
+                // did nothing at all.
+                val chooserIntent = Intent.createChooser(baseIntent, null)
+
                 return try {
-                    fileChooserLauncher.launch(intent)
+                    fileChooserLauncher.launch(chooserIntent)
                     true
-                } catch (e: ActivityNotFoundException) {
+                } catch (e: Exception) {
+                    // Catch SecurityException / IllegalStateException in addition to
+                    // ActivityNotFoundException — all leave the callback in a hung state
+                    // on modern Android if not cleaned up here.
                     fileChooserCallback?.onReceiveValue(null)
                     fileChooserCallback = null
                     Toast.makeText(
