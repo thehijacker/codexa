@@ -7765,6 +7765,15 @@ async function init() {
     // Jump to a specific CFI if provided via ?jumpcfi= URL param (bookmarks/annotations deep-link)
     // Use navigateToCfi: handles CXReader, converts range CFIs (highlights) to start CFIs, and falls back to %.
     const _jumpCfi = params.get('jumpcfi');
+    // CXReader needs annotations pre-loaded so onBeforePaginate can inject <mark> elements into
+    // the chapter DOM, and scrollToAnnotation can then page to the correct position within it.
+    // Without this, annotationsCache is empty at jump time → scrollToAnnotation is never called
+    // → CXReader lands on page 1 of the chapter instead of the annotated page.
+    let _annotationsPreloaded = false;
+    if (_jumpCfi && prefs.experimentalReader && _cxReader) {
+      await loadAnnotations(currentBook.id);
+      _annotationsPreloaded = true;
+    }
     if (_jumpCfi) {
       try { await navigateToCfi(_jumpCfi); } catch { /* invalid CFI — stay at current pos */ }
     }
@@ -7779,7 +7788,7 @@ async function init() {
     initOnlineStatus();
         // Load bookmarks and annotations for this book (non-blocking)
     void loadBookmarks(currentBook.id);
-    void loadAnnotations(currentBook.id);
+    if (!_annotationsPreloaded) void loadAnnotations(currentBook.id);
     // Start a stats session (non-blocking)
     void startStatsSession(currentBook.id);    
     // Final chapter-name refresh — by now TOC and relocated have both fired
