@@ -34,6 +34,18 @@ function openDB() {
 
 export async function saveBookMeta(book) {
   const db = await openDB();
+  // downloadStatus must reflect whether the EPUB blob is actually cached.
+  // Callers that only persist metadata (opening a book, info modal, background
+  // refresh) pass no downloadStatus — those must NOT claim 'complete', otherwise
+  // the reader's auto-download guard thinks the book is already cached and never
+  // stores the blob. Preserve any existing status; default new entries to 'meta'.
+  let status = book.downloadStatus;
+  if (!status) {
+    try {
+      const existing = await getBookMeta(book.id);
+      status = existing?.downloadStatus || 'meta';
+    } catch { status = 'meta'; }
+  }
   return new Promise((resolve, reject) => {
     const tx  = db.transaction(STORE, 'readwrite');
     tx.objectStore(STORE).put({
@@ -45,7 +57,7 @@ export async function saveBookMeta(book) {
       percentage:     book.percentage     || 0,
       file_size:      book.file_size      || 0,
       cachedAt:       Date.now(),
-      downloadStatus: book.downloadStatus || 'complete',
+      downloadStatus: status,
       description:    book.description    || null,
       genres:         book.genres         || null,
       pages:          book.pages          || null,
@@ -100,7 +112,34 @@ export async function fetchOfflineBookFile(bookId) {
   }
 }
 
+/**
+ * Return a Set of bookIds whose EPUB blob is actually present in the books cache.
+ * This is the source of truth for "is this book available offline" — IndexedDB
+ * downloadStatus can drift out of sync (e.g. metadata saved without a blob).
+ */
+export async function getCachedBookIds() {
+  const ids = new Set();
+  if (!('caches' in window)) return ids;
+  try {
+    const cache = await caches.open(BOOKS_CACHE_NAME);
+    const keys = await cache.keys();
+    for (const req of keys) {
+      const m = new URL(req.url).pathname.match(/^\/offline\/books\/(\d+)\/epub$/);
+      if (m) ids.add(Number(m[1]));
+    }
+  } catch { /* ignore */ }
+  return ids;
+}
+
 export async function isBookDownloaded(bookId) {
+  // Truth is the actual cached blob, not the IndexedDB flag.
+  if ('caches' in window) {
+    try {
+      const cache = await caches.open(BOOKS_CACHE_NAME);
+      const res = await cache.match(`/offline/books/${Number(bookId)}/epub`);
+      if (res) return true;
+    } catch { /* fall through to IDB */ }
+  }
   try {
     const meta = await getBookMeta(Number(bookId));
     return meta?.downloadStatus === 'complete';
@@ -195,6 +234,25 @@ export async function deleteDownload(bookId) {
 }
 
 /**
+ * Silently purge IndexedDB entries and SW cache for books no longer in the library.
+ * Pass a Set of book IDs that are currently in the user's library (the source of truth).
+ * Runs entirely in the background — never throws, never blocks the caller.
+ */
+export async function pruneStaleDownloads(liveIds) {
+  if (!isOfflineSupported) return;
+  const stored = await getAllBooks();
+  const stale  = stored.filter(b => !liveIds.has(b.id));
+  if (!stale.length) return;
+  const registration = await navigator.serviceWorker.ready.catch(() => null);
+  const sw = registration?.active;
+  for (const entry of stale) {
+    if (sw) sw.postMessage({ type: 'DELETE_BOOK', bookId: Number(entry.id) });
+    await removeBook(entry.id);
+    console.log('[offline] pruned stale download bookId:', entry.id, entry.title || '');
+  }
+}
+
+/**
  * Silently download any "Currently Reading" books that aren't yet cached.
  */
 export async function autoDownloadCurrentlyReading(books, token) {
@@ -215,8 +273,9 @@ export async function autoDownloadCurrentlyReading(books, token) {
   });
   if (!currentlyReading.length) return;
 
-  const existing = await getAllBooks().catch(() => []);
-  const doneIds  = new Set(existing.filter(b => b.downloadStatus === 'complete').map(b => b.id));
+  // Base "already cached" on the real blob cache, not the IDB flag, so books
+  // whose status drifted to 'complete' without a blob get re-downloaded.
+  const doneIds = await getCachedBookIds();
 
   for (const book of currentlyReading) {
     if (doneIds.has(book.id)) continue;

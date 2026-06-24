@@ -13,6 +13,7 @@ const LIB_THEMES = new Set(['system', 'day', 'night', 'eink']);
 
 let shelves           = [];
 let _activePage       = 'library';
+const _shelfBadges    = new Map(); // shelfId → new-book count, survives re-renders
 let _onShelfSelect    = null;
 let _activeShelfId    = 'all';
 let _readingCount     = 0;
@@ -36,6 +37,7 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
 
   sidebar.innerHTML = buildSidebarHtml();
   initLibraryThemeControls(sidebar);
+  initDisplaySizeControls(sidebar);
   initSidebarLangPicker(sidebar.querySelector('#sidebar-lang-picker'));
 
   // Username
@@ -267,20 +269,18 @@ function buildSidebarHtml() {
           <img src="/images/statistics.svg" class="nav-icon nav-icon-statistics" alt="">
         </button>
       </div>
-      <div class="sidebar-theme">
-        <span class="sidebar-section-title">${t('sidebar.appearance')}</span>
-        <div class="sidebar-theme-group" role="radiogroup" aria-label="${t('sidebar.appearance')}">
-          <button class="sidebar-theme-btn" data-theme="day"    aria-pressed="false" title="${t('sidebar.theme_day')}">${t('sidebar.theme_day')}</button>
-          <button class="sidebar-theme-btn" data-theme="night"  aria-pressed="false" title="${t('sidebar.theme_night')}">${t('sidebar.theme_night')}</button>
-          <button class="sidebar-theme-btn" data-theme="system" aria-pressed="false" title="${t('sidebar.theme_system')}">${t('sidebar.theme_system')}</button>
-          <button class="sidebar-theme-btn" data-theme="eink"   aria-pressed="false" title="${t('sidebar.theme_eink')}">${t('sidebar.theme_eink')}</button>
-        </div>
-      </div>
+      <div id="sidebar-theme-picker" class="sidebar-lang-picker"></div>
+      <div id="sidebar-size-picker" class="sidebar-lang-picker"></div>
       <div id="sidebar-lang-picker" class="sidebar-lang-picker"></div>
-      <button class="sidebar-item sidebar-item-btn" id="sidebar-logout-btn">
-        <span class="sidebar-item-icon"><img src="/images/logout.svg" class="nav-icon nav-icon-logout" alt=""></span>
-        <span class="sidebar-item-label">${t('sidebar.logout')}</span>
-      </button>
+      <div class="sidebar-footer-row">
+        <button class="sidebar-item sidebar-item-btn" id="sidebar-logout-btn">
+          <span class="sidebar-item-icon"><img src="/images/logout.svg" class="nav-icon nav-icon-logout" alt=""></span>
+          <span class="sidebar-item-label">${t('sidebar.logout')}</span>
+        </button>
+        <a class="sidebar-github-link" href="https://github.com/thehijacker/codexa" target="_blank" rel="noopener noreferrer" title="${t('sidebar.github')}" aria-label="${t('sidebar.github')}">
+          <img src="/images/github.svg" class="nav-icon nav-icon-github" alt="GitHub">
+        </a>
+      </div>
     </div>`;
 }
 
@@ -292,9 +292,12 @@ function renderShelves() {
     const item = document.createElement('div');
     item.className = 'sidebar-shelf-item' + (_activeShelfId === shelf.id ? ' sidebar-item-active' : '');
     item.dataset.id = shelf.id;
+    const shelfIcon = shelf.opds_folder_url ? 'opds_shelf' : 'shelf';
+    const shelfIconClass = shelf.opds_folder_url ? 'nav-icon nav-icon-shelf nav-icon-opds-shelf' : 'nav-icon nav-icon-shelf';
     item.innerHTML = `
-      <span class="sidebar-item-icon"><img src="/images/shelf.svg" class="nav-icon nav-icon-shelf" alt=""></span>
+      <span class="sidebar-item-icon"><img src="/images/${shelfIcon}.svg" class="${shelfIconClass}" alt=""></span>
       <span class="sidebar-item-label">${escHtml(shelf.name)}</span>
+      <span class="shelf-new-badge hidden" id="shelf-badge-${shelf.id}"></span>
       <span class="shelf-count">${shelf.book_count}</span>
       <button class="shelf-edit-btn" title="Uredi" data-id="${shelf.id}">✎</button>`;
 
@@ -310,6 +313,21 @@ function renderShelves() {
     });
     list.appendChild(item);
   });
+  // Reapply badge counts that survived the re-render
+  for (const [id, count] of _shelfBadges) _applyShelfBadge(id, count);
+}
+
+function _applyShelfBadge(shelfId, count) {
+  const el = document.getElementById(`shelf-badge-${shelfId}`);
+  if (!el) return;
+  if (count > 0) { el.textContent = String(count); el.classList.remove('hidden'); }
+  else           { el.classList.add('hidden'); }
+}
+
+export function setShelfBadge(shelfId, count) {
+  if (count > 0) _shelfBadges.set(shelfId, count);
+  else           _shelfBadges.delete(shelfId);
+  _applyShelfBadge(shelfId, count);
 }
 
 // Re-render sidebar when language changes
@@ -320,6 +338,7 @@ document.addEventListener('langchange', () => {
   const username = sidebar.querySelector('#sidebar-username')?.textContent || '';
   sidebar.innerHTML = buildSidebarHtml();
   initLibraryThemeControls(sidebar);
+  initDisplaySizeControls(sidebar);
   initSidebarLangPicker(sidebar.querySelector('#sidebar-lang-picker'));
   const unameEl = sidebar.querySelector('#sidebar-username');
   if (unameEl) unameEl.textContent = username;
@@ -427,11 +446,110 @@ function applyLibraryTheme(theme) {
   }
 }
 
-function syncLibraryThemeButtons(sidebar, theme) {
-  sidebar.querySelectorAll('.sidebar-theme-btn').forEach(btn => {
-    const active = btn.dataset.theme === theme;
-    btn.classList.toggle('active', active);
-    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+// Generic dropdown styled exactly like the language picker (reuses .lang-menu-* CSS):
+// a button showing { icon, current label, caret } that opens a list of options upward.
+// opts: { container, iconSrc, iconClass, ariaLabel, options:[{value,label}], getValue, onSelect }
+function buildIconDropdown(opts) {
+  const { container, iconSrc, iconClass, ariaLabel, options, getValue, onSelect } = opts;
+  if (!container) return;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'lang-menu-wrap';
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'lang-menu-btn';
+  btn.setAttribute('aria-haspopup', 'listbox');
+  btn.setAttribute('aria-expanded', 'false');
+  if (ariaLabel) btn.setAttribute('aria-label', ariaLabel);
+  btn.innerHTML = `<img src="${iconSrc}" class="nav-icon ${iconClass}" alt="">`
+    + '<span class="lang-menu-label"></span><span class="lang-menu-caret">▾</span>';
+  const labelEl = btn.querySelector('.lang-menu-label');
+
+  const list = document.createElement('div');
+  list.className = 'lang-menu-list lang-menu-up hidden';
+  list.setAttribute('role', 'listbox');
+
+  function render() {
+    const cur = getValue();
+    const sel = options.find(o => o.value === cur) || options[0];
+    labelEl.textContent = sel ? sel.label : '';
+    list.innerHTML = '';
+    for (const opt of options) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'lang-menu-option' + (opt.value === cur ? ' active' : '');
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', opt.value === cur ? 'true' : 'false');
+      item.innerHTML = `<span>${escHtml(opt.label)}</span><span class="lang-menu-check">✓</span>`;
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeList();
+        onSelect(opt.value);
+        render();
+      });
+      list.appendChild(item);
+    }
+  }
+  function openList() {
+    render();
+    // Collapsed sidebar: escape the narrow column / overflow with position:fixed.
+    if (container.closest('.app-sidebar')?.classList.contains('collapsed')) {
+      const rect = btn.getBoundingClientRect();
+      list.style.cssText = `position:fixed;left:${rect.right + 8}px;bottom:${window.innerHeight - rect.top + 4}px;top:auto;right:auto;`;
+    } else {
+      list.style.cssText = '';
+    }
+    list.classList.remove('hidden');
+    btn.setAttribute('aria-expanded', 'true');
+  }
+  function closeList() {
+    list.classList.add('hidden');
+    btn.setAttribute('aria-expanded', 'false');
+  }
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    list.classList.contains('hidden') ? openList() : closeList();
+  });
+  document.addEventListener('click', closeList);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeList(); });
+
+  wrap.appendChild(btn);
+  wrap.appendChild(list);
+  container.innerHTML = '';
+  container.appendChild(wrap);
+  render();
+}
+
+// ── Display size (viewport-width scaling for large-screen e-readers/tablets) ───
+const DISPLAY_SIZE_KEY = 'br_display_size';
+const DISPLAY_SIZES = ['auto', 'large', 'larger', 'largest'];
+
+function getDisplaySize() {
+  const v = localStorage.getItem(DISPLAY_SIZE_KEY) || 'auto';
+  return DISPLAY_SIZES.includes(v) ? v : 'auto';
+}
+
+function initDisplaySizeControls(sidebar) {
+  buildIconDropdown({
+    container: sidebar.querySelector('#sidebar-size-picker'),
+    iconSrc:   '/images/display_size.svg',
+    iconClass: 'nav-icon-display-size',
+    ariaLabel: t('sidebar.display_size'),
+    options: [
+      { value: 'auto',    label: t('sidebar.size_auto') },
+      { value: 'large',   label: t('sidebar.size_large') },
+      { value: 'larger',  label: t('sidebar.size_larger') },
+      { value: 'largest', label: t('sidebar.size_largest') },
+    ],
+    getValue: getDisplaySize,
+    onSelect: (v) => {
+      if (v === getDisplaySize()) return;
+      try { localStorage.setItem(DISPLAY_SIZE_KEY, v); } catch (_) { /* ignore */ }
+      // Apply live (no reload). The shared fn (index.html head) uses a viewport-width
+      // override on mobile and CSS zoom on desktop, detecting which the browser needs.
+      if (typeof window.__brApplyDisplaySize === 'function') window.__brApplyDisplaySize(v, true);
+    },
   });
 }
 
@@ -439,15 +557,20 @@ function initLibraryThemeControls(sidebar) {
   const androidEink = typeof window.AndroidCodexa?.isEinkMode === 'function'
     && window.AndroidCodexa.isEinkMode();
   if (androidEink) localStorage.setItem(LIB_THEME_KEY, 'eink');
-  const theme = androidEink ? 'eink' : getLibraryTheme();
-  applyLibraryTheme(theme);
-  syncLibraryThemeButtons(sidebar, theme);
-  sidebar.querySelectorAll('.sidebar-theme-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const next = btn.dataset.theme;
-      setLibraryTheme(next);
-      syncLibraryThemeButtons(sidebar, next);
-    });
+  applyLibraryTheme(androidEink ? 'eink' : getLibraryTheme());
+  buildIconDropdown({
+    container: sidebar.querySelector('#sidebar-theme-picker'),
+    iconSrc:   '/images/appearance.svg',
+    iconClass: 'nav-icon-appearance',
+    ariaLabel: t('sidebar.appearance'),
+    options: [
+      { value: 'day',    label: t('sidebar.theme_day') },
+      { value: 'night',  label: t('sidebar.theme_night') },
+      { value: 'system', label: t('sidebar.theme_system') },
+      { value: 'eink',   label: t('sidebar.theme_eink') },
+    ],
+    getValue: getLibraryTheme,
+    onSelect: (v) => setLibraryTheme(v), // setLibraryTheme persists + applies
   });
 }
 

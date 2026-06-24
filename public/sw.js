@@ -1,7 +1,7 @@
 // Codexa Service Worker
 // Caches app shell for offline use. EPUBs are cached on demand in BOOKS_CACHE.
 
-const CACHE_VERSION = 'br-v20260619023';
+const CACHE_VERSION = 'br-v20260624004';
 const BOOKS_CACHE   = 'codexa-books-v2';
 const APP_SHELL = [
   '/',
@@ -17,12 +17,14 @@ const APP_SHELL = [
   '/js/router.js',
   '/js/settings.js',
   '/js/offline.js',
+  '/js/progress-outbox.js',
   '/js/api.js',
   '/js/ui.js',
   '/js/library.js',
   '/js/sidebar.js',
   '/js/i18n.js',
   '/js/opds.js',
+  '/js/reader_v4.js',
   '/locales/en.json',
   '/locales/de.json',
   '/locales/es.json',
@@ -40,6 +42,10 @@ const APP_SHELL = [
   '/images/dictionary_bw.svg',
   '/images/shelf.svg',
   '/images/shelf_bw.svg',
+  '/images/opds_shelf.svg',
+  '/images/opds_shelf_bw.svg',
+  '/images/sync.svg',
+  '/images/sync_bw.svg',
   '/images/settings.svg',
   '/images/settings_bw.svg',
   '/images/logout.svg',
@@ -180,7 +186,7 @@ self.addEventListener('fetch', (e) => {
   if (url.pathname.startsWith('/covers/') && url.hostname === self.location.hostname) {
     e.respondWith(
       caches.open(BOOKS_CACHE).then(c =>
-        c.match(e.request).then(cached => cached || fetch(e.request))
+        c.match(e.request).then(cached => cached || fetch(e.request).catch(() => Response.error()))
       )
     );
     return;
@@ -213,25 +219,31 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Never serve the reader bundle via SW respondWith. On Chrome 83 Android WebView,
-  // transferring a large file (287 KB) through the SW IPC corrupts the native-fetch
-  // routing — any subsequent SW-returned-without-respondWith fetch hangs silently.
-  // The HTML loads the bundle with a ?v= cache-buster so the browser's own HTTP
-  // cache handles freshness; the SW APP_SHELL entry (without ?v=) never matched anyway.
-  if (url.pathname === '/js/reader_v4.js') {
+  // reader_v4.js is pre-cached in APP_SHELL (without ?v=). Serve from SW cache so
+  // offline reading works regardless of browser HTTP cache state. The MutationObserver
+  // root-cause fix for Chrome 83 WebView is already in place client-side; the old
+  // full bypass that relied solely on browser HTTP cache was too fragile for offline.
+  if (url.pathname === '/js/reader_v4.js' && url.hostname === self.location.hostname) {
+    e.respondWith(
+      caches.match('/js/reader_v4.js').then(cached => cached || fetch(e.request))
+    );
     return;
   }
 
-  // Cache-first for app shell assets
+  // Cache-first for app shell assets.
+  // ignoreSearch: HTML pages are navigated to with ?id= query params (e.g. readerv4.html?id=234)
+  // but the APP_SHELL caches them without params. Without ignoreSearch the lookup misses,
+  // the offline network fetch fails, .catch(() => cached) returns undefined, and respondWith
+  // throws "Failed to convert value to 'Response'".
   e.respondWith(
-    caches.match(e.request).then(cached => {
+    caches.match(e.request, { ignoreSearch: true }).then(cached => {
       const networkFetch = fetch(e.request).then(response => {
         if (response.ok && e.request.method === 'GET') {
           const clone = response.clone();
           caches.open(CACHE_VERSION).then(cache => cache.put(e.request, clone));
         }
         return response;
-      }).catch(() => cached);
+      }).catch(() => cached || Response.error());
       return cached || networkFetch;
     })
   );

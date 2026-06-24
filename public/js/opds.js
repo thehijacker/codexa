@@ -335,7 +335,9 @@ async function doSearch() {
 }
 
 // ── OPDS Sync to shelf (SSE progress) ───────────────────────────────────────
-function openSyncModal(folderUrl, folderTitle) {
+export function openSyncModal(folderUrl, folderTitle, existingShelfId = null, serverId = null) {
+  const effectiveServerId = serverId ?? currentServer?.id;
+  if (effectiveServerId == null) { console.warn('[opds] openSyncModal: no server selected'); return; }
   document.getElementById('sync-modal')?.remove();
 
   const backdrop = document.createElement('div');
@@ -395,7 +397,7 @@ function openSyncModal(folderUrl, folderTitle) {
   backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
 
   // ── Phase 0: pre-fetch count ──────────────────────────────────────────────
-  apiFetch(`/opds/sync-count?serverId=${encodeURIComponent(currentServer.id)}&folderUrl=${encodeURIComponent(folderUrl || '')}`)
+  apiFetch(`/opds/sync-count?serverId=${encodeURIComponent(effectiveServerId)}&folderUrl=${encodeURIComponent(folderUrl || '')}`)
     .then(data => {
       backdrop.querySelector('#sync-scanning').hidden = true;
       const formEl    = backdrop.querySelector('#sync-form');
@@ -430,13 +432,14 @@ function openSyncModal(folderUrl, folderTitle) {
     backdrop.querySelector('#sync-modal-close').disabled = true;
 
     const params  = new URLSearchParams({
-      serverId:  currentServer.id,
+      serverId:  effectiveServerId,
       folderUrl: folderUrl || '',
       shelfName,
       token:     localStorage.getItem('br_token') || '',
     });
     if (limit && limit > 0) params.set('limit', limit);
     if (force) params.set('force', '1');
+    if (existingShelfId) params.set('shelfId', String(existingShelfId));
 
     const es = new EventSource(`/api/opds/sync-sse?${params.toString()}`);
     let total = 0;
@@ -606,6 +609,17 @@ document.addEventListener('opdsserverschanged', async () => {
     }
   } catch { /* ignore */ }
 });
+
+// ── Deep-link into OPDS browser at a specific server + folder URL ────────────
+export async function openOpdsBrowserAtFolder(serverId, folderUrl) {
+  await showPanel('opds'); // ensures initOpds/loadServers completes first
+  const server = servers.find(s => s.id === parseInt(serverId, 10));
+  if (!server) return;
+  currentServer = server;
+  navStack = [{ title: server.name, url: null }, { title: '', url: folderUrl }];
+  renderServerList();
+  browseUrl(folderUrl);
+}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 export async function initOpds() {

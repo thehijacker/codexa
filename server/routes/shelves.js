@@ -9,7 +9,8 @@ router.use(authenticateToken);
 router.get('/', (req, res) => {
   const db = getDb();
   const shelves = db.prepare(`
-    SELECT s.id, s.name, s.created_at, COUNT(bs.book_id) AS book_count
+    SELECT s.id, s.name, s.created_at, s.opds_server_id, s.opds_folder_url, s.last_synced_at,
+           COUNT(bs.book_id) AS book_count
       FROM shelves s
       LEFT JOIN book_shelves bs ON bs.shelf_id = s.id
      WHERE s.user_id = ?
@@ -63,6 +64,19 @@ router.delete('/:id', (req, res) => {
 
   db.prepare('DELETE FROM shelves WHERE id = ?').run(shelf.id);
   res.status(204).end();
+});
+
+// ── DELETE /api/shelves/:id/opds-link — remove OPDS origin from a shelf ───────
+router.delete('/:id/opds-link', (req, res) => {
+  const db    = getDb();
+  const shelf = db.prepare(
+    'SELECT id FROM shelves WHERE id = ? AND user_id = ?'
+  ).get(req.params.id, req.user.id);
+  if (!shelf) return res.status(404).json({ error: 'error.shelf_not_found' });
+
+  db.prepare('UPDATE shelves SET opds_server_id = NULL, opds_folder_url = NULL, last_synced_at = NULL WHERE id = ?')
+    .run(shelf.id);
+  res.json({ success: true });
 });
 
 // ── GET /api/shelves/for-book/:bookId — shelf IDs containing this book ────────

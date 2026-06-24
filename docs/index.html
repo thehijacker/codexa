@@ -18,12 +18,11 @@
     <div id="nav-header">
       <a id="nav-logo" href="#about">&#128218; Codexa</a>
       <div id="search-wrap">
-        <input id="search-input" type="search" placeholder="Search docs…" autocomplete="off" spellcheck="false">
-        <button id="search-clear" aria-label="Clear search">&#215;</button>
+        <div id="search-input-wrap">
+          <input id="search-input" type="search" placeholder="Search docs…" autocomplete="off" spellcheck="false">
+          <button id="search-clear" aria-label="Clear search">&#215;</button>
+        </div>
         <span id="search-count"></span>
-      </div>
-      <div id="nav-actions">
-        <button id="theme-btn" title="Toggle theme">&#9737; System</button>
       </div>
     </div>
 
@@ -91,6 +90,7 @@
             <li><a href="#opds-browse"   data-section="opds" data-scroll="opds-browse">Browsing</a></li>
             <li><a href="#opds-download" data-section="opds" data-scroll="opds-download">Downloading</a></li>
             <li><a href="#opds-sync"     data-section="opds" data-scroll="opds-sync">Folder Sync to Shelf</a></li>
+            <li><a href="#opds-linked"   data-section="opds" data-scroll="opds-linked">Linked Shelves</a></li>
           </ul>
         </li>
         <li>
@@ -99,6 +99,7 @@
             <li><a href="#themes-reader" data-section="themes" data-scroll="themes-reader">Reader Themes</a></li>
             <li><a href="#themes-eink"   data-section="themes" data-scroll="themes-eink">E-ink Mode</a></li>
             <li><a href="#themes-app"    data-section="themes" data-scroll="themes-app">App Theme</a></li>
+            <li><a href="#themes-display" data-section="themes" data-scroll="themes-display">Display Size</a></li>
           </ul>
         </li>
         <li>
@@ -129,7 +130,8 @@
           <ul class="nav-sub">
             <li><a href="#shelf-create" data-section="shelves" data-scroll="shelf-create">Creating a Shelf</a></li>
             <li><a href="#shelf-add"    data-section="shelves" data-scroll="shelf-add">Adding Books</a></li>
-            <li><a href="#shelf-sync"   data-section="shelves" data-scroll="shelf-sync">OPDS Folder Sync</a></li>
+            <li><a href="#shelf-sync"        data-section="shelves" data-scroll="shelf-sync">OPDS Folder Sync</a></li>
+            <li><a href="#shelf-linked-opds" data-section="shelves" data-scroll="shelf-linked-opds">Linked Shelves</a></li>
           </ul>
         </li>
         <li>
@@ -174,13 +176,34 @@
             <li><a href="#reader-peek"      data-section="reader" data-scroll="reader-peek">Peek Mode</a></li>
           </ul>
         </li>
+        <li>
+          <a href="#cxreader" data-section="cxreader">CXReader Engine</a>
+          <ul class="nav-sub">
+            <li><a href="#cxreader-why"      data-section="cxreader" data-scroll="cxreader-why">Why We Built It</a></li>
+            <li><a href="#cxreader-features" data-section="cxreader" data-scroll="cxreader-features">What's Improved</a></li>
+            <li><a href="#cxreader-position" data-section="cxreader" data-scroll="cxreader-position">Exact Position Restore</a></li>
+            <li><a href="#cxreader-fixed"    data-section="cxreader" data-scroll="cxreader-fixed">Fixed-layout EPUBs</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#comics" data-section="comics">Comic Books</a>
+          <ul class="nav-sub">
+            <li><a href="#comics-formats"  data-section="comics" data-scroll="comics-formats">Formats (CBZ / CBR)</a></li>
+            <li><a href="#comics-upload"   data-section="comics" data-scroll="comics-upload">Uploading &amp; Importing</a></li>
+            <li><a href="#comics-reading"  data-section="comics" data-scroll="comics-reading">Reading Comics</a></li>
+            <li><a href="#comics-metadata" data-section="comics" data-scroll="comics-metadata">Metadata</a></li>
+          </ul>
+        </li>
       </ul>
     </div>
 
     <div id="nav-footer">
-      <a href="https://github.com/thehijacker/codexa" target="_blank" rel="noopener">GitHub</a>
-      &nbsp;&middot;&nbsp;
-      AGPL-3.0
+      <span class="nav-footer-text">
+        <a href="https://github.com/thehijacker/codexa" target="_blank" rel="noopener">GitHub</a>
+        &nbsp;&middot;&nbsp;
+        AGPL-3.0
+      </span>
+      <button id="theme-btn" title="Toggle theme" aria-label="Toggle theme">&#9737;</button>
     </div>
   </nav>
 
@@ -190,25 +213,37 @@
     <!-- ═══════════════════════════════════════════════════════ About ════ -->
     <section id="about" class="active">
       <h1>About Codexa</h1>
-      <p class="section-subtitle">A self-hosted EPUB reader with KOReader sync, OPDS browsing, and offline support</p>
+      <p class="section-subtitle">A self-hosted EPUB and comic book reader with KOReader sync, OPDS browsing, and offline support</p>
 
       <p>
-        Codexa is a self-hosted web application for reading EPUB books. It runs as a lightweight
-        Node.js container, requires no cloud account, and keeps all your data on your own server.
-        Open it in any modern browser, install it as a Progressive Web App, or use the dedicated
-        Android and iOS apps.
+        Codexa is a self-hosted reading platform for your <strong>EPUB books and comic books</strong> —
+        your own private library that follows you across every device. It runs as a single lightweight
+        Node.js container, needs no cloud account, and keeps everything — books, covers, highlights,
+        bookmarks, and reading positions — on <strong>your own server</strong>. Open it in any modern
+        browser, install it as a Progressive Web App, or use the dedicated Android and iOS apps. Pick
+        up exactly where you left off, on any of them.
       </p>
 
       <p>
-        I was using Grimmory/Booklore as my ebook collection server and many different devices connected to its 
-        OPDS service and KOReader sync server to sync progress. Sadly some of my epub books were not properly 
-        displayed in Grimmory web reader and also two way Grimmory <-> KOReader sync was not yet working, 
-        so when failing to find alternative web base browser, I decided to develop my own. It started as a 
-        personal project, but grew so much that I would like to share if anyone else might find it useful.
+        What sets Codexa apart is <strong>CXReader</strong>, its own purpose-built rendering engine.
+        Instead of leaning on a generic third-party EPUB library, Codexa renders books with code
+        written specifically for reliability, faithful typography, and — crucially — flawless
+        behaviour on slow e-ink screens. The result is a reader that handles stubborn real-world EPUBs,
+        fixed-layout manga, and CBZ/CBR comics with the same care, and stays fast on a BOOX or Kobo.
+      </p>
+
+      <p>
+        It began as a personal itch. I was running Grimmory/Booklore as my ebook server, with a fleet
+        of devices syncing through its OPDS catalog and KOReader sync server. Later I migrated to more 
+        resource friendly Book Orbit server, but some of my EPUBs rendered poorly in the web reader, 
+        and two-way Grimmory&nbsp;&harr;&nbsp;KOReader sync wasn't working for me. Unable to find a 
+        web-based reader that did everything I needed, I built my own. It grew far beyond a weekend 
+        project — so I'm sharing it in case it's useful to you too.
       </p>
       <p>
-        Codexa stores everything locally — books, covers, annotations, and reading positions —
-        with optional synchronisation to KOReader devices using the open KOSync protocol.
+        Everything stays local, with <strong>optional two-way synchronisation</strong> to KOReader
+        devices over the open KOSync protocol — Codexa even includes its own KOSync-compatible server,
+        so your e-reader and your phone stay on the same page without any extra software.
       </p>
 
       <figure>
@@ -221,8 +256,10 @@
         <li><strong>Single Node.js process</strong> — easy to deploy with Docker in minutes</li>
         <li><strong>Multi-user with JWT authentication</strong> — per-user libraries</li>
         <li><strong>Full offline reading</strong> — via a Service Worker cache</li>
+        <li><strong>CXReader</strong> — Codexa's own custom-built EPUB engine (replaces epub.js) for better reliability</li>
+        <li><strong>Comic book support</strong> — read CBZ and CBR files alongside your EPUB library</li>
         <li><strong>Built-in KOSync-compatible server</strong> — connect KOReader devices without extra software</li>
-        <li><strong>OPDS catalog browser</strong> — for Calibre-Web, Komga, Kavita, and others</li>
+        <li><strong>OPDS catalog browser</strong> — for Calibre-Web, Book Orbit, Booklore Komga, Kavita, and others; downloads books directly</li>
         <li><strong>Works on any device</strong> — desktop browsers, mobile PWA, Android APK, iOS IPA</li>
         <li><strong>Optimised for e-ink displays</strong> — BOOX, Kobo, and similar</li>
       </ul>
@@ -239,8 +276,11 @@
         <div class="feature-card">
           <h3>&#128214; Reading</h3>
           <ul>
-            <li><strong>EPUB reader powered by epub.js</strong> — reflowable and fixed layout</li>
+            <li><strong>CXReader</strong> — Codexa's own EPUB engine; reflowable, fixed-layout, and comic book formats</li>
+            <li><strong>CBZ &amp; CBR comic books</strong> — two-page spread on desktop, ComicInfo.xml metadata, theme-aware background</li>
+            <li><strong>Fixed-layout EPUB</strong> — manga, children's books, and art books at pixel-accurate dimensions</li>
             <li><strong>Paginated layout</strong> — with configurable margins and columns</li>
+            <li><strong>Exact position restore</strong> — reopens at the precise page, not just an approximate percentage</li>
             <li><strong>Bookmarks</strong> — with custom labels</li>
             <li><strong>Highlights</strong> — in four colours (yellow, green, blue, pink) with notes</li>
             <li><strong>In-book full-text search</strong> — with result navigation</li>
@@ -282,7 +322,7 @@
             <li><strong>Download any book for offline reading</strong> — via Service Worker cache</li>
             <li><strong>PWA</strong> — installable on desktop and mobile</li>
             <li><strong>Android app</strong> — with volume-key navigation, portrait lock, hardware e-ink toggle</li>
-            <li><strong>iOS app</strong> — sideload or TestFlight</li>
+            <li><strong>iOS app</strong> — IPA file sideload (work in progress)</li>
             <li><strong>Responsive layout</strong> — for phones, tablets, and desktops</li>
           </ul>
         </div>
@@ -292,8 +332,9 @@
           <ul>
             <li><strong>Multi-user with JWT authentication</strong> — per-user libraries</li>
             <li><strong>Shelves</strong> — organise books into named collections</li>
-            <li><strong>Online library</strong> — browse OPDS catalogs from Calibre-Web, Komga, Kavita, and more</li>
+            <li><strong>Online library</strong> — browse OPDS catalogs from Calibre-Web, Book Orbit, Booklore, Komga, Kavita, and more</li>
             <li><strong>Bulk shelf sync</strong> — from OPDS folder with stale-book detection</li>
+            <li><strong>OPDS-linked shelves</strong> — synced shelves remember their source folder; one click opens it in the OPDS browser or re-triggers a sync</li>
             <li><strong>Series support</strong> — with series name, number, and one-click filter</li>
             <li><strong>Sort</strong> — by date, title, author, progress, or series</li>
             <li><strong>Real-time library search</strong></li>
@@ -481,7 +522,7 @@ npm start</code></pre>
         <strong>Traefik</strong> to add HTTPS. Set <code>client_max_body_size</code> to at least
         300&nbsp;MB so large EPUB uploads are not rejected.
       </p>
-
+      <p><strong>Nginx:</strong></p>
       <div class="code-block">
         <button class="copy-btn">Copy</button>
         <pre><code>server {
@@ -494,6 +535,19 @@ npm start</code></pre>
         proxy_set_header   X-Real-IP $remote_addr;
         client_max_body_size 300M;
     }
+}</code></pre>
+      </div>
+  <p><strong>Caddy:</strong></p>
+  <div class="code-block">
+        <button class="copy-btn">Copy</button>
+        <pre><code>books.example.com {
+    # Set the max body size to 300MB
+    request_body {
+        max_size 300mb
+    }
+
+    # Proxy all traffic to your app
+    reverse_proxy 127.0.0.1:3000
 }</code></pre>
       </div>
 
@@ -632,7 +686,8 @@ data/<br>
 &#9500;&#9472;&#9472; codexa.db&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # SQLite database (WAL mode)<br>
 &#9500;&#9472;&#9472; books/<br>
 &#9474;&nbsp;&nbsp; &#9492;&#9472;&#9472; {user_id}/<br>
-&#9474;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &#9492;&#9472;&#9472; {sha256}.epub<br>
+&#9474;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &#9500;&#9472;&#9472; {sha256}.epub<br>
+&#9474;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &#9492;&#9472;&#9472; {sha256}.cbz&nbsp;&nbsp; # CBR files converted to CBZ<br>
 &#9500;&#9472;&#9472; covers/<br>
 &#9474;&nbsp;&nbsp; &#9492;&#9472;&#9472; {sha256}.jpg<br>
 &#9500;&#9472;&#9472; fonts/<br>
@@ -653,9 +708,11 @@ data/<br>
 
       <h3>books/</h3>
       <p>
-        EPUB files are stored per-user in subdirectories named by the numeric user ID. Each file
-        is named by its SHA-256 hash, so duplicate uploads are rejected (same content = same hash).
-        The original filename is stored in the database.
+        Book files (EPUB and CBZ) are stored per-user in subdirectories named by the numeric user
+        ID. Each file is named by its SHA-256 hash, so duplicate uploads are rejected (same
+        content = same hash). The original filename is stored in the database.
+        CBR files are converted to CBZ before storage — only <code>.epub</code> and
+        <code>.cbz</code> files appear on disk.
       </p>
 
       <h3>covers/</h3>
@@ -1062,6 +1119,56 @@ data/<br>
         relative URLs and authentication automatically.
       </div>
 
+      <h2 id="opds-linked">Linked Shelves</h2>
+      <p>
+        When you run <strong>Sync to Shelf</strong> for the first time, Codexa records the OPDS
+        server and folder URL on that shelf — making it a <em>linked shelf</em>. Linked shelves
+        appear with a distinct icon in the sidebar so you can tell them apart from manually-created
+        shelves at a glance.
+      </p>
+      <p>
+        Whenever you open a linked shelf in the library, a banner appears at the top showing the
+        last sync date and time alongside two quick-action buttons:
+      </p>
+      <ul>
+        <li>
+          <strong>Open in OPDS</strong> — switches to the Online Library panel and navigates
+          directly to the source folder. You can browse new arrivals or individually pick books
+          to download without running a full sync.
+        </li>
+        <li>
+          <strong>Sync again</strong> — opens the sync dialog pre-filled with the source folder
+          and always targets the same shelf, even if the shelf has been renamed since the original sync.
+        </li>
+      </ul>
+
+      <h3>Automatic Background Sync</h3>
+      <p>
+        Opening a linked shelf also triggers a silent background sync. Codexa checks the source
+        OPDS folder for new books and downloads any it finds — no dialog, no spinner, no
+        interruption to your browsing. A one-hour cooldown per shelf prevents repeated checks when
+        you switch shelves quickly.
+      </p>
+      <ul>
+        <li>If new books are found while you are viewing the shelf, the library refreshes automatically.</li>
+        <li>If new books are found while you are on a different shelf, a <strong>badge</strong> appears on the linked shelf's sidebar entry showing the count. The badge clears when you open that shelf.</li>
+        <li>Stale-book warnings (books removed from the catalog) are never shown during auto-sync — they appear only on a manual <strong>Sync again</strong>.</li>
+      </ul>
+
+      <h3>Removing the Link</h3>
+      <p>
+        To detach a shelf from its OPDS source, hover over the shelf in the sidebar, click the
+        edit (&#9998;) icon, and press <strong>Unlink from OPDS</strong>. The shelf and all its
+        books are kept; only the OPDS connection is removed. The shelf reverts to a regular
+        manually-managed shelf.
+      </p>
+
+      <div class="callout">
+        <strong>Shelf identity is preserved</strong>
+        Re-syncing a linked shelf always updates the same shelf by ID, not by name. You can freely
+        rename the shelf in the sidebar without breaking the OPDS link.
+      </div>
+
       <a class="back-top" href="#about">&#8593; Top</a>
     </section>
 
@@ -1125,12 +1232,47 @@ data/<br>
 
       <h2 id="themes-app">App Theme (Library)</h2>
       <p>
-        The library interface follows the system's light/dark preference automatically. A theme
-        selector in the library header lets you lock it to Light, Dark, or E-ink independently of
-        the system setting. When <strong>E-ink mode</strong> is selected here, the reader
-        automatically opens in e-ink mode as well — no need to configure it separately inside the
-        reader.
+        The library interface follows the system's light/dark preference automatically. An
+        <strong>Appearance</strong> selector at the bottom of the library sidebar lets you lock it
+        to Light, Dark, System, or E-ink independently of the system setting. When
+        <strong>E-ink mode</strong> is selected here, the reader automatically opens in e-ink mode
+        as well — no need to configure it separately inside the reader.
       </p>
+
+      <h2 id="themes-display">Display Size</h2>
+      <p>
+        On large, high-resolution screens — 7&ndash;10&Prime; e-ink readers (BOOX, ...), tablets,
+        and even big desktop monitors — a standard interface can feel cramped. The
+        <strong>Display size</strong> selector at the bottom of the library sidebar scales the whole
+        library up so it's comfortable to read and tap, with an even, predictable progression.
+        Larger sizes also flow into the touch-friendly layout (collapsible hamburger menu,
+        full-width book grid) where there's room.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Option</th><th>Effect</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Auto</strong></td><td>Default. Uses the device's native size — no scaling.</td></tr>
+            <tr><td><strong>Large</strong></td><td>Enlarges the interface about 1.25&times;.</td></tr>
+            <tr><td><strong>Larger</strong></td><td>Enlarges the interface about 1.5&times;.</td></tr>
+            <tr><td><strong>Largest</strong></td><td>Enlarges the interface about 1.75&times; — the biggest comfortable step.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        The setting applies <strong>instantly</strong> (no reload), is remembered per device, and is
+        independent of the theme. It affects the <strong>library</strong>; the reader has its own
+        size controls (font size, status-bar text, and header-button size in
+        <strong>Reader &rarr; Settings</strong>).
+      </p>
+      <div class="callout">
+        <strong>Works everywhere</strong>
+        Display size now works on desktop browsers too, not just phones, tablets,
+        and the Android app — Codexa automatically picks the right scaling technique for each
+        platform, so the control behaves the same wherever you read.
+      </div>
 
       <a class="back-top" href="#about">&#8593; Top</a>
     </section>
@@ -1184,13 +1326,20 @@ data/<br>
     <!-- ════════════════════════════════════════════════ Uploading Books ══ -->
     <section id="upload">
       <h1>Uploading Books</h1>
-      <p class="section-subtitle">Add EPUB files to your library</p>
+      <p class="section-subtitle">Add EPUB, CBZ, and CBR files to your library</p>
 
-      <h2>Accepted Format</h2>
-      <p>
-        Codexa supports <strong>EPUB</strong> files only (<code>.epub</code>). Maximum file size
-        is <strong>300&nbsp;MB</strong> per upload.
-      </p>
+      <h2>Accepted Formats</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Format</th><th>Extension</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><strong>EPUB</strong></td><td><code>.epub</code></td><td>Standard e-book format — reflowable or fixed-layout</td></tr>
+            <tr><td><strong>CBZ</strong></td><td><code>.cbz</code></td><td>Comic Book ZIP — a ZIP archive of ordered image files</td></tr>
+            <tr><td><strong>CBR</strong></td><td><code>.cbr</code></td><td>Comic Book RAR — automatically converted to CBZ on the server</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Maximum file size is <strong>300&nbsp;MB</strong> per upload.</p>
 
       <h2 id="upload-methods">Upload Methods</h2>
 
@@ -1198,20 +1347,21 @@ data/<br>
       <ol class="steps">
         <li>Open the library.</li>
         <li>Click the <strong>Upload</strong> button (&#8679; icon) in the toolbar.</li>
-        <li>Select one or more <code>.epub</code> files from your device.</li>
+        <li>Select one or more <code>.epub</code>, <code>.cbz</code>, or <code>.cbr</code> files from your device.</li>
         <li>The files are uploaded, metadata is extracted, and covers are generated automatically.</li>
       </ol>
 
       <h3>Drag and Drop</h3>
       <p>
-        Drag one or more <code>.epub</code> files from your file manager and drop them anywhere
-        on the library page. A drop overlay appears to confirm the action.
+        Drag one or more files from your file manager and drop them anywhere on the library page.
+        A drop overlay appears to confirm the action.
       </p>
 
       <h3>From Online Library</h3>
       <p>
-        Navigate to a book in the <a href="#opds" data-section="opds">Online Library</a> and click
-        <strong>Add to library</strong>. The book is saved directly to your library.
+        Navigate to a book or comic in the <a href="#opds" data-section="opds">Online Library</a> and click
+        <strong>Add to library</strong>. EPUB, CBZ, and CBR files are all supported.
+        CBR files are detected by their file signature and converted to CBZ automatically.
       </p>
 
       <h3>OPDS Folder Sync</h3>
@@ -1222,24 +1372,43 @@ data/<br>
 
       <h2>Duplicate Detection</h2>
       <p>
-        Codexa computes a SHA-256 hash of each uploaded EPUB. If the same file content already
-        exists in your library, the upload is rejected with a friendly message — no duplicates
-        are stored.
+        Codexa computes a SHA-256 hash of each uploaded file. If the same content already exists
+        in your library, the upload is rejected with a friendly message — no duplicates are stored.
+        CBR files are converted to CBZ before hashing, so re-uploading the same comic as either
+        format is correctly detected as a duplicate.
       </p>
 
       <h2 id="upload-metadata">Metadata Extraction</h2>
-      <p>The following metadata is extracted automatically from the EPUB:</p>
+      <h3>EPUB</h3>
+      <p>The following metadata is extracted automatically from the EPUB OPF file:</p>
       <ul>
         <li>Title, author</li>
         <li>Cover image</li>
-        <li>Series name and number</li>
+        <li>Series name and number (Calibre tags or EPUB3 <code>belongs-to-collection</code>)</li>
         <li>Description, publisher, language, ISBN</li>
         <li>Genre tags, page count</li>
       </ul>
+
+      <h3>CBZ / CBR</h3>
+      <p>
+        If the archive contains a <code>ComicInfo.xml</code> file (the standard comic metadata format),
+        Codexa extracts:
+      </p>
+      <ul>
+        <li>Title, series name and number</li>
+        <li>Writer and penciller (combined into the author field)</li>
+        <li>Summary (description) and genre</li>
+        <li>Cover image (first image in the archive, sorted by filename)</li>
+        <li>Page count</li>
+      </ul>
+      <p>
+        If <code>ComicInfo.xml</code> is absent, the filename is used as the title and the first
+        image becomes the cover.
+      </p>
       <p>
         If a book is missing genres or other fields (for example because it was uploaded before a
         newer version of Codexa), use <strong>Settings → Admin → ↺ Refresh metadata for all
-        books</strong> to re-extract everything from the EPUB files on disk.
+        books</strong> to re-extract everything from the files on disk.
       </p>
 
       <a class="back-top" href="#about">&#8593; Top</a>
@@ -1387,15 +1556,47 @@ data/<br>
 
       <h2 id="shelf-sync">OPDS Folder Sync</h2>
       <p>
-        Any shelf can be linked to an OPDS catalog folder. When you run
-        <strong>Sync to Shelf</strong> from the OPDS browser, the selected folder's books are
-        downloaded and added to a shelf with that name. Re-running the sync:
+        Navigate to any folder in the <a href="#opds" data-section="opds">Online Library</a> and
+        click the <strong>Sync to Shelf</strong> button. The folder's books are downloaded and
+        added to a named shelf. Re-running the sync:
       </p>
       <ul>
         <li>Downloads new books that appeared in the catalog since the last sync.</li>
         <li>Skips books already in your library (duplicate detection by file hash).</li>
         <li>Reports books that were removed from the catalog (stale books) — you decide whether to keep or remove them.</li>
       </ul>
+
+      <h2 id="shelf-linked-opds">Linked Shelves</h2>
+      <p>
+        After a sync, the shelf becomes <em>linked</em> to the OPDS source folder. Linked shelves
+        have a distinct icon in the sidebar and show a banner across the top of the library displaying
+        the last sync time and two buttons:
+      </p>
+      <ul>
+        <li>
+          <strong>Open in OPDS</strong> — jumps straight to the source folder in the Online
+          Library without any manual navigation.
+        </li>
+        <li>
+          <strong>Sync again</strong> — reopens the sync dialog targeting this shelf. Even if you
+          rename the shelf, the link is preserved — the sync always updates the correct shelf.
+        </li>
+      </ul>
+      <p>
+        Opening a linked shelf also triggers a <strong>silent background sync</strong>. New books
+        are downloaded automatically without any dialog. If new books arrive while you are browsing
+        a different shelf, a badge on the sidebar entry shows the count of new books waiting.
+        The background sync runs at most once per hour per shelf.
+      </p>
+      <p>
+        To remove the OPDS link, click the edit (&#9998;) icon on the shelf and press
+        <strong>Unlink from OPDS</strong>. The shelf and its books are kept; it simply becomes a
+        regular shelf.
+      </p>
+      <p>
+        Manually-created shelves are never linked. Only shelves created (or updated) by an OPDS
+        sync have the linked icon and banner.
+      </p>
 
       <a class="back-top" href="#about">&#8593; Top</a>
     </section>
@@ -1413,7 +1614,7 @@ data/<br>
       <h2 id="offline-how">How It Works</h2>
       <p>
         Codexa uses a <strong>Service Worker</strong> to cache files in your browser. There are
-        two separate caches:
+        three stores working together:
       </p>
       <ul>
         <li>
@@ -1422,10 +1623,21 @@ data/<br>
           loads without a network connection even if you haven't downloaded any books.
         </li>
         <li>
-          <strong>Book cache</strong> — EPUB files that you explicitly download for offline use.
-          Each book is stored individually and can be removed without affecting other cached books.
+          <strong>Book cache</strong> — the book files (EPUB and comic CBZ/CBR) you download for
+          offline use, together with their cover images. Each book is stored individually and can
+          be removed without affecting other cached books.
+        </li>
+        <li>
+          <strong>On-device database (IndexedDB)</strong> — book metadata (title, author, cover,
+          reading percentage) plus your bookmarks and highlights. This lets the library and reader
+          show the right information while you're offline.
         </li>
       </ul>
+      <p>
+        A book counts as available offline only when its file is genuinely in the book cache — the
+        <strong>Downloaded</strong> shelf reflects what is actually on the device, so you never see
+        a book you can't open.
+      </p>
 
       <h2 id="offline-download">Downloading a Book for Offline Use</h2>
       <ol class="steps">
@@ -1433,6 +1645,11 @@ data/<br>
         <li>Click <strong>Download for offline reading</strong>.</li>
         <li>Progress is shown in the dialog. When complete, the book is available offline.</li>
       </ol>
+      <p>
+        You don't always have to do this manually: while you're online, Codexa quietly downloads
+        the books you're <strong>currently reading</strong> in the background, so they're ready if
+        you lose connectivity. Both the file and its cover are cached.
+      </p>
 
       <h2 id="offline-reading">Reading Offline</h2>
       <p>
@@ -1440,17 +1657,36 @@ data/<br>
         only downloaded books. All reader features work normally offline:
       </p>
       <ul>
-        <li>Bookmarks and annotations are stored in IndexedDB (on-device database).</li>
-        <li>Reading progress is saved locally and synced to the server when you come back online.</li>
-        <li>Dictionary lookups work for dictionaries that are served from your server (offline only if the server is reachable or cached).</li>
+        <li>Your reading position is saved on the device as you turn pages and when you close the book.</li>
+        <li>Bookmarks and highlights are stored in IndexedDB (the on-device database).</li>
+        <li>Dictionary lookups work for dictionaries that are served from your server (available offline only if the server is reachable or the dictionary is cached).</li>
       </ul>
 
       <h2>What Happens When You Come Back Online</h2>
+      <p>
+        Any reading you did offline is synced <strong>automatically</strong> the moment Codexa can
+        reach the server again — you do <em>not</em> have to reopen the book. Each position you
+        read offline is held in a small on-device queue and then flushed:
+      </p>
       <ul>
-        <li>Reading progress is automatically pushed to the KOSync server.</li>
-        <li>OPDS catalog data refreshes.</li>
-        <li>New books uploaded to the server appear in the library.</li>
+        <li>
+          It's written to your Codexa reading progress <strong>and</strong> pushed to
+          <strong>KOReader sync (KOSync)</strong>, so other devices and KOReader pick it up.
+        </li>
+        <li>
+          Syncing only ever moves progress <strong>forward</strong>. If you'd already read further
+          on another device, that position is kept — your offline session won't roll it back.
+        </li>
+        <li>
+          The queue is reliable: if you reconnect while reading a different book, positions from
+          earlier offline sessions still sync, and anything that can't be sent yet is retried on the
+          next reconnect or app launch.
+        </li>
       </ul>
+      <p>
+        At the same time, OPDS catalog data refreshes and any new books added on the server appear
+        in the library.
+      </p>
 
       <h2>Removing a Downloaded Book</h2>
       <p>
@@ -1556,24 +1792,18 @@ data/<br>
     <!-- ══════════════════════════════════════════════════════════ Reader ══ -->
     <section id="reader">
       <h1>Reader</h1>
-      <p class="section-subtitle">Everything available inside the Codexa EPUB reader</p>
+      <p class="section-subtitle">Everything available inside the Codexa reader — EPUBs and comic books</p>
 
-      <div class="screenshots-grid">
-        <figure>
-          <img src="../screenshots/reader/overview.png" alt="Reader interface overview">
-          <figcaption>Reader overview</figcaption>
-        </figure>
-        <figure>
-          <img src="../screenshots/reader/navigation.png" alt="Navigation tap zones">
-          <figcaption>Tap zones</figcaption>
-        </figure>
-      </div>
+      <figure>
+        <img src="../screenshots/reader/overview.png" alt="Reader interface overview">
+        <figcaption>Reader overview</figcaption>
+      </figure>
 
       <h2>Interface Overview</h2>
       <p>The reader has three main areas:</p>
       <ul>
-        <li><strong>Header bar</strong> — buttons for TOC, bookmarks, highlights, search, jump, settings, fullscreen, and back to library. Can be set to auto-hide while reading.</li>
-        <li><strong>Reading area</strong> — the book content rendered by epub.js. The left and right edges are tap/click zones for page navigation.</li>
+        <li><strong>Header bar</strong> — buttons for TOC, bookmarks, highlights, search, jump, settings, fullscreen, and back to library. Can be set to auto-hide while reading. Search and annotation buttons are hidden when reading comics (image-only files have no text to select).</li>
+        <li><strong>Reading area</strong> — book content rendered by <a href="#cxreader" data-section="cxreader">CXReader</a>, Codexa's custom engine. The left and right edges are tap/click zones for page navigation.</li>
         <li><strong>Status bar</strong> — configurable overlay slots at the top and bottom of the screen showing page numbers, progress, time estimates, and more.</li>
       </ul>
 
@@ -1581,8 +1811,8 @@ data/<br>
 
       <h3>Tap / Click</h3>
       <ul>
-        <li><strong>Right half of the screen</strong> → next page</li>
-        <li><strong>Left half of the screen</strong> → previous page</li>
+        <li><strong>Right half of the screen (configurable percentage)</strong> → next page</li>
+        <li><strong>Left half of the screen (configurable percentage)</strong> → previous page</li>
       </ul>
       <p>The centre of the screen is reserved for text selection and dictionary lookups.</p>
 
@@ -1638,16 +1868,14 @@ data/<br>
       </ul>
 
       <h2 id="reader-annot">Highlights &amp; Annotations</h2>
-      <div class="screenshots-grid">
-        <figure>
-          <img src="../screenshots/reader/annotation-toolbar.png" alt="Annotation toolbar after text selection">
-          <figcaption>Annotation toolbar</figcaption>
-        </figure>
-        <figure>
-          <img src="../screenshots/reader/annotations-sidebar.png" alt="Annotations list sidebar">
-          <figcaption>Annotations list</figcaption>
-        </figure>
-      </div>
+      <figure>
+        <img src="../screenshots/reader/annotation-toolbar.png" alt="Annotation toolbar after text selection">
+        <figcaption>Annotation toolbar</figcaption>
+      </figure>
+      <figure>
+        <img src="../screenshots/reader/annotations-sidebar.png" alt="Annotations list sidebar">
+        <figcaption>Annotations list</figcaption>
+      </figure>
 
       <h3>Creating a Highlight</h3>
       <ol class="steps">
@@ -1659,7 +1887,7 @@ data/<br>
       <h3>Adding a Note</h3>
       <p>
         After selecting text, tap the pencil (&#9998;) button in the toolbar. Type your note
-        (up to 1&nbsp;000 characters) and click <strong>Save</strong>.
+        (up to 1000 characters) and click <strong>Save</strong>.
       </p>
 
       <h3>Viewing All Annotations</h3>
@@ -1720,6 +1948,11 @@ data/<br>
         Your reading position is saved automatically as you read. If you close the browser or app
         mid-chapter, a <strong>resume banner</strong> appears the next time you open the library.
         Tap <strong>Resume</strong> to jump back, or <strong>Dismiss</strong> to ignore it.
+
+      <figure>
+        <img src="../screenshots/reader/resume.png" alt="Resume closed book">
+        <figcaption>Resume closed book</figcaption>
+      </figure>        
       </p>
 
       <h2 id="reader-jump">Jump to Position</h2>
@@ -1752,16 +1985,48 @@ data/<br>
       </p>
 
       <h3 id="reader-theme">Theme Tab</h3>
+      <div class="screenshots-grid">
       <figure>
-        <img src="../screenshots/reader/settings-theme.png" alt="Theme settings tab">
+        <img src="../screenshots/reader/settings-theme1.png" alt="Theme settings tab">
         <figcaption>Theme settings</figcaption>
       </figure>
+      <figure>
+        <img src="../screenshots/reader/settings-theme2.png" alt="Header button toggles">
+        <figcaption>Header button toggles</figcaption>
+      </figure>      
+      </div>
       <ul>
         <li><strong>Theme:</strong> Light, Sepia, Dark, Sepia Dark, Midnight, Nord, Custom. Selecting <em>Custom</em> reveals a background colour picker and a text colour picker.</li>
         <li><strong>Override book styles:</strong> forces the reader's fonts and colours on books with their own CSS.</li>
         <li><strong>E-ink mode:</strong> high-contrast black-and-white for e-ink displays.</li>
-        <li><strong>Page gap shadow:</strong> thin shadow along the book spine in two-page spread mode.</li>
+        <li><strong>Page border (book spine):</strong> shows a thin shadow along the centre spine in two-page spread mode.</li>
       </ul>
+
+      <h4>Header buttons</h4>
+      <p>
+        Toggle individual buttons in the reader toolbar on or off. Hidden buttons are simply
+        removed from the header; their features remain accessible elsewhere (e.g. the bookmarks
+        panel). Available toggles:
+      </p>
+      <ul>
+        <li><strong>Highlights</strong> — show/hide the annotations button.</li>
+        <li><strong>Search</strong> — show/hide the in-book search button.</li>
+        <li><strong>Percentage</strong> — show/hide the reading-progress percentage button.</li>
+        <li><strong>Sync</strong> — show/hide the KOSync/progress sync button.</li>
+        <li><strong>Sleep timer</strong> — show/hide the sleep timer button.</li>
+        <li><strong>Fullscreen</strong> — show/hide the fullscreen toggle button.</li>
+        <li><strong>Bookmark count badge</strong> — shows a small number badge on the bookmark button indicating how many bookmarks the current book has.</li>
+        <li><strong>Highlight count badge</strong> — shows a small number badge on the highlights button indicating how many highlights the current book has.</li>
+      </ul>
+
+      <h4>Classic reader (epub.js)</h4>
+      <p>
+        By default Codexa uses <a href="#cxreader" data-section="cxreader">CXReader</a>, its own
+        purpose-built EPUB engine. Enabling <strong>Classic reader (epub.js)</strong> switches back
+        to the original epub.js library. The book reloads immediately when you toggle this setting.
+        Use this only if you encounter a rendering issue specific to CXReader; most features work
+        better with CXReader off.
+      </p>
 
       <h3 id="reader-text">Text Tab</h3>
       <figure>
@@ -1844,6 +2109,9 @@ data/<br>
             <tr><td>Book title</td><td>Title of the current book</td></tr>
             <tr><td>Book author</td><td>Author of the current book</td></tr>
             <tr><td>Chapter title</td><td>Title of the current chapter</td></tr>
+            <tr><td>Chapter number</td><td>Current spine index and total spine items (e.g. <em>3/24</em>)</td></tr>
+            <tr><td>Battery</td><td>Device battery level as a percentage; icon changes to a charging symbol when plugged in (requires browser Battery Status API)</td></tr>
+            <tr><td>Connection</td><td>Shows <em>Online</em> or <em>Offline</em> depending on network connectivity</td></tr>
           </tbody>
         </table>
       </div>
@@ -1878,7 +2146,13 @@ data/<br>
         If the server position differs from your local position (e.g. you read on another device),
         a <strong>conflict resolution dialog</strong> asks which position to use:
         <em>Stay here</em> or <em>Jump to X%</em>.
-      </p>
+
+      <figure>
+        <img src="../screenshots/reader/sync_zones.png" alt="Tap zones for KOReader Sync">
+        <figcaption>Tap zones for KOReader Sync</figcaption>
+      </figure>
+
+      </p>      
 
       <h2 id="reader-peek">Peek Mode</h2>
       <p>
@@ -1886,6 +2160,256 @@ data/<br>
         <a href="#book-details" data-section="book-details">Book Details</a> dialog) to read
         without saving your position. Useful for reviewing a book without advancing your progress
         tracker.
+      </p>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════ CXReader ══ -->
+    <section id="cxreader">
+      <h1>CXReader Engine</h1>
+      <p class="section-subtitle">Codexa's own custom-built EPUB and comic rendering library</p>
+
+      <p>
+        CXReader is an EPUB reading engine developed entirely within Codexa. It replaces the
+        third-party <strong>epub.js</strong> library that Codexa originally used and is responsible
+        for parsing, rendering, and paginating all books — EPUBs, fixed-layout EPUBs, CBZ, and CBR
+        comics.
+      </p>
+
+      <h2 id="cxreader-why">Why We Built It</h2>
+      <p>
+        epub.js is a mature library, but it has known compatibility issues on older Android
+        WebView versions (notably <strong>Chrome 83</strong>, found on many older e-ink Android devices).
+        On those devices, epub.js's virtual pagination — which relies on <code>translateY</code>
+        transforms and clip-path masking — clips lines at page boundaries and causes
+        <code>fetch()</code> calls to silently hang after a <code>MutationObserver</code>
+        interaction. CXReader was designed from the ground up to avoid these problems.
+      </p>
+      <p>
+        Additionally, epub.js does not support CBZ/CBR comic files at all. Codexa's CBZ and CBR
+        support is built directly into CXReader.
+      </p>
+
+      <h2 id="cxreader-features">What's Improved Over epub.js</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Area</th><th>epub.js</th><th>CXReader</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Pagination engine</strong></td>
+              <td>Virtual pagination using <code>translateY</code> transforms and CSS clip-path — clips lines on some e-ink WebViews</td>
+              <td>Native CSS multi-column layout — the browser fragments content correctly, no clipping</td>
+            </tr>
+            <tr>
+              <td><strong>E-ink compatibility</strong></td>
+              <td>Chrome 83 WebView: <code>fetch()</code> hangs after MutationObserver interactions; requires workarounds</td>
+              <td>Built with legacy WebView quirks in mind; per-path workarounds baked in</td>
+            </tr>
+            <tr>
+              <td><strong>Position restore accuracy</strong></td>
+              <td>Restores to approximate percentage; exact page not saved</td>
+              <td>Saves exact page number per chapter; reopens on the precise page with % fallback if layout changes</td>
+            </tr>
+            <tr>
+              <td><strong>Fixed-layout EPUB</strong></td>
+              <td>Supported via epub.js's own fixed-layout renderer</td>
+              <td>Supported: detects <code>rendition:layout=pre-paginated</code>, scales each spine item to fit the viewport with CSS transform</td>
+            </tr>
+            <tr>
+              <td><strong>Comic books (CBZ/CBR)</strong></td>
+              <td>Not supported</td>
+              <td>Full support: image-only ZIP/RAR archives rendered full-screen with two-page spread on desktop</td>
+            </tr>
+            <tr>
+              <td><strong>Annotation CFI precision</strong></td>
+              <td>Full DOM-range CFIs via epub.js's built-in generator</td>
+              <td>Full DOM-range CFIs via CXReader's own generator/resolver — highlights land on the exact word, not just a text search fallback</td>
+            </tr>
+            <tr>
+              <td><strong>Font reflow</strong></td>
+              <td>Requires full re-render on font swap</td>
+              <td>Detects layout shifts from late-loading fonts and re-measures only when content height changes</td>
+            </tr>
+            <tr>
+              <td><strong>Dependency</strong></td>
+              <td>Third-party npm package</td>
+              <td>Zero external dependencies — all EPUB parsing done client-side with JSZip and the browser's DOMParser</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="cxreader-position">Exact Position Restore</h2>
+      <p>
+        When you turn a page, CXReader saves both the spine index (chapter) and the exact page
+        number within that chapter to <code>localStorage</code>. On reopen, it restores to that
+        precise page.
+      </p>
+      <p>
+        If the layout changes between sessions — for example because you changed the font size or
+        the window was resized — the saved page may be out of range for the new layout. In that
+        case CXReader falls back to the reading percentage, which lands close to the right place.
+        Once you are reading again, the exact page is re-saved for the next open.
+      </p>
+
+      <h2 id="cxreader-fixed">Fixed-layout EPUBs</h2>
+      <p>
+        Fixed-layout EPUBs are books where each spine item (page) has a declared pixel size and
+        precise coordinate-based CSS — typical for <strong>manga</strong>,
+        <strong>children's picture books</strong>, <strong>art books</strong>, and
+        <strong>graphic novels in EPUB format</strong>. Standard reflowable rendering completely
+        breaks these.
+      </p>
+      <p>
+        CXReader detects fixed-layout books via the <code>rendition:layout = pre-paginated</code>
+        OPF metadata tag. When detected:
+      </p>
+      <ul>
+        <li>Each spine item is rendered in an iframe at its declared pixel dimensions (e.g. 1200 × 1600 px).</li>
+        <li>The iframe is scaled with CSS <code>transform: scale()</code> to fit the viewport — centred horizontally and vertically.</li>
+        <li>The reader's own CSS (fonts, margins, column layout) is <em>not</em> injected so the book's precise styling is preserved.</li>
+        <li>Every page advance moves to the next spine item — one item equals one page.</li>
+        <li>Reflowable EPUBs are completely unaffected.</li>
+      </ul>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════ Comics ════ -->
+    <section id="comics">
+      <h1>Comic Books</h1>
+      <p class="section-subtitle">Read CBZ and CBR comic files alongside your EPUB library</p>
+
+      <p>
+        Codexa supports the two most common digital comic formats. They appear in your library
+        exactly like books and can be downloaded for offline reading, organised into shelves, and
+        imported from OPDS servers.
+      </p>
+
+      <h2 id="comics-formats">Formats</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Format</th><th>Extension</th><th>Container</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>CBZ</strong></td>
+              <td><code>.cbz</code></td>
+              <td>ZIP archive of images</td>
+              <td>Preferred format — stored directly on the server</td>
+            </tr>
+            <tr>
+              <td><strong>CBR</strong></td>
+              <td><code>.cbr</code></td>
+              <td>RAR archive of images</td>
+              <td>Automatically converted to CBZ on the server at upload or import time. The original RAR is never stored.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Both formats are detected by their file signature (magic bytes), not just the file
+        extension — so files with an incorrect extension are still handled correctly.
+      </p>
+      <p>
+        Supported image types inside the archive: JPEG, PNG, WebP, GIF, AVIF. Images are sorted
+        by filename using natural (numeric) ordering, so <code>page10.jpg</code> sorts after
+        <code>page9.jpg</code>.
+      </p>
+
+      <h2 id="comics-upload">Uploading &amp; Importing</h2>
+      <h3>Direct Upload</h3>
+      <p>
+        Use the <strong>Upload</strong> button (&#8679;) in the library toolbar and select
+        <code>.cbz</code> or <code>.cbr</code> files. Multiple files can be uploaded at once.
+        CBR files are converted to CBZ automatically before being stored — you always get a CBZ
+        in the library.
+      </p>
+
+      <h3>From OPDS</h3>
+      <p>
+        Navigate to a comic in the <a href="#opds" data-section="opds">Online Library</a> and
+        click <strong>Add to library</strong>. Codexa downloads the file, detects CBR by its
+        RAR signature even if the server reports the wrong content-type, and converts it to CBZ
+        if needed. Folder sync works the same way — an entire OPDS comic folder can be synced to
+        a shelf in one action.
+      </p>
+
+      <h2 id="comics-reading">Reading Comics</h2>
+      <p>
+        Open a comic the same way as any book. CXReader detects the CBZ format automatically and
+        switches to image-display mode.
+      </p>
+
+      <h3>Single-Page Mode</h3>
+      <p>
+        By default one page is shown at a time, filling the reading area. Navigation works
+        identically to books: tap/click the right half for the next page, left half for the
+        previous page, or swipe left/right on touch screens.
+      </p>
+
+      <h3>Two-Page Spread (Desktop)</h3>
+      <p>
+        When <strong>Two pages</strong> layout is selected in Reader Settings → Page, two
+        consecutive comic pages are shown side by side — just like a physical comic book spread.
+        Each navigation step advances by two pages and always stays aligned to even-numbered
+        boundaries (0+1, 2+3, 4+5, …) so spreads never get out of sync.
+      </p>
+
+      <h3>Background Colour</h3>
+      <p>
+        The background behind the image uses the same colour as the selected reader theme.
+        In the default Light theme this is white; in Dark or Midnight themes it is dark/black.
+        Switch to any theme you prefer — the comic background follows automatically.
+      </p>
+
+      <h3>Download Progress</h3>
+      <p>
+        Comic files are large. While downloading, Codexa shows the actual download percentage
+        (<em>Downloading file… 45%</em>) instead of an animated ellipsis. On e-ink mode,
+        the percentage updates at wider intervals (every 10%) to reduce screen refreshes.
+      </p>
+
+      <h3>What's Not Available for Comics</h3>
+      <p>
+        Because comic pages are images, the following text-based features are hidden when reading
+        a comic:
+      </p>
+      <ul>
+        <li>In-book text search</li>
+        <li>Highlights &amp; annotations</li>
+        <li>Dictionary lookup</li>
+        <li>Bionic reading</li>
+        <li>Font and text settings</li>
+      </ul>
+      <p>
+        Bookmarks, reading progress, offline download, shelves, and KOReader sync all work
+        normally.
+      </p>
+
+      <h2 id="comics-metadata">Metadata (ComicInfo.xml)</h2>
+      <p>
+        CBZ files can include a <code>ComicInfo.xml</code> file at the root of the archive. This
+        is a widely-supported standard used by comic management tools such as Mylar3, ComicTagger,
+        and Komga. Codexa reads the following fields from it:
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ComicInfo.xml tag</th><th>Codexa field</th></tr></thead>
+          <tbody>
+            <tr><td><code>Title</code></td><td>Book title</td></tr>
+            <tr><td><code>Series</code></td><td>Series name</td></tr>
+            <tr><td><code>Number</code></td><td>Series number (issue/volume)</td></tr>
+            <tr><td><code>Summary</code></td><td>Description</td></tr>
+            <tr><td><code>Writer</code> + <code>Penciller</code></td><td>Author (combined)</td></tr>
+            <tr><td><code>Genre</code></td><td>Genre tags</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        The metadata is extracted both at upload time (server-side) and when the comic is opened
+        in the reader (client-side). If <code>ComicInfo.xml</code> is absent, the archive
+        filename is used as the title.
       </p>
 
       <a class="back-top" href="#about">&#8593; Top</a>

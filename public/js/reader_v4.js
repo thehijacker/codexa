@@ -1,10 +1,11 @@
-import { apiFetch, requireAuth, getToken } from './api.js';
+﻿import { apiFetch, requireAuth, getToken } from './api.js';
 import { toast } from './ui.js';
 import { t, initI18n, applyTranslations, getCurrentLang } from './i18n.js';
 import ePub from './flow/index.js';
 import { isBookDownloaded, downloadBook, fetchOfflineBookFile, getBookMeta, saveBookMeta } from './offline.js';
+import { queueProgress, clearProgress, flushProgressOutbox } from './progress-outbox.js';
 
-const READER_BUILD = 'br-v82';
+const READER_BUILD = 'br-v84';
 const _i18nReady = initI18n();
 console.log('[codexa] reader build', READER_BUILD);
 
@@ -266,6 +267,8 @@ const DEFAULT_PREFS = {
   headerBtnSync:         true,  // show manual sync button in header
   headerBtnSleepTimer:   true,  // show sleep timer button in header
   headerBtnFullscreen:   true,  // show fullscreen button in header
+  bookmarkBadge:         true,  // show count badge on bookmark button
+  annotationBadge:       true,  // show count badge on annotations button
   floatNavBtn:           false, // floating one-handed nav button
   floatNavBtnPos:        null,  // { xPct, yPct } saved position; null = default right-center
   floatNavBtnOpacity:    70,    // 10-100, button opacity %
@@ -303,6 +306,7 @@ let deferredNextPending  = false; // true while a mid-repagination NEXT is defer
 let _autoAdvancePending  = false; // true while a stuck-page auto-advance is in flight
 let isReady = false;          // true only after initial position is fully displayed
 let openCfi = '';             // CFI at the moment the book was first ready — used to skip no-op kosync pushes
+let openPct = 0;             // percentage at the moment the book was first ready — detects within-chapter movement for close push
 let tocFlatItems = [];
 let customFonts  = [];
 let fontFaceCSS  = '';
@@ -432,6 +436,7 @@ const fullscreenBtn   = document.getElementById('btn-fullscreen');
 const bookmarksSidebar = document.getElementById('bookmarks-sidebar');
 const bookmarksListEl  = document.getElementById('bookmarks-list');
 const bookmarksBadge   = document.getElementById('bookmarks-badge');
+const annotationsBadge = document.getElementById('annotations-badge');
 const bookmarkBackBtn    = document.getElementById('btn-bookmark-back');
 const bookmarkAcceptBtn  = document.getElementById('btn-bookmark-accept');
 const annotationBackBtn  = document.getElementById('btn-annotation-back');
@@ -466,7 +471,13 @@ function loadPrefs() {
       statusBar: {
         ...DEFAULT_STATUS_BAR,
         ...sb,
-        positions:       { ...DEFAULT_STATUS_BAR.positions,       ...sb.positions },
+        positions:       {
+          ...DEFAULT_STATUS_BAR.positions,
+          // On mobile with no saved br slot, show battery + connection by default.
+          ...(!('br' in (sb.positions || {})) && window.matchMedia('(max-width: 640px)').matches
+              ? { br: ['battery', 'online'] } : {}),
+          ...sb.positions,
+        },
         showIcons:       { ...DEFAULT_STATUS_BAR.showIcons,       ...sb.showIcons },
         bookProgressBar: { ...DEFAULT_STATUS_BAR.bookProgressBar, ...sb.bookProgressBar },
         chapProgressBar: { ...DEFAULT_STATUS_BAR.chapProgressBar, ...sb.chapProgressBar },
@@ -929,6 +940,16 @@ img     { filter: grayscale(100%) !important; }
 `;
 }
 
+// `:where()` (zero-specificity) is Chrome 88+. Older WebViews drop the whole rule as
+// invalid, so the paragraph-margin reset vanishes and browsers fall back to the UA
+// default 1em <p> margins (extra space even at paraSpacing 0). Detect support and emit
+// a plain `p` reset there instead. `selector(:where(a))` reliably reports false on every
+// engine that lacks :where (the selector() condition itself predates :where).
+const _supportsWhere = (() => {
+  try { return !!(window.CSS && CSS.supports && CSS.supports('selector(:where(a))')); }
+  catch { return false; }
+})();
+
 function buildEpubCss() {
   const theme = prefs.theme === 'custom'
     ? { bg: prefs.customBg || '#000000', text: prefs.customText || '#c8b89a', link: prefs.customText || '#c8b89a' }
@@ -966,9 +987,25 @@ body {
   word-wrap:      break-word !important;
   box-sizing:     border-box !important;
 }
+/* Clear horizontal spacing from book-defined content wrappers (e.g. <div class="body">).
+   Reader margin is applied via body padding and must be the sole source of side spacing. */
+body > div, body > section, body > article {
+  padding-left:  0 !important;
+  padding-right: 0 !important;
+  margin-left:   0 !important;
+  margin-right:  0 !important;
+  max-width:     100% !important;
+  box-sizing:    border-box !important;
+}
 /* Always enforce theme color on all text — overrides any per-element book CSS */
 body * { color: ${theme.text} !important; }
 a, a * { color: ${theme.link} !important; }
+/* Zero-specificity fallback: prevents browser-default 1em paragraph margins when a book's
+   chapter has no stylesheet (empty <head/>). :where() loses to any author rule, so any book
+   CSS like "p { margin: 2px }" still wins. */
+${_supportsWhere
+  ? ':where(p) { margin-top: 0; margin-bottom: 0.3em; }'
+  : 'p { margin-top: 0; margin-bottom: 0.3em; }'}
 ${fontOverrides}
 img {
   max-width:   100% !important;
@@ -984,7 +1021,7 @@ img {
 figure { background: transparent !important; background-color: transparent !important; }
 ${prefs.eink ? buildEinkCss(theme) : ''}
 ${prefs.paraIndent ? `p { text-indent: ${(prefs.paraIndentSize / 10).toFixed(1)}em !important; }` : 'p { text-indent: 0 !important; }'}
-${prefs.paraSpacing > 0 ? `p { margin-bottom: ${(prefs.paraSpacing / 10).toFixed(1)}em !important; }` : ''}
+p { margin-top: 0 !important; margin-bottom: ${(prefs.paraSpacing / 10).toFixed(1)}em !important; }
 ${prefs.letterSpacing > 0 ? `body, p, li, td, th, span { letter-spacing: ${(prefs.letterSpacing / 10).toFixed(1)}px !important; }` : ''}
 ${prefs.disableJustify
   ? 'body, p, li, td, th, blockquote { text-align: left !important; }'
@@ -1291,8 +1328,14 @@ function applyUiTheme() {
     document.documentElement.style.setProperty('--color-accent-dark', ui.accentDark);
     // document.documentElement.style.setProperty('--shadow',            ui.shadow);
     // --shadow is controlled by applyPageShadow() to respect the spine-shadow toggle
-    // Header: translucent glass tinted to the page colour
-    const headerBg    = hexToRgba(theme.bg,   0.6);
+    // Header: translucent glass tinted to the page colour. The frosted effect needs
+    // backdrop-filter (Chrome 76+); on older WebViews that lack it a translucent
+    // header just lets the status bar / page text bleed through, so fall back to a
+    // fully opaque header there.
+    const headerAlpha = (window.CSS && CSS.supports &&
+      (CSS.supports('backdrop-filter', 'blur(2px)') ||
+       CSS.supports('-webkit-backdrop-filter', 'blur(2px)'))) ? 0.6 : 1;
+    const headerBg    = hexToRgba(theme.bg,   headerAlpha);
     const headerBdr   = hexToRgba(theme.text, 0.12);
     const headerMuted = hexToRgba(theme.text, 0.55);
     document.documentElement.style.setProperty('--reader-header-bg',          headerBg);
@@ -1633,7 +1676,27 @@ function _sanitizeFootnoteHtml(el) {
 
 async function showFootnotePopup(fragId, crossDocHref) {
   let targetEl = null;
-  if (!crossDocHref) {
+  if (prefs.experimentalReader && _cxReader) {
+    if (!crossDocHref) {
+      // Same-doc: element is already in the rendered iframe
+      targetEl = _cxReader._renderer?.iframe?.contentDocument?.getElementById(fragId) ?? null;
+    } else {
+      // Cross-doc: find spine item by href and fetch its content via blob URL
+      const crossPath = crossDocHref.split('#')[0];
+      const crossFile = crossPath.split('/').pop();
+      const spineItem = _cxReader._book?.spine?.find(s => {
+        const sh = (s.absPath || s.href || '').split('#')[0];
+        return sh === crossPath || sh.split('/').pop() === crossFile;
+      });
+      if (spineItem?.blobUrl) {
+        try {
+          const html = await fetch(spineItem.blobUrl).then(r => r.text());
+          const doc  = new DOMParser().parseFromString(html, 'text/html');
+          targetEl   = doc.getElementById(fragId) ?? null;
+        } catch { targetEl = null; }
+      }
+    }
+  } else if (!crossDocHref) {
     const view = rendition?.manager?.views?.first?.();
     targetEl = view?.document?.getElementById(fragId) ?? null;
   } else {
@@ -1862,12 +1925,14 @@ function scheduleClearPressHighlight() {
 // When locations are ready, always prefer seekToPercentage — rendition.display(cfi)
 // silently fails to reach the correct page in spread/paginated mode (error stays inside
 // epub.js's rAF queue, so the catch block never fires).
-async function navigateToCfi(cfi) {
+async function navigateToCfi(cfi, annotationId = null) {
   if (prefs.experimentalReader && _cxReader) {
     await _cxReader.goToCfi(cfi);
-    // After chapter renders, scroll to the specific annotation page if there is one
-    const ann = annotationsCache.find(a => a.cfi === cfi);
-    if (ann) _cxReader.scrollToAnnotation(ann.id);
+    // Scroll to specific annotation mark. Prefer the explicit annotationId (avoids wrong-mark
+    // when multiple annotations in the same chapter share a spine-level CFI), fall back to
+    // CFI-match for epub.js annotations that have real range CFIs.
+    const targetId = annotationId ?? annotationsCache.find(a => a.cfi === cfi)?.id;
+    if (targetId != null) _cxReader.scrollToAnnotation(targetId);
     return;
   }
   const startCfi = cfiRangeToStart(cfi);
@@ -1971,10 +2036,11 @@ function reapplyAnnotations() {
   if (prefs.experimentalReader && _cxReader) {
     const iframe = _cxReader.iframe;
     if (iframe?.contentDocument) {
+      const _raDoc = iframe.contentDocument;
       injectAnnotationsIntoContents({
-        document: iframe.contentDocument,
+        document: _raDoc,
         sectionIndex: _cxReader.spineIdx,
-        range: () => null,
+        range: (cfi) => _cxRangeFromCfi(cfi, _raDoc),
       });
     }
     return;
@@ -2104,6 +2170,7 @@ async function loadAnnotations(bookId) {
 }
 
 function renderAnnotationList() {
+  updateAnnotationBadge();
   const listEl = document.getElementById('annotations-list');
   if (!listEl) return;
   if (!annotationsCache.length) {
@@ -2137,7 +2204,7 @@ function renderAnnotationList() {
         annotationAcceptBtn.style.display = '';
       }
       closePanels();
-      navigateToCfi(a.cfi);
+      navigateToCfi(a.cfi, a.id);
     });
     item.querySelector('.annotation-delete-btn').addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -2199,7 +2266,7 @@ function averageChapPages() {
 
 // Estimated book pages
 function estimateBookTotal() {
-  const len = book?.spine?.spineItems?.length || book?.spine?.length || 1;
+  const len = book?.spine?.spineItems?.length || book?.spine?.length || _cxReader?.spine?.length || 1;
   let total = 0;
   for (let i = 0; i < len; i++) total += chapPageCache[i] || averageChapPages();
   return Math.max(1, total);
@@ -2227,18 +2294,30 @@ function computeStatValue(id) {
       const bp = estimateBookPage(), bt = estimateBookTotal();
       return bp > 0 ? bp + '/' + bt : '';
     }
-    case 'pagesLeftChap':
-      return currentChapTotal > 0 ? String(Math.max(0, currentChapTotal - currentChapPage)) : '';
-    case 'pagesLeftBook':
-      return String(estimateBookPagesLeft());
+    case 'pagesLeftChap': {
+      if (currentChapTotal <= 0) return '';
+      // In two-page mode the last spread can be a single left-only page (endPage===0).
+      // Add 1 so it shows "1 left" rather than 0 — consistent with full spreads where
+      // the visible right page is included in the count.
+      const _tpBonus = currentIsTwoPage && currentEndPage === 0 ? 1 : 0;
+      return String(Math.max(0, currentChapTotal - currentChapPage + _tpBonus));
+    }
+    case 'pagesLeftBook': {
+      const _tpBonus = currentIsTwoPage && currentEndPage === 0 ? 1 : 0;
+      return String(Math.max(0, estimateBookPagesLeft() + _tpBonus));
+    }
     case 'pctChapter':
       return currentChapTotal > 0 ? Math.round((currentChapPage / currentChapTotal) * 100) + '%' : '';
     case 'pctBook':
       return Math.round(currentPct * 100) + '%';
-    case 'timeLeftChap':
-      return formatEta(Math.max(0, currentChapTotal - currentChapPage));
-    case 'timeLeftBook':
-      return formatEta(estimateBookPagesLeft());
+    case 'timeLeftChap': {
+      const _tpBonus = currentIsTwoPage && currentEndPage === 0 ? 1 : 0;
+      return formatEta(Math.max(0, currentChapTotal - currentChapPage + _tpBonus));
+    }
+    case 'timeLeftBook': {
+      const _tpBonus = currentIsTwoPage && currentEndPage === 0 ? 1 : 0;
+      return formatEta(Math.max(0, estimateBookPagesLeft() + _tpBonus));
+    }
     case 'currentTime': {
       const now = new Date();
       if (prefs.statusBar?.clockFormat === '12h') {
@@ -2253,7 +2332,7 @@ function computeStatValue(id) {
     case 'chapterTitle':
       return chapterLabelFromHref(currentHref);
     case 'chapterNum': {
-      const spineTotal = book?.spine?.spineItems?.length || book?.spine?.length || 0;
+      const spineTotal = book?.spine?.spineItems?.length || book?.spine?.length || _cxReader?.spine?.length || 0;
       return spineTotal ? (currentSpineIndex + 1) + '/' + spineTotal : '';
     }
     case 'series': {
@@ -2550,8 +2629,9 @@ function applyHeaderBtnVisibility() {
     if (el) el.style.display = visible ? '' : 'none';
   };
   const hasAnnotations = annotationsCache.length > 0;
-  set('btn-annotations',  prefs.headerBtnAnnotations || hasAnnotations);
-  set('btn-search',       prefs.headerBtnSearch);
+  const isCbz = !!_cxReader?._isCbz;
+  set('btn-annotations',  !isCbz && (prefs.headerBtnAnnotations || hasAnnotations));
+  set('btn-search',       !isCbz && prefs.headerBtnSearch);
   set('btn-jump-pct',     prefs.headerBtnPercentage);
   set('btn-sync',         prefs.headerBtnSync);
   set('btn-sleep-timer',  prefs.headerBtnSleepTimer);
@@ -3576,13 +3656,22 @@ function updateDictButtonVisibility() {
 async function renderDictSettings() {
   const container = document.getElementById('dict-settings-list');
   if (!container) return;
-  // Fetch dicts and server prefs in parallel; server prefs may have dictionaryMeta
-  // updated from the Settings page (which doesn't write to localStorage).
+  // Fetch dicts and server prefs in parallel. Server prefs may have dictionaryMeta
+  // updated from the Settings page (which doesn't write to localStorage). If localStorage
+  // was cleared, dictionaries/dictionaryOrder are also restored here from the server copy.
   const [dicts] = await Promise.all([
     loadAvailableDicts(),
     apiFetch('/settings').then(s => {
       const sp = typeof s.reader_prefs === 'string' ? JSON.parse(s.reader_prefs) : (s.reader_prefs || {});
       if (sp.dictionaryMeta) prefs.dictionaryMeta = sp.dictionaryMeta;
+      // Restore dict selection/order from server when local prefs are at default values
+      // (both empty arrays = fresh localStorage; prefs.dictionaries===null means "all disabled" and is intentional)
+      const _localAtDefault = Array.isArray(prefs.dictionaries) && prefs.dictionaries.length === 0
+                            && Array.isArray(prefs.dictionaryOrder) && prefs.dictionaryOrder.length === 0;
+      if (_localAtDefault) {
+        if (sp.dictionaryOrder?.length) prefs.dictionaryOrder = sp.dictionaryOrder;
+        if (sp.dictionaries !== undefined) prefs.dictionaries = sp.dictionaries;
+      }
     }).catch(() => {}),
   ]);
   if (!dicts.length) {
@@ -3764,14 +3853,10 @@ async function showDictPopup(word) {
 }
 
 function closeDictPopup() {
+  // Schedule selection clear after WORD_HIGHLIGHT_LINGER_MS so the selected word stays
+  // visible briefly after the popup closes — clearPressHighlight() removes any <mark>
+  // press-highlight and calls removeAllRanges() on the iframe window.
   scheduleClearPressHighlight();
-  // Clear text selection so highlighted word is removed after dictionary closes.
-  try { window.getSelection?.()?.removeAllRanges?.(); } catch { /* ignore */ }
-  try {
-    rendition?.getContents?.().forEach(c => {
-      try { c.window?.getSelection?.()?.removeAllRanges?.(); } catch { /* ignore */ }
-    });
-  } catch { /* ignore */ }
   const dictPopup = document.getElementById('dict-popup');
   if (dictPopup?.contains(document.activeElement)) document.activeElement.blur();
   dictPopup?.classList.remove('open');
@@ -4041,12 +4126,16 @@ function syncSettingsUi() {
   const hbsy = document.getElementById('header-btn-sync-toggle');
   const hbst = document.getElementById('header-btn-sleep-timer-toggle');
   const hbf = document.getElementById('header-btn-fullscreen-toggle');
+  const hbbb = document.getElementById('header-btn-bookmark-badge-toggle');
+  const hbab = document.getElementById('header-btn-annotation-badge-toggle');
   if (hba)  hba.checked  = prefs.headerBtnAnnotations;
   if (hbs)  hbs.checked  = prefs.headerBtnSearch;
   if (hbp)  hbp.checked  = prefs.headerBtnPercentage;
   if (hbsy) hbsy.checked = prefs.headerBtnSync;
   if (hbst) hbst.checked = prefs.headerBtnSleepTimer;
   if (hbf)  hbf.checked  = prefs.headerBtnFullscreen;
+  if (hbbb) hbbb.checked = prefs.bookmarkBadge;
+  if (hbab) hbab.checked = prefs.annotationBadge;
   syncStatusBarSettings();
 }
 
@@ -4654,6 +4743,16 @@ function initSettingsUi() {
     });
   });
 
+  // Count badge toggles
+  document.getElementById('header-btn-bookmark-badge-toggle')?.addEventListener('change', (e) => {
+    prefs.bookmarkBadge = e.target.checked;
+    updateBookmarkBadge(); persistPrefs();
+  });
+  document.getElementById('header-btn-annotation-badge-toggle')?.addEventListener('change', (e) => {
+    prefs.annotationBadge = e.target.checked;
+    updateAnnotationBadge(); persistPrefs();
+  });
+
   // Dictionary popup close
   document.getElementById('dict-popup-close').addEventListener('click', closeDictPopup);
   document.getElementById('dict-backdrop').addEventListener('click', closeDictPopup);
@@ -5088,8 +5187,8 @@ function startPeriodicSync() {
   stopPeriodicSync();
   syncIntervalTimer = setInterval(() => {
     if (!isReady || !currentBook) return;
-    console.log('[kosync] periodic sync (4 min)');
-    void saveProgress({ forceRemote: true, inSession: true });
+    console.log('[kosync] periodic local save (4 min)');
+    void saveProgress({ allowRemote: false });
   }, SYNC_INTERVAL_MS);
 }
 
@@ -5099,8 +5198,8 @@ function scheduleDebouncedSync() {
   syncDebounceTimer = setTimeout(() => {
     syncDebounceTimer = null;
     if (!isReady || !currentBook) return;
-    console.log('[kosync] debounced sync (60s inactivity)');
-    void saveProgress({ forceRemote: true, inSession: true });
+    console.log('[kosync] debounced local save (60s inactivity)');
+    void saveProgress({ allowRemote: false });
   }, SYNC_DEBOUNCE_MS);
 }
 
@@ -5139,7 +5238,12 @@ async function saveProgress({ forceRemote = false, allowRemote = true, inSession
         const cachePayload = { cfi_position: cfi, percentage: pct, device: 'Codexa' };
         try { localStorage.setItem(`br_progress_${currentBook.file_hash}`, JSON.stringify(cachePayload)); } catch { /* ignore */ }
       }
-    }).catch(() => {}),
+      // Online save reached the server — drop any queued offline position for this book.
+      clearProgress(currentBook.id);
+    }).catch(() => {
+      // Offline / unreachable — queue this position so it syncs (incl. KOSync) on reconnect.
+      if (pct > 0) queueProgress({ bookId: currentBook.id, fileHash: currentBook.file_hash, cfi, pct, xpointer: koReaderXPointer() });
+    }),
   ];
   if (shouldPushKosync) {
     saves.push(pushRemoteProgress(docKey, koReaderXPointer(), pct));
@@ -5169,14 +5273,22 @@ function saveProgressBackground({ inSession = false } = {}) {
   const docKey = externalDocKey();
   const xp     = koReaderXPointer();
   const posChanged    = cfi !== openCfi;
-  const alreadySynced = cfi !== '' && cfi === lastSyncedCfi;
+  // CXReader CFIs are chapter-level only, so posChanged misses within-chapter movement.
+  // Track pct change from open to catch the case where the user read pages within the same chapter.
+  const pctChanged    = Math.abs(pct - openPct) > 0.001;
   // force:true only when position changed — prevents an open-then-tab-close from
   // overwriting the server's good value with the imprecise CFI-display starting page.
-  fetch(`/api/progress/${currentBook.file_hash}`, opts({ cfi_position: cfi, percentage: pct, device: 'Codexa', ...(posChanged ? { force: true } : {}) })).catch(() => {});
+  fetch(`/api/progress/${currentBook.file_hash}`, opts({ cfi_position: cfi, percentage: pct, device: 'Codexa', ...((posChanged || pctChanged) ? { force: true } : {}) })).catch(() => {});
   if (pct > 0) {
     try { localStorage.setItem(`br_progress_${currentBook.file_hash}`, JSON.stringify({ cfi_position: cfi, percentage: pct, device: 'Codexa' })); } catch { /* ignore */ }
+    // Close path uses keepalive fetch whose success can't be observed on unload.
+    // Queue the position unconditionally; the flush is idempotent (skips/clears
+    // entries the server already has) so an online close self-heals on next flush.
+    queueProgress({ bookId: currentBook.id, fileHash: currentBook.file_hash, cfi, pct, xpointer: xp });
   }
-  if (!alreadySynced && pct > 0 && (inSession || !prefs.skipSaveOnClose) && (posChanged || inSession) && pct >= bestKnownRemotePct - 0.005) {
+  // Push to KOSync on close whenever position moved (chapter changed OR within-chapter pct changed).
+  // Periodic/debounced saves intentionally skip KOSync; close is the designated sync point.
+  if (pct > 0 && !prefs.skipSaveOnClose && (posChanged || pctChanged) && pct >= bestKnownRemotePct - 0.005) {
     fetch(`/api/kosync/remote/${encodeURIComponent(docKey)}`,   opts({ document: docKey, progress: xp, percentage: pct, device: 'Codexa', device_id: 'codexa-web' })).catch(() => {});
     fetch(`/api/kosync/internal/${encodeURIComponent(docKey)}`, opts({ progress: xp, percentage: pct, device: 'Codexa', device_id: 'codexa-web' })).catch(() => {});
     if (pct > bestKnownRemotePct) bestKnownRemotePct = pct;
@@ -5343,6 +5455,8 @@ async function networkRestoreSync() {
 window.__codexaNetworkRestore = networkRestoreSync;
 
 window.addEventListener('online', () => {
+  // Flush any offline reading progress (this book or others) to server + KOSync.
+  flushProgressOutbox().catch(() => {});
   if (!currentBook) return;
   syncOfflineBookmarks(currentBook.id).catch(() => {});
   syncOfflineAnnotations(currentBook.id).catch(() => {});
@@ -5370,6 +5484,7 @@ function _cxSyncLayout() {
 }
 
 function _cxRelocatedHandler(e) {
+  const oldSpineIndex = currentSpineIndex;
   const { spineIndex, href, page, pageCount, endPage, twoColumn } = e.detail;
   currentSpineIndex = spineIndex;
   currentHref       = href;
@@ -5380,6 +5495,12 @@ function _cxRelocatedHandler(e) {
   currentCfi = _cxReader?.makeCfi() || '';
   currentPct = _cxReader?.makePct() || 0;
   if (currentPct > 0) lastKnownGoodPct = currentPct;
+  if (currentBook) {
+    try {
+      localStorage.setItem(`br_cx_page_${currentBook.id}`,
+        JSON.stringify({ spineIdx: spineIndex, page }));
+    } catch { /* quota */ }
+  }
   // Feed the chapter page-count cache so bookPage / timeLeftBook estimates improve over time
   if (pageCount > 0) chapPageCache[spineIndex] = pageCount;
   console.log(`[CXReader] relocated spine=${spineIndex} page=${page}/${pageCount} pct=${(currentPct*100).toFixed(1)}%`);
@@ -5392,17 +5513,36 @@ function _cxRelocatedHandler(e) {
     _cxViewerPaddingSet = true;
     _cxMeasureViewerInset();
     if (_cxViewerPadTop > 0 || _cxViewerPadBot > 0) {
-      _cxReader.reinitPaginator();
-      // Re-sync ALL page vars (not just the total) from the inset-corrected paginator, and
-      // refresh the cache, so the very first page shows the right page/total immediately.
-      currentChapPage  = _cxReader.page;
-      currentEndPage   = _cxReader.endPage;
-      currentChapTotal = _cxReader.pageCount;
-      if (currentChapTotal > 0) chapPageCache[spineIndex] = currentChapTotal;
-      renderStatusSlots();
+      if (_cxReader._isCbz) {
+        _cxReader.setCbzInset(_cxViewerPadTop, _cxViewerPadBot);
+      } else {
+        _cxReader.reinitPaginator();
+        // Re-sync ALL page vars (not just the total) from the inset-corrected paginator, and
+        // refresh the cache, so the very first page shows the right page/total immediately.
+        currentChapPage  = _cxReader.page;
+        currentEndPage   = _cxReader.endPage;
+        currentChapTotal = _cxReader.pageCount;
+        if (currentChapTotal > 0) chapPageCache[spineIndex] = currentChapTotal;
+        renderStatusSlots();
+      }
     }
   }
-  if (isReady && currentPct > 0) saveProgress(currentCfi, currentPct);
+  if (isReady) {
+    const crossedChapter = oldSpineIndex !== null && spineIndex !== oldSpineIndex;
+    if (crossedChapter) {
+      // Chapter boundary — mirror epub.js: force remote push, log visit, reset debounce.
+      const alreadySent = href === lastSentChapterHref;
+      const bookmarkPending = !!preBookmarkCfi;
+      saveProgress({ forceRemote: !alreadySent && !bookmarkPending, allowRemote: !alreadySent && !bookmarkPending });
+      cancelDebouncedSync();
+      writeInterruptedSession();
+      if (currentBook) logChapterVisit(currentBook.id, href, chapterLabelFromHref(href));
+      if (!alreadySent && !bookmarkPending) lastSentChapterHref = href;
+    } else if (currentPct > 0) {
+      // Within-chapter page turn — debounce remote push (matches epub.js pattern).
+      scheduleDebouncedSync();
+    }
+  }
   _attachCxKbd(_cxReader?.iframe);
   _attachCxDict(_cxReader?.iframe);
   _attachCxTouchNav(_cxReader?.iframe);
@@ -5427,23 +5567,151 @@ function _attachCxKbd(iframe) {
   }, { passive: true });
 }
 
-// Returns a spine-level CFI for the current CXReader chapter.
-// Used as cfiFromRange() shim — enough for annotation routing; text search finds the exact position.
+// Returns a spine-level CFI for the current CXReader chapter (fallback when range is unavailable).
 function _cxMakeCfi() {
   const n = ((_cxReader?.spineIdx ?? 0) + 1) * 2;
   return `epubcfi(/6/${n}!/4/2/1:0)`;
+}
+
+// Walk from node to documentElement, building the CFI step path (e.g. "/4/2/1").
+// Elements get even steps (2, 4, …); text nodes get odd steps (1, 3, …).
+function _cxCfiNodePath(node, doc) {
+  const parts = [];
+  let cur = node;
+  while (cur && cur !== doc.documentElement) {
+    const parent = cur.parentNode;
+    if (!parent) break;
+    let eIdx = 0, tIdx = 0, pos;
+    for (const child of parent.childNodes) {
+      if (child.nodeType === Node.ELEMENT_NODE)      eIdx += 2;
+      else if (child.nodeType === Node.TEXT_NODE) tIdx = tIdx === 0 ? 1 : tIdx + 2;
+      if (child === cur) { pos = child.nodeType === Node.ELEMENT_NODE ? eIdx : tIdx; break; }
+    }
+    if (pos !== undefined) parts.unshift('/' + pos);
+    cur = parent;
+  }
+  return parts.join('');
+}
+
+// Build a real range CFI from a DOM selection range — used when creating CXReader annotations.
+function _cxCfiFromRange(range) {
+  if (!range || !_cxReader) return _cxMakeCfi();
+  try {
+    const spineN = (_cxReader.spineIdx + 1) * 2;
+    const doc = range.startContainer.ownerDocument;
+    const startPath = _cxCfiNodePath(range.startContainer, doc) + ':' + range.startOffset;
+    const endPath   = _cxCfiNodePath(range.endContainer,   doc) + ':' + range.endOffset;
+    return `epubcfi(/6/${spineN}!${startPath},${endPath})`;
+  } catch {
+    return _cxMakeCfi();
+  }
+}
+
+// Resolve a range CFI produced by _cxCfiFromRange back to a DOM Range.
+function _cxRangeFromCfi(cfi, doc) {
+  if (!cfi || !doc) return null;
+  try {
+    const inner = cfi.replace(/^epubcfi\(/, '').replace(/\)$/, '');
+    const bang = inner.indexOf('!');
+    if (bang < 0) return null;
+    const docPart = inner.slice(bang + 1);
+    const comma = docPart.indexOf(',');
+    if (comma < 0) return null;
+    const startStr = docPart.slice(0, comma);
+    const endStr   = docPart.slice(comma + 1);
+
+    function resolveStep(pathStr, root) {
+      const colon = pathStr.lastIndexOf(':');
+      const offset = colon >= 0 ? parseInt(pathStr.slice(colon + 1), 10) : 0;
+      const navStr = colon >= 0 ? pathStr.slice(0, colon) : pathStr;
+      const steps = navStr.split('/').filter(Boolean).map(Number);
+      let cur = root;
+      for (const n of steps) {
+        let eIdx = 0, tIdx = 0, found = false;
+        for (const child of cur.childNodes) {
+          if (child.nodeType === Node.ELEMENT_NODE)      eIdx += 2;
+          else if (child.nodeType === Node.TEXT_NODE) tIdx = tIdx === 0 ? 1 : tIdx + 2;
+          const childPos = child.nodeType === Node.ELEMENT_NODE ? eIdx : tIdx;
+          if (childPos === n) { cur = child; found = true; break; }
+        }
+        if (!found) return null;
+      }
+      return { node: cur, offset };
+    }
+
+    const root  = doc.documentElement;
+    const start = resolveStep(startStr, root);
+    const end   = resolveStep(endStr,   root);
+    if (!start || !end) return null;
+    const r = doc.createRange();
+    r.setStart(start.node, start.offset);
+    r.setEnd(end.node, end.offset);
+    return r;
+  } catch {
+    return null;
+  }
 }
 
 // Called from CXReader.onBeforePaginate — injects bionic/annotations BEFORE paginator
 // measures scrollHeight so that DOM changes from bionic wrapping are already in place.
 function _cxApplyHooks(iframe) {
   if (!iframe?.contentDocument) return;
+  const _ahDoc = iframe.contentDocument;
+
+  // Mark whitespace-only <p> elements with data-br-blank so the compactBlankLines CSS rule
+  // can hide them. CSS p:empty only matches truly childless elements; many EPUBs use spacer
+  // paragraphs containing only whitespace/&nbsp;/<br> which don't match p:empty.
+  // Always mark regardless of pref state so toggling compactBlankLines via reapplyCss()
+  // takes effect immediately without re-parsing the chapter.
+  const _CX_BLANK_RE = /^[\s\u00a0\u200b]*$/;
+  for (const p of _ahDoc.querySelectorAll('p')) {
+    if (!p.querySelector(':not(br)') && _CX_BLANK_RE.test(p.textContent)) {
+      p.setAttribute('data-br-blank', '1');
+    } else {
+      p.removeAttribute('data-br-blank');
+    }
+  }
+  // Also apply/remove inline styles directly \u2014 Chrome 83 WebView does not reliably
+  // re-evaluate CSS attribute selectors inside iframes when the attribute is set
+  // dynamically after initial load. Inline style bypasses that entirely.
+  for (const p of _ahDoc.querySelectorAll('p[data-br-blank]')) {
+    if (prefs.compactBlankLines) {
+      p.style.setProperty('display', 'none', 'important');
+      p.style.setProperty('margin',  '0',    'important');
+      p.style.setProperty('padding', '0',    'important');
+    } else {
+      p.style.removeProperty('display');
+      p.style.removeProperty('margin');
+      p.style.removeProperty('padding');
+    }
+  }
+  // Strip whitespace-only text nodes that sit between block-level siblings.
+  // Some EPUBs use &#13; (carriage return) between <p> elements rather than inside them;
+  // these text nodes are invisible in white-space:normal but can create visible gaps when
+  // the parent has white-space:pre-line, or via browser strut-height on anonymous blocks.
+  if (prefs.compactBlankLines) {
+    const _BLOCK_EL = /^(P|DIV|SECTION|ARTICLE|H[1-6]|BLOCKQUOTE|FIGURE|HEADER|FOOTER|ASIDE|MAIN)$/;
+    const _wkr = _ahDoc.createTreeWalker(_ahDoc.body, NodeFilter.SHOW_TEXT);
+    const _strip = [];
+    let _tn;
+    while ((_tn = _wkr.nextNode())) {
+      if (!_CX_BLANK_RE.test(_tn.nodeValue)) continue;
+      const prev = _tn.previousSibling;
+      const next = _tn.nextSibling;
+      if ((prev && prev.nodeType === 1 && _BLOCK_EL.test(prev.nodeName)) ||
+          (next && next.nodeType === 1 && _BLOCK_EL.test(next.nodeName))) {
+        _strip.push(_tn);
+      }
+    }
+    for (const _n of _strip) _n.remove();
+  }
+
   injectIntoContents({
-    document: iframe.contentDocument,
+    document: _ahDoc,
     window: iframe.contentWindow,
     sectionIndex: _cxReader?.spineIdx ?? 0,
-    cfiFromRange: _cxMakeCfi,
-    range: () => null,
+    cfiFromRange: _cxCfiFromRange,
+    range: (cfi) => _cxRangeFromCfi(cfi, _ahDoc),
   });
 }
 
@@ -5451,15 +5719,20 @@ function _cxApplyHooks(iframe) {
 function _attachCxDict(iframe) {
   if (!iframe?.contentDocument || iframe === _cxDictIframe) return;
   _cxDictIframe = iframe;
+  const _adDoc = iframe.contentDocument;
   const shim = {
-    document: iframe.contentDocument,
+    document: _adDoc,
     window: iframe.contentWindow,
     sectionIndex: _cxReader?.spineIdx ?? 0,
-    cfiFromRange: _cxMakeCfi,
-    range: () => null,
+    cfiFromRange: _cxCfiFromRange,
+    range: (cfi) => _cxRangeFromCfi(cfi, _adDoc),
   };
   attachIframeDictionary(shim);
   attachIframeAnnotation(shim);
+  // Footnote interception: marks footnote links with data-footnote-href (removing href so
+  // the renderer's generic cx-link handler doesn't intercept them and navigate to the
+  // chapter start), then adds capture-phase listeners that post footnote-show messages.
+  attachIframeFootnotes(shim);
 }
 
 // Forward swipe/tap touch events from inside the CXReader iframe to the parent handlers.
@@ -5536,6 +5809,7 @@ async function startCXRendition(displayCfi = null) {
 
     const readerCss = buildEpubCss();
     await _cxReader.renderChapter(_cxStartIdx, viewer, readerCss);
+    applyHeaderBtnVisibility();
 
     console.log('[CXReader] chapter 0 rendered');
   } catch (err) {
@@ -6233,7 +6507,14 @@ async function syncOfflineAnnotations(bookId) {
 function updateBookmarkBadge() {
   const n = bookmarksCache.length;
   bookmarksBadge.textContent = n > 9 ? '9+' : String(n);
-  bookmarksBadge.classList.toggle('hidden', n === 0);
+  bookmarksBadge.classList.toggle('hidden', n === 0 || !prefs.bookmarkBadge);
+}
+
+function updateAnnotationBadge() {
+  if (!annotationsBadge) return;
+  const n = annotationsCache.length;
+  annotationsBadge.textContent = n > 9 ? '9+' : String(n);
+  annotationsBadge.classList.toggle('hidden', n === 0 || !prefs.annotationBadge);
 }
 
 function renderBookmarkList() {
@@ -6335,9 +6616,8 @@ async function loadBookmarks(bookId) {
 }
 
 async function addBookmark() {
-  if (!currentBook || !rendition) return;
-  const loc   = rendition.currentLocation();
-  const cfi   = loc?.start?.cfi || currentCfi;
+  if (!currentBook || (!rendition && !_cxReader)) return;
+  const cfi   = rendition?.currentLocation()?.start?.cfi || currentCfi;
   const pct   = currentPct;
   const chapter = chapterTitleEl.textContent || '';
   const label = `${chapter ? chapter + ' · ' : ''}${Math.round(pct * 100)}%`;
@@ -6594,25 +6874,32 @@ document.getElementById('kosync-zone-bl')?.addEventListener('click', async () =>
   const doSync = await showSyncDialog(best, currentPct, null);
   if (!doSync) return;
 
-  const dfMatch = best.progress.match(/^\/body\/DocFragment\[(\d+)\]/);
-  if (dfMatch) {
-    const spineIdx  = parseInt(dfMatch[1], 10) - 1;
-    const spineItem = book.spine.get(spineIdx);
-    if (spineItem?.href) {
-      const paraMatch = !prefs.bionicReading && best.progress.match(/\/p\[(\d+)\]/);
-      let navigated = false;
-      if (paraMatch) {
-        const guessCfi = `epubcfi(/6/${(spineIdx + 1) * 2}!/4/${parseInt(paraMatch[1]) * 2})`;
-        try { await rendition.display(guessCfi); navigated = true; } catch { navigated = false; }
-      }
-      if (!navigated) await rendition.display(spineItem.href);
-      if (prefs.bionicReading && book.locations.length() > 0)
+  if (prefs.experimentalReader && _cxReader) {
+    if (best.percentage != null) {
+      await _cxReader.goToPct(best.percentage);
+      _cxReader.seekToPercent(best.percentage);
+    }
+  } else {
+    const dfMatch = best.progress.match(/^\/body\/DocFragment\[(\d+)\]/);
+    if (dfMatch) {
+      const spineIdx  = parseInt(dfMatch[1], 10) - 1;
+      const spineItem = book.spine.get(spineIdx);
+      if (spineItem?.href) {
+        const paraMatch = !prefs.bionicReading && best.progress.match(/\/p\[(\d+)\]/);
+        let navigated = false;
+        if (paraMatch) {
+          const guessCfi = `epubcfi(/6/${(spineIdx + 1) * 2}!/4/${parseInt(paraMatch[1]) * 2})`;
+          try { await rendition.display(guessCfi); navigated = true; } catch { navigated = false; }
+        }
+        if (!navigated) await rendition.display(spineItem.href);
+        if (prefs.bionicReading && book.locations.length() > 0)
+          await seekToPercentage(best.percentage);
+      } else if (book.locations.length() > 0 && best.percentage != null) {
         await seekToPercentage(best.percentage);
-    } else if (book.locations.length() > 0 && best.percentage != null) {
+      }
+    } else if (best.percentage != null && book.locations.length() > 0) {
       await seekToPercentage(best.percentage);
     }
-  } else if (best.percentage != null && book.locations.length() > 0) {
-    await seekToPercentage(best.percentage);
   }
 });
 
@@ -6878,6 +7165,17 @@ document.addEventListener('fullscreenchange', async () => {
 async function init() {
   await _i18nReady;
 
+  // If localStorage was cleared (no saved prefs), restore dict selection/order from the
+  // server copy so word lookups use the user's configured dictionaries, not the language default.
+  if (!localStorage.getItem('br_reader_prefs')) {
+    apiFetch('/settings').then(s => {
+      const sp = typeof s.reader_prefs === 'string' ? JSON.parse(s.reader_prefs) : (s.reader_prefs || {});
+      if (sp.dictionaryOrder?.length) prefs.dictionaryOrder = sp.dictionaryOrder;
+      if (sp.dictionaries !== undefined) prefs.dictionaries = sp.dictionaries;
+      if (sp.dictionaryMeta) prefs.dictionaryMeta = sp.dictionaryMeta;
+    }).catch(() => {});
+  }
+
   console.log('[reader] UA:', navigator.userAgent.slice(0, 200));
   console.log('[reader] bookId:', bookId, 'online:', navigator.onLine);
 
@@ -6970,23 +7268,31 @@ async function init() {
       } catch (e) {
         console.warn('[reader] getBookMeta failed (' + (e?.message || e) + '), using network');
       }
-      // Only use IDB cache if it has a usable KOSync hash; otherwise go to network
-      // so the server can compute file_hash_md5 on the fly. Stale IDB entries from
-      // before file_hash_md5 was populated would cause KOSync to send the wrong hash.
+      // Prefer IDB when it has a usable KOSync hash (avoids stale-hash KOSync issue).
+      // Otherwise fetch from network and use IDB as offline fallback if network fails.
       if (_localMeta && (_localMeta.file_hash_md5 || _localMeta.kosync_hash)) {
         currentBook = _localMeta;
         console.log('[reader] book metadata from IndexedDB:', currentBook.title);
       } else {
         console.log('[reader] fetching book metadata from network...');
         const _tok = getToken();
-        const _res = await fetch('/api/books/' + bookId, {
-          headers: Object.assign({ Accept: 'application/json' }, _tok ? { Authorization: 'Bearer ' + _tok } : {}),
-        });
-        console.log('[reader] fetch status:', _res.status);
-        if (!_res.ok) throw new Error('HTTP ' + _res.status);
-        currentBook = await _res.json();
-        console.log('[reader] book metadata from network:', currentBook.title);
-        saveBookMeta(currentBook).catch(() => {});
+        try {
+          const _res = await fetch('/api/books/' + bookId, {
+            headers: Object.assign({ Accept: 'application/json' }, _tok ? { Authorization: 'Bearer ' + _tok } : {}),
+          });
+          console.log('[reader] fetch status:', _res.status);
+          if (!_res.ok) throw new Error('HTTP ' + _res.status);
+          currentBook = await _res.json();
+          console.log('[reader] book metadata from network:', currentBook.title);
+          saveBookMeta(currentBook).catch(() => {});
+        } catch (_netErr) {
+          if (_localMeta) {
+            currentBook = _localMeta;
+            console.log('[reader] network failed, using IDB fallback:', currentBook.title);
+          } else {
+            throw _netErr;
+          }
+        }
       }
     }
     bookTitleEl.textContent = currentBook.title;
@@ -7006,6 +7312,7 @@ async function init() {
   console.log('[reader] loading epub...');
   let arrayBuffer;
   try {
+    _rafStop = true; // stop dots — show progress % for network downloads
     loadingMsg.textContent = t('reader.loading_file');
     if (_legacyWebView) {
       // Legacy path (br-v51 pattern): network first → CacheStorage only as offline fallback.
@@ -7037,7 +7344,31 @@ async function init() {
           12000
         );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        arrayBuffer = await withTimeout(res.arrayBuffer(), 30000);
+        const _dlTotal = parseInt(res.headers.get('content-length') || '0', 10);
+        if (_dlTotal > 0 && res.body) {
+          const _dlReader = res.body.getReader();
+          const _dlChunks = [];
+          let _dlLoaded = 0, _dlLastPct = -1;
+          const _dlStep = prefs.eink ? 10 : 5;
+          while (true) {
+            const { done, value } = await _dlReader.read();
+            if (done) break;
+            _dlChunks.push(value);
+            _dlLoaded += value.length;
+            const _dlPct = Math.min(99, Math.floor(_dlLoaded / _dlTotal * 100));
+            if (_dlPct >= _dlLastPct + _dlStep) {
+              _dlLastPct = _dlPct;
+              if (loadingMsg) loadingMsg.textContent = t('reader.loading_file') + ' ' + _dlPct + '%';
+            }
+          }
+          if (loadingMsg) loadingMsg.textContent = t('reader.loading_file') + ' 100%';
+          const _dlBuf = new Uint8Array(_dlLoaded);
+          let _dlOff = 0;
+          for (const _dlC of _dlChunks) { _dlBuf.set(_dlC, _dlOff); _dlOff += _dlC.length; }
+          arrayBuffer = _dlBuf.buffer;
+        } else {
+          arrayBuffer = await withTimeout(res.arrayBuffer(), 30000);
+        }
         console.log('[reader] epub from network, bytes:', arrayBuffer.byteLength);
       }
     }
@@ -7131,6 +7462,7 @@ async function init() {
 
     let startCfi      = null;
     let localProgress = null;
+    let _offlineProgressAhead = false; // local (offline) progress is ahead of server → push on open
     const bionicReloadState = readBionicReloadState();
     let reloadStartPct = null;
     let skipOpenSync = false;
@@ -7157,9 +7489,28 @@ async function init() {
     } catch { /* ignore */ }
     try {
       try {
-        localProgress = await apiFetch(`/progress/${currentBook.file_hash}`);
-        if (localProgress) {
-          try { localStorage.setItem(`br_progress_${currentBook.file_hash}`, JSON.stringify(localProgress)); } catch { /* ignore */ }
+        // Read the locally-cached position first. While offline, saveProgressBackground()
+        // writes the latest position to localStorage but can't reach the server/KOSync.
+        // If that local copy is ahead of the server when we reconnect, resume from it and
+        // push it on open — otherwise reopening would discard the offline reading.
+        let _cachedLocal = null;
+        try {
+          const _raw = localStorage.getItem(`br_progress_${currentBook.file_hash}`);
+          if (_raw) _cachedLocal = JSON.parse(_raw);
+        } catch { /* ignore */ }
+        const _serverProgress = await apiFetch(`/progress/${currentBook.file_hash}`);
+        if (_cachedLocal && (_cachedLocal.percentage || 0) > (_serverProgress?.percentage || 0) + 0.005) {
+          console.log('[reader] offline progress ahead of server ('
+            + Math.round((_cachedLocal.percentage || 0) * 100) + '% > '
+            + Math.round((_serverProgress?.percentage || 0) * 100) + '%) — resuming local, will push');
+          localProgress = _cachedLocal;
+          _offlineProgressAhead = true;
+          // Keep the local copy — do NOT overwrite it with the stale server value.
+        } else {
+          localProgress = _serverProgress;
+          if (localProgress) {
+            try { localStorage.setItem(`br_progress_${currentBook.file_hash}`, JSON.stringify(localProgress)); } catch { /* ignore */ }
+          }
         }
       } catch {
         try {
@@ -7216,6 +7567,18 @@ async function init() {
     loadAvailableDicts().then(updateDictButtonVisibility).catch(() => {});
     _rafStop = true;
     loadingOverlay.classList.add('hidden');
+    // Hide viewer while we navigate to the correct page; revealed below after all seeks complete.
+    // opacity:0 keeps layout intact so epub.js/CXReader measure columns correctly.
+    epubViewer.style.opacity = '0';
+    const _revealViewer = () => {
+      if (!prefs.eink) {
+        epubViewer.style.transition = 'opacity 0.15s';
+        setTimeout(() => { epubViewer.style.transition = ''; }, 200);
+      }
+      epubViewer.style.opacity = '';
+    };
+    // Safety: reveal after 3 s even if the code below never reaches the normal reveal path.
+    const _revealTimer = setTimeout(_revealViewer, 3000);
     // Deferred from init start: acquire wake lock only after book is fully loaded
     // to avoid potential compositor/timer interference during loading on e-ink WebViews.
     acquireWakeLock();
@@ -7310,11 +7673,21 @@ async function init() {
           if (book.locations.length() > 0) await seekToPercentage(syncTarget.percentage);
         }
       } catch (e) { console.warn('[kosync] navigate failed:', e.message); }
-    } else if (prefs.experimentalReader && _cxReader && localProgress?.percentage > 0) {
-      // CXReader, no sync jump: the chapter was already opened (from the saved CFI) but
-      // CXReader CFIs are chapter-level only — the page within the chapter is carried by the
-      // percentage. seekToPercent() back-computes the target page and jumps there directly.
-      _cxReader.seekToPercent(localProgress.percentage);
+    } else if (prefs.experimentalReader && _cxReader && localProgress?.percentage > 0 && !isPeekMode) {
+      // CXReader, no sync jump: restore exact page first; fall back to % if page is out of range.
+      // Skip in peek mode: peek never saves position.
+      let exactRestored = false;
+      try {
+        const raw = localStorage.getItem(`br_cx_page_${currentBook?.id}`);
+        if (raw) {
+          const { spineIdx: si, page: pg } = JSON.parse(raw);
+          if (si === _cxStartIdx && pg > 1 && pg <= _cxReader.pageCount) {
+            _cxReader.seekToPage(pg);
+            exactRestored = true;
+          }
+        }
+      } catch { /* ignore */ }
+      if (!exactRestored) _cxReader.seekToPercent(localProgress.percentage);
     } else if (startCfiIsEpubcfi && localProgress?.percentage != null && book.locations.length() > 0) {
       // No sync navigation occurred.  The CFI display in startRendition snaps to the page
       // containing the saved element but can land a few pages behind when the CFI has a
@@ -7337,42 +7710,67 @@ async function init() {
     // that happened above (seekToPercentage / sync jump) may not have updated
     // currentCfi/currentPct yet — read them directly from the rendition now.
     {
-      const loc = rendition?.currentLocation();
-      if (loc?.start?.cfi) currentCfi = loc.start.cfi;
-      if (book.locations?.length() > 0) {
-        // Locations already generated (cached) — most accurate
-        const pct = book.locations.percentageFromCfi(currentCfi);
-        if (pct != null) currentPct = pct;
-      } else if (localProgress?.percentage > 0) {
-        // No locations cache — use server-saved percentage immediately.
-        // This is the most reliable fallback: it's our own DB value and is
-        // always available. epub.js returns 0 (not null) when locations aren't
-        // loaded, so we check this BEFORE loc.start.percentage to avoid 0 winning.
-        currentPct = localProgress.percentage;
-      } else if (syncTarget?.percentage != null) {
-        // Sync jump target — positions differed so user chose to jump here.
-        currentPct = syncTarget.percentage;
-      } else if (loc?.start?.percentage > 0) {
-        // epub.js estimate — only trust it when > 0 (0 means locations not loaded)
-        currentPct = loc.start.percentage;
-      } else if (loc?.start?.index != null) {
-        // Last resort: rough spine-position estimate
-        const total = book.spine?.spineItems?.length || book.spine?.length || 1;
-        currentPct = (loc.start.index + 1) / total;
+      if (prefs.experimentalReader && _cxReader) {
+        // CXReader tracks its own position in the live paginator — read it directly.
+        // Do NOT fall through to localProgress.percentage: that is the DB value from before
+        // init started, and any navigation above (goToPct / seekToPercent) may have already
+        // moved to a different page within the chapter.  Using the stale DB value here
+        // overwrites the corrected pct and causes the wrong page to be re-saved on close,
+        // creating a self-reinforcing loop that always reopens at the wrong page.
+        currentCfi = _cxReader.makeCfi();
+        const p = _cxReader.makePct();
+        if (p > 0) currentPct = p;
+      } else {
+        const loc = rendition?.currentLocation();
+        if (loc?.start?.cfi) currentCfi = loc.start.cfi;
+        if (book.locations?.length() > 0) {
+          // Locations already generated (cached) — most accurate
+          const pct = book.locations.percentageFromCfi(currentCfi);
+          if (pct != null) currentPct = pct;
+        } else if (localProgress?.percentage > 0) {
+          // No locations cache — use server-saved percentage immediately.
+          // This is the most reliable fallback: it's our own DB value and is
+          // always available. epub.js returns 0 (not null) when locations aren't
+          // loaded, so we check this BEFORE loc.start.percentage to avoid 0 winning.
+          currentPct = localProgress.percentage;
+        } else if (syncTarget?.percentage != null) {
+          // Sync jump target — positions differed so user chose to jump here.
+          currentPct = syncTarget.percentage;
+        } else if (loc?.start?.percentage > 0) {
+          // epub.js estimate — only trust it when > 0 (0 means locations not loaded)
+          currentPct = loc.start.percentage;
+        } else if (loc?.start?.index != null) {
+          // Last resort: rough spine-position estimate
+          const total = book.spine?.spineItems?.length || book.spine?.length || 1;
+          currentPct = (loc.start.index + 1) / total;
+        }
       }
     }
     console.log('[pos] final position before isReady cfi:', currentCfi.slice(0,60), 'pct:', (currentPct*100).toFixed(2)+'%');
     isReady = true;
     console.log('[pos] isReady=true, currentCfi:', currentCfi.slice(0,60));
     openCfi = currentCfi;      // snapshot position-on-open for change detection
-    lastSyncedCfi = currentCfi; // server already knows this position — no immediate remote push needed
+    openPct = currentPct;      // snapshot pct-on-open for within-chapter change detection (CXReader CFI is chapter-level only)
+    if (_offlineProgressAhead && !isPeekMode) {
+      // We resumed from a position read offline that the server/KOSync never received.
+      // Force a remote + KOSync push now so reopening online actually syncs offline reading.
+      lastSyncedCfi = '';
+      console.log('[kosync] pushing offline-read progress on open, pct:', (currentPct * 100).toFixed(2) + '%');
+      void saveProgress({ forceRemote: true, forced: true, inSession: true });
+    } else {
+      lastSyncedCfi = currentCfi; // server already knows this position — no immediate remote push needed
+    }
     _kosyncPushFailures    = 0;
     _kosyncWarnedThisSession = false;
     // Jump to a specific CFI if provided via ?jumpcfi= URL param (bookmarks/annotations deep-link)
+    // Use navigateToCfi: handles CXReader, converts range CFIs (highlights) to start CFIs, and falls back to %.
     const _jumpCfi = params.get('jumpcfi');
-    if (_jumpCfi && rendition) {
-      try { await rendition.display(decodeURIComponent(_jumpCfi)); } catch { /* invalid CFI — stay at current pos */ }
+    if (_jumpCfi) {
+      try { await navigateToCfi(_jumpCfi); } catch { /* invalid CFI — stay at current pos */ }
     }
+    // All navigation is done — reveal the viewer at the correct page.
+    clearTimeout(_revealTimer);
+    _revealViewer();
     // Peek mode: always notify user that progress is not saved
     if (isPeekMode) toast.info(t('reader.peek_mode_hint'));
     cancelDebouncedSync();

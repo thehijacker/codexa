@@ -3,7 +3,89 @@
 <head>
   <meta charset="UTF-8" />
   <script>document.documentElement.style.visibility='hidden'</script>
+  <script>
+    /* Detect missing flexbox `gap` (Chrome < 84) and flag <html> so the margin
+       fallbacks in main.css kick in. No reliable CSS feature query exists for it. */
+    (function () {
+      try {
+        var f = document.createElement('div');
+        f.style.cssText = 'display:flex;flex-direction:column;row-gap:1px;position:absolute;visibility:hidden';
+        f.appendChild(document.createElement('div'));
+        f.appendChild(document.createElement('div'));
+        document.documentElement.appendChild(f);
+        var ok = f.scrollHeight === 1;
+        document.documentElement.removeChild(f);
+        if (!ok) document.documentElement.className += ' no-flexgap';
+      } catch (e) {}
+    })();
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <script>
+    /* Display size: scale the whole library UI up. Mobile browsers / WebViews honour a
+       viewport <meta> width override (and cross the 768px breakpoint into the touch
+       layout); desktop browsers IGNORE it, so there we fall back to CSS zoom. Applied
+       LIVE (no reload). Whether a browser honours the width is measured once and cached
+       in localStorage('br_vp_honored'). 'user-scalable=no' blocks pinch-zoom (no
+       maximum-scale, which would otherwise cancel the width scaling). */
+    (function () {
+      try {
+        var KEY = 'br_display_size', HKEY = 'br_vp_honored';
+        var SCALE = 'user-scalable=no';
+        window.__brDeviceWidth = window.innerWidth;
+
+        // Returns the CSS layout width for a preset (0 = auto / device-width).
+        // Even, gentle steps — each value is the device width divided by the scale.
+        function targetFor(size, dw) {
+          if (!(dw > 0)) return 0;
+          if (size === 'large')   return Math.round(dw / 1.25); // 1.25×
+          if (size === 'larger')  return Math.round(dw / 1.5);  // 1.5×
+          if (size === 'largest') return Math.round(dw / 1.75); // 1.75×
+          return 0; // auto / device-width
+        }
+        // Replace the <meta> element (not edit in place) so the viewport is fully
+        // re-evaluated — editing in place can be a no-op when reverting to device-width.
+        function setMeta(content) {
+          var old = document.querySelector('meta[name="viewport"]');
+          var m = document.createElement('meta');
+          m.setAttribute('name', 'viewport');
+          m.setAttribute('content', content);
+          if (old && old.parentNode) old.parentNode.replaceChild(m, old);
+          else (document.head || document.documentElement).appendChild(m);
+        }
+
+        window.__brApplyDisplaySize = function (size, detect) {
+          var html = document.documentElement;
+          var dw = window.__brDeviceWidth;
+          var t = targetFor(size, dw);
+          html.style.zoom = '';
+          if (!(t > 0)) {
+            setMeta('width=device-width, initial-scale=1.0, ' + SCALE + ', viewport-fit=cover');
+            return;
+          }
+          var honored = localStorage.getItem(HKEY); // '1' width honoured, '0' ignored (desktop), null unknown
+          var useZoom = honored === '0';
+          if (honored === null && detect) {
+            if (window.AndroidCodexa) {
+              useZoom = false; // the Android app WebView always honours the viewport width
+            } else {
+              setMeta('width=' + t + ', ' + SCALE + ', viewport-fit=cover');
+              void html.offsetWidth; // force layout so innerWidth reflects the override
+              useZoom = window.innerWidth > t + 50; // unchanged ⇒ width ignored ⇒ desktop
+            }
+            try { localStorage.setItem(HKEY, useZoom ? '0' : '1'); } catch (e) {}
+          }
+          if (useZoom) {
+            setMeta('width=device-width, initial-scale=1.0, ' + SCALE + ', viewport-fit=cover');
+            html.style.zoom = (dw / t).toFixed(4);
+          } else {
+            setMeta('width=' + t + ', ' + SCALE + ', viewport-fit=cover');
+          }
+        };
+
+        window.__brApplyDisplaySize(localStorage.getItem(KEY), false);
+      } catch (e) {}
+    })();
+  </script>
   <link rel="manifest" href="/manifest.json" />
   <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
   <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png" />
@@ -83,6 +165,21 @@
         </div>
       </div>
 
+      <!-- OPDS-linked shelf banner (shown only when viewing a shelf synced from OPDS) -->
+      <div id="opds-shelf-banner" class="opds-shelf-banner hidden">
+        <span id="opds-shelf-sync-date" class="opds-shelf-sync-date"></span>
+        <div class="opds-shelf-banner-actions">
+          <button id="opds-shelf-go-btn" class="btn btn-sm btn-secondary">
+            <img src="/images/online_library.svg" class="nav-icon nav-icon-online-library" alt="">
+            <span data-i18n="library.opds_go_folder">Open in OPDS</span>
+          </button>
+          <button id="opds-shelf-sync-btn" class="btn btn-sm btn-primary">
+            <img src="/images/sync.svg" class="nav-icon nav-icon-sync" alt="">
+            <span data-i18n="library.opds_sync_again">Sync again</span>
+          </button>
+        </div>
+      </div>
+
       <!-- Edit mode toolbar -->
       <div id="edit-toolbar" class="edit-toolbar hidden">
         <span id="edit-selected-count" class="edit-count">0 izbranih</span>
@@ -102,10 +199,12 @@
 
       <!-- Upload drop zone -->
       <div class="drop-zone hidden" id="drop-zone">
-        <div style="font-size:2.5rem;margin-bottom:.75rem"><img src="/images/folder.svg" class="nav-icon nav-icon-folder" style="width:2.5rem;height:2.5rem" alt=""></div>
-        <p style="margin-bottom:.5rem" data-i18n="library.drop_hint1">Povlecite EPUB datoteke sem</p>
-        <p style="font-size:.85rem" data-i18n="library.drop_hint2">ali kliknite za izbiro</p>
-        <input type="file" id="file-input" accept=".epub" multiple />
+        <label for="file-input" class="drop-zone-label">
+          <div style="font-size:2.5rem;margin-bottom:.75rem"><img src="/images/folder.svg" class="nav-icon nav-icon-folder" style="width:2.5rem;height:2.5rem" alt=""></div>
+          <p style="margin-bottom:.5rem" data-i18n="library.drop_hint1">Povlecite EPUB datoteke sem</p>
+          <p style="font-size:.85rem" data-i18n="library.drop_hint2">ali kliknite za izbiro</p>
+        </label>
+        <input type="file" id="file-input" accept=".epub,.cbz,.cbr" multiple />
       </div>
 
       <!-- Upload progress -->
@@ -268,7 +367,7 @@
         <div id="admin-fonts-list" style="margin-bottom:.6rem"></div>
         <label class="admin-upload-btn">
           <span data-i18n="reader.upload_fonts">Upload fonts…</span>
-          <input type="file" id="admin-font-upload" accept=".ttf,.otf,.woff,.woff2" multiple hidden>
+          <input type="file" id="admin-font-upload" accept=".ttf,.otf,.woff,.woff2" multiple class="file-input-offscreen">
         </label>
 
         <hr class="section-divider">
@@ -276,7 +375,7 @@
         <div id="admin-dicts-list" style="margin-bottom:.6rem"></div>
         <label class="admin-upload-btn">
           <span data-i18n="reader.upload_dict">Upload dictionary ZIP…</span>
-          <input type="file" id="admin-dict-upload" accept=".zip" multiple hidden>
+          <input type="file" id="admin-dict-upload" accept=".zip" multiple class="file-input-offscreen">
         </label>
       </div>
 

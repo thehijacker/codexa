@@ -1,21 +1,27 @@
 // CXReader — Experimental EPUB reader library
 // Phase 5: Navigation, TOC, progress save.
 
-import { EpubParser }      from './epub-parser.js';
-import { ChapterRenderer }  from './renderer.js';
-import { ColumnPaginator }  from './column-paginator.js';
+import { EpubParser }        from './epub-parser.js';
+import { ChapterRenderer }   from './renderer.js';
+import { ColumnPaginator }   from './column-paginator.js';
+import { CbzParser }         from './cbz-parser.js';
+import { FixedPagePaginator } from './fixed-paginator.js';
 
 export class CXReader {
   constructor() {
-    this._parser      = new EpubParser();
-    this._renderer    = null;
-    this._paginator   = null;
-    this._book        = null;
-    this._spineIdx    = 0;
-    this._containerEl = null;
-    this._readerCss   = '';
-    this._twoColumn   = false;  // single-column (vertical) by default
-    this._columnGap   = 0;      // px gap between the two columns when two-column is on
+    this._parser        = new EpubParser();
+    this._renderer      = null;
+    this._paginator     = null;
+    this._book          = null;
+    this._spineIdx      = 0;
+    this._containerEl   = null;
+    this._readerCss     = '';
+    this._twoColumn     = false;  // single-column (vertical) by default
+    this._columnGap     = 0;      // px gap between the two columns when two-column is on
+    this._isCbz         = false;
+    this._isFixedLayout = false;
+    this._cbzPadTop     = 0;
+    this._cbzPadBot     = 0;
     // Called with (iframe) before paginator.init() — use to inject bionic/annotations
     this.onBeforePaginate = null;
   }
@@ -24,7 +30,9 @@ export class CXReader {
   // for single column too because native column fragmentation never splits a line — unlike the
   // old translateY+clip-path paginator, which clipped lines on e-ink Android WebViews.
   _makePaginator() {
-    return new ColumnPaginator();
+    return (this._isCbz || this._isFixedLayout)
+      ? new FixedPagePaginator(this._twoColumn)
+      : new ColumnPaginator();
   }
 
   // init() options for the current layout mode.
@@ -93,6 +101,14 @@ export class CXReader {
   setLayout({ twoColumn, columnGap } = {}) {
     if (typeof twoColumn === 'boolean') this._twoColumn = twoColumn;
     if (typeof columnGap === 'number')  this._columnGap = columnGap;
+    if (this._isCbz && this._containerEl && this._paginator) {
+      // In two-column mode, snap to the start of the nearest spread (even index).
+      if (this._twoColumn) this._spineIdx = Math.floor(this._spineIdx / 2) * 2;
+      this._paginator = this._makePaginator();
+      this._renderCbzItem(this._spineIdx);
+      this._fireRelocated();
+      return;
+    }
     const iframe = this._renderer?.iframe;
     if (!iframe || !this._paginator) return;
     const prevCount = this._paginator.pageCount || 1;
@@ -105,10 +121,28 @@ export class CXReader {
   }
 
   async open(arrayBuffer) {
-    console.log('[CXReader] open() parsing EPUB...');
-    this._book = await this._parser.parse(arrayBuffer);
-    this._renderer  = new ChapterRenderer(this._book.manifest);
+    console.log('[CXReader] open() parsing...');
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    this._isCbz = !zip.file('META-INF/container.xml');
+    if (this._isCbz) {
+      console.log('[CXReader] open() detected CBZ');
+      this._book = await new CbzParser().parse(zip);
+      this._renderer = null;
+    } else {
+      this._book = await this._parser.parse(arrayBuffer);
+      this._isFixedLayout = !!this._book.isFixedLayout;
+      this._renderer = new ChapterRenderer(this._book.manifest);
+    }
     this._paginator = this._makePaginator();
+
+    // Precompute cumulative weights for content-proportional percentage calculation.
+    const raw = this._book.spineWeights || [];
+    this._weights     = raw.length === this._book.spine.length ? raw : [];
+    this._totalWeight = this._weights.reduce((s, w) => s + w, 0) || 0;
+    this._cumWts      = [];
+    let cum = 0;
+    for (const w of this._weights) { this._cumWts.push(cum); cum += w; }
+
     console.log('[CXReader] open() done:', this._book.metadata.title);
     return this._book;
   }
@@ -122,7 +156,13 @@ export class CXReader {
     const spineItem   = this._book.spine[this._spineIdx];
     console.log(`[CXReader] renderChapter ${this._spineIdx}: ${spineItem.href}`);
 
-    const iframe = await this._renderer.render(spineItem, containerEl, readerCss);
+    if (this._isCbz) {
+      this._renderCbzItem(this._spineIdx);
+      this._fireRelocated();
+      return null;
+    }
+
+    const iframe = await this._renderer.render(spineItem, containerEl, readerCss, this._fixedLayoutOpts());
     this.onBeforePaginate?.(iframe);
     this._initPaginator(iframe);
     this._fireRelocated();
@@ -135,8 +175,16 @@ export class CXReader {
     const idx = Math.max(0, Math.min(spineIdx, this._book.spine.length - 1));
     this._spineIdx = idx;
     console.log(`[CXReader] goToSpineItem ${idx}`);
+
+    if (this._isCbz) {
+      this._renderCbzItem(idx);
+      this._paginator = this._makePaginator();
+      this._fireRelocated();
+      return;
+    }
+
     const iframe = await this._renderer.render(
-      this._book.spine[idx], this._containerEl, this._readerCss
+      this._book.spine[idx], this._containerEl, this._readerCss, this._fixedLayoutOpts()
     );
     this.onBeforePaginate?.(iframe);
     this._initPaginator(iframe);
@@ -164,13 +212,17 @@ export class CXReader {
     if (cfi && !cfi.startsWith('epubcfi(')) await this.goToHref(cfi);
   }
 
-  // Approximate percentage → spine item (linear mapping over spine length).
+  // Percentage → spine item using content-proportional weights (falls back to uniform).
   async goToPct(pct) {
     if (!this._book || !this._containerEl) return;
-    const idx = Math.min(
-      this._book.spine.length - 1,
-      Math.max(0, Math.floor(pct * this._book.spine.length))
-    );
+    const total = this._book.spine.length;
+    let idx = Math.min(total - 1, Math.max(0, Math.floor(pct * total)));
+    if (this._totalWeight > 0) {
+      const target = pct * this._totalWeight;
+      for (let i = 0; i < total; i++) {
+        if ((this._cumWts[i] ?? 0) + (this._weights[i] ?? 1) > target) { idx = i; break; }
+      }
+    }
     await this.goToSpineItem(idx);
   }
 
@@ -180,26 +232,38 @@ export class CXReader {
     return `epubcfi(/6/${n}!/4/2/1:0)`;
   }
 
-  // Approximate book percentage: spine fraction + fractional page within chapter.
+  // Book percentage: content-proportional using spine file sizes (falls back to uniform).
   makePct() {
-    const total     = this._book?.spine.length || 1;
-    const pageCount = this._paginator?.pageCount || 1;
-    const page      = this._paginator?.currentPage || 1;
-    return (this._spineIdx + (page - 1) / pageCount) / total;
+    const total      = this._book?.spine.length || 1;
+    const pageCount  = this._paginator?.pageCount || 1;
+    const page       = this._paginator?.currentPage || 1;
+    const fracWithin = pageCount > 1 ? (page - 1) / pageCount : 0;
+    if (this._totalWeight > 0) {
+      const before = this._cumWts[this._spineIdx] ?? 0;
+      const wt     = this._weights[this._spineIdx] ?? 1;
+      return (before + wt * fracWithin) / this._totalWeight;
+    }
+    return (this._spineIdx + fracWithin) / total;
   }
 
   async next() {
     if (!this._paginator || !this._book) return;
-    if (this._paginator.next()) {
+    if (this._isCbz) {
+      if (this._spineIdx >= this._book.spine.length - 1) return;
+      const step = this._twoColumn ? 2 : 1;
+      this._spineIdx = Math.min(this._spineIdx + step, this._book.spine.length - 1);
+      this._renderCbzItem(this._spineIdx);
+      this._paginator = this._makePaginator();
       this._fireRelocated();
       return;
     }
-    // At last page — advance chapter
+    if (this._paginator.next()) { this._fireRelocated(); return; }
+    // At last page — advance to next chapter
     if (this._spineIdx + 1 < this._book.spine.length) {
       this._spineIdx++;
       console.log(`[CXReader] chapter → ${this._spineIdx}`);
       const iframe = await this._renderer.render(
-        this._book.spine[this._spineIdx], this._containerEl, this._readerCss
+        this._book.spine[this._spineIdx], this._containerEl, this._readerCss, this._fixedLayoutOpts()
       );
       this.onBeforePaginate?.(iframe);
       this._initPaginator(iframe);
@@ -209,16 +273,22 @@ export class CXReader {
 
   async prev() {
     if (!this._paginator || !this._book) return;
-    if (this._paginator.prev()) {
+    if (this._isCbz) {
+      if (this._spineIdx <= 0) return;
+      const step = this._twoColumn ? 2 : 1;
+      this._spineIdx = Math.max(0, this._spineIdx - step);
+      this._renderCbzItem(this._spineIdx);
+      this._paginator = this._makePaginator();
       this._fireRelocated();
       return;
     }
+    if (this._paginator.prev()) { this._fireRelocated(); return; }
     // At first page — go to previous chapter's last page
     if (this._spineIdx > 0) {
       this._spineIdx--;
       console.log(`[CXReader] chapter ← ${this._spineIdx}`);
       const iframe = await this._renderer.render(
-        this._book.spine[this._spineIdx], this._containerEl, this._readerCss
+        this._book.spine[this._spineIdx], this._containerEl, this._readerCss, this._fixedLayoutOpts()
       );
       this.onBeforePaginate?.(iframe);
       this._initPaginator(iframe);
@@ -231,6 +301,7 @@ export class CXReader {
   // @font-face declarations (in cx-reader-fonts) are only updated when they change — keeping
   // them stable avoids FOUT each time the user toggles a setting like text alignment.
   reapplyCss(newCss) {
+    if (this._isFixedLayout) return;
     const iframe = this._renderer?.iframe;
     if (!iframe?.contentDocument) return;
     const doc = iframe.contentDocument;
@@ -277,16 +348,30 @@ export class CXReader {
   // Seek to the page within the CURRENT chapter that best matches pct (0..1).
   // Used at open-time to restore within-chapter position from the saved percentage, since
   // CXReader CFIs are chapter-level only and cannot encode a page number.
-  // Formula: pct = (spineIdx + (page-1)/pageCount) / spineTotal  →  solve for page.
   seekToPercent(pct) {
     if (!this._book || !this._paginator) return;
     const total     = this._book.spine.length;
     const pageCount = this._paginator.pageCount;
     if (total <= 0 || pageCount <= 1) return;
-    const page0 = (pct * total - this._spineIdx) * pageCount; // 0-based fractional page
+    let page0;
+    if (this._totalWeight > 0) {
+      const before = this._cumWts[this._spineIdx] ?? 0;
+      const wt     = (this._weights[this._spineIdx] ?? 1) || 1;
+      page0 = ((pct * this._totalWeight - before) / wt) * pageCount;
+    } else {
+      page0 = (pct * total - this._spineIdx) * pageCount;
+    }
     const target = Math.max(1, Math.min(pageCount, Math.round(page0) + 1));
     if (target === this._paginator.currentPage) return;
     this._paginator.goToPage(target);
+    this._fireRelocated();
+  }
+
+  // Jump directly to a specific page within the current chapter.
+  // Used to restore an exact saved page (more precise than seekToPercent when pageCount matches).
+  seekToPage(n) {
+    if (!this._paginator) return;
+    this._paginator.goToPage(n);
     this._fireRelocated();
   }
 
@@ -316,11 +401,57 @@ export class CXReader {
   destroy() {
     this._renderer?.destroy();
     this._parser.revokeBlobUrls();
+    if (this._isCbz && this._book?._blobUrls) {
+      for (const url of this._book._blobUrls.values()) URL.revokeObjectURL(url);
+      this._book._blobUrls.clear();
+    }
     this._paginator = null;
     console.log('[CXReader] destroy()');
   }
 
   // ── Private ───────────────────────────────────────────────────────────────────
+
+  _fixedLayoutOpts() {
+    if (!this._isFixedLayout) return null;
+    return { pageWidth: this._book.pageWidth || 0, pageHeight: this._book.pageHeight || 0 };
+  }
+
+  _renderCbzItem(idx) {
+    this._containerEl.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'cx-cbz-wrap';
+    wrap.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--reader-page-bg,#000);box-sizing:border-box;';
+
+    const showTwo = this._twoColumn && idx + 1 < this._book.spine.length;
+    const addImg = (i) => {
+      const img = document.createElement('img');
+      img.src = this._book.spine[i].blobUrl;
+      img.style.cssText = showTwo
+        ? 'max-width:50%;max-height:100%;object-fit:contain;'
+        : 'max-width:100%;max-height:100%;object-fit:contain;';
+      wrap.appendChild(img);
+    };
+    addImg(idx);
+    if (showTwo) addImg(idx + 1);
+
+    this._containerEl.appendChild(wrap);
+    this._applyCurrentCbzInset();
+  }
+
+  // Apply measured status-bar inset so the image(s) sit between the two bars.
+  setCbzInset(top, bot) {
+    this._cbzPadTop = top || 0;
+    this._cbzPadBot = bot || 0;
+    this._applyCurrentCbzInset();
+  }
+
+  _applyCurrentCbzInset() {
+    const wrap = this._containerEl?.querySelector('.cx-cbz-wrap');
+    if (!wrap) return;
+    const t = this._cbzPadTop, b = this._cbzPadBot;
+    wrap.style.top    = t ? `${t}px` : '0';
+    wrap.style.bottom = b ? `${b}px` : '0';
+  }
 
   _spineIndexForHref(hrefBase) {
     if (!hrefBase || !this._book) return -1;

@@ -2,6 +2,7 @@ package com.codexa.reader
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -16,6 +17,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -52,6 +54,21 @@ class MainActivity : AppCompatActivity() {
             // First run and user somehow cancelled — show it again (non-cancellable)
             openServerSelect(cancellable = false)
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // <input type="file"> support. Without onShowFileChooser() + this launcher,
+    // the WebView silently drops every file pick (book / font / dictionary upload).
+    // -------------------------------------------------------------------------
+    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+
+    private val fileChooserLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        // parseResult handles cancel (returns null) and multi-select via clipData.
+        val uris = WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+        fileChooserCallback?.onReceiveValue(uris)
+        fileChooserCallback = null
     }
 
     // -------------------------------------------------------------------------
@@ -261,7 +278,36 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.addJavascriptInterface(JsBridge(), "AndroidCodexa")
-        webView.webChromeClient = WebChromeClient()
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                // Cancel any previous pending pick so its <input> isn't left hanging.
+                fileChooserCallback?.onReceiveValue(null)
+                fileChooserCallback = filePathCallback
+
+                val intent = fileChooserParams?.createIntent()
+                if (intent == null) {
+                    fileChooserCallback = null
+                    return false
+                }
+                return try {
+                    fileChooserLauncher.launch(intent)
+                    true
+                } catch (e: ActivityNotFoundException) {
+                    fileChooserCallback?.onReceiveValue(null)
+                    fileChooserCallback = null
+                    Toast.makeText(
+                        this@MainActivity,
+                        getString(R.string.file_chooser_unavailable),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    false
+                }
+            }
+        }
 
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(

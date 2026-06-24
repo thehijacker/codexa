@@ -39,6 +39,23 @@
       document.documentElement.style.setProperty('--color-text-muted', _fg);
     } catch (_e) {}
   </script>
+  <script>
+    /* Detect missing flexbox `gap` (Chrome < 84) and flag <html> so the margin
+       fallbacks in reader.css restore spacing between settings rows, header
+       buttons, tab icons, etc. No reliable CSS feature query exists for it. */
+    (function () {
+      try {
+        var f = document.createElement('div');
+        f.style.cssText = 'display:flex;flex-direction:column;row-gap:1px;position:absolute;visibility:hidden';
+        f.appendChild(document.createElement('div'));
+        f.appendChild(document.createElement('div'));
+        document.documentElement.appendChild(f);
+        var ok = f.scrollHeight === 1;
+        document.documentElement.removeChild(f);
+        if (!ok) document.documentElement.className += ' no-flexgap';
+      } catch (e) {}
+    })();
+  </script>
   <!-- iOS 26 PWA: env(safe-area-inset-*) returns 0px at load time in standalone mode.
        100svh also reports wrong height (793px vs true 852px innerHeight on iPhone 16).
        Probe real values via DOM + window.innerHeight and re-apply after PWA chrome settles. -->
@@ -134,7 +151,7 @@
     <header class="reader-header">
       <button id="btn-toc"             class="btn-icon" data-i18n-title="reader.btn_toc"           title="Kazalo vsebine"><img src="/images/chapters.svg" class="nav-icon nav-icon-chapters" alt=""></button>
       <button id="btn-bookmarks"       class="btn-icon bookmark-btn-wrap" data-i18n-title="reader.btn_bookmarks" title="Zaznamki"><img src="/images/bookmark.svg" class="nav-icon nav-icon-bookmark" alt=""><span id="bookmarks-badge" class="bookmark-badge hidden"></span></button>
-      <button id="btn-annotations"     class="btn-icon" data-i18n-title="reader.btn_annotations" title="Označbe"><img src="/images/highlight.svg" class="nav-icon nav-icon-highlight" alt=""></button>
+      <button id="btn-annotations"     class="btn-icon bookmark-btn-wrap" data-i18n-title="reader.btn_annotations" title="Označbe"><img src="/images/highlight.svg" class="nav-icon nav-icon-highlight" alt=""><span id="annotations-badge" class="bookmark-badge hidden"></span></button>
       <button id="btn-bookmark-back"   class="btn-icon" style="display:none" data-i18n-title="reader.btn_search_back"   title="Nazaj na prejšnji položaj">↩</button>
       <button id="btn-bookmark-accept"    class="btn-icon" style="display:none" data-i18n-title="reader.btn_search_accept" title="Sprejmi položaj">✓</button>
       <button id="btn-annotation-back"   class="btn-icon" style="display:none" data-i18n-title="reader.btn_search_back"   title="Nazaj na prejšnji položaj">↩</button>
@@ -474,6 +491,21 @@
             <label class="toggle"><input type="checkbox" id="header-btn-fullscreen-toggle"><span class="toggle-slider"></span></label>
           </div>
         </div>
+        <div class="setting-row">
+          <div class="setting-row-inline">
+            <div class="setting-label" data-i18n="reader.header_btn_bookmark_badge">Bookmark count badge</div>
+            <label class="toggle"><input type="checkbox" id="header-btn-bookmark-badge-toggle"><span class="toggle-slider"></span></label>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-row-inline">
+            <div class="setting-label" data-i18n="reader.header_btn_annotation_badge">Highlight count badge</div>
+            <label class="toggle"><input type="checkbox" id="header-btn-annotation-badge-toggle"><span class="toggle-slider"></span></label>
+          </div>
+        </div>
+
+        <div class="settings-divider"></div>
+
         <div class="setting-row">
           <div class="setting-row-inline">
             <div>

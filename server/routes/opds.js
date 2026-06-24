@@ -74,9 +74,10 @@ router.get('/sync-sse', async (req, res) => {
 
   const { serverId, folderUrl, shelfName } = req.query;
   const limitParam = req.query.limit ? parseInt(req.query.limit, 10) : null;
-  const force = req.query.force === '1';
+  const force  = req.query.force  === '1';
+  const silent = req.query.silent === '1';
   if (serverId === undefined || serverId === null) return done({ type: 'error', message: 'error.server_id_required' });
-  if (!shelfName || !String(shelfName).trim()) return done({ type: 'error', message: 'error.shelf_name_required' });
+  if (!req.query.shelfId && (!shelfName || !String(shelfName).trim())) return done({ type: 'error', message: 'error.shelf_name_required' });
 
   const servers = getServers(user.id);
   const server  = getServerById(servers, serverId);
@@ -102,8 +103,9 @@ router.get('/sync-sse', async (req, res) => {
 
     const fs   = require('fs');
     const path = require('path');
-    const { DATA_DIR }                                              = require('../db');
-    const { computeFileHash, computeFileMd5, extractEpubMetadata } = require('../utils/epub');
+    const { DATA_DIR }                                                           = require('../db');
+    const { computeFileHash, computeFileMd5, extractEpubMetadata, extractCbzMetadata } = require('../utils/epub');
+    const { isCbrBuffer, convertCbrToCbz }                                      = require('../utils/cbr');
     const db         = getDb();
     const TMP_DIR    = path.join(DATA_DIR, 'tmp');
     const BOOKS_DIR  = path.join(DATA_DIR, 'books');
@@ -112,7 +114,14 @@ router.get('/sync-sse', async (req, res) => {
     fs.mkdirSync(userDir, { recursive: true });
 
     const cleanName = String(shelfName).trim().slice(0, 100);
-    let shelf = db.prepare('SELECT id FROM shelves WHERE user_id = ? AND name = ?').get(user.id, cleanName);
+    const fixedShelfId = req.query.shelfId ? parseInt(req.query.shelfId, 10) : null;
+    let shelf;
+    if (fixedShelfId) {
+      shelf = db.prepare('SELECT id FROM shelves WHERE id = ? AND user_id = ?').get(fixedShelfId, user.id);
+      if (!shelf) return done({ type: 'error', message: 'error.shelf_not_found' });
+    } else {
+      shelf = db.prepare('SELECT id FROM shelves WHERE user_id = ? AND name = ?').get(user.id, cleanName);
+    }
 
     // Collect pre-existing book IDs in the shelf (to detect stale books after sync)
     const preExistingBookIds = new Set();
@@ -126,6 +135,10 @@ router.get('/sync-sse', async (req, res) => {
       const r = db.prepare('INSERT INTO shelves (user_id, name) VALUES (?, ?)').run(user.id, cleanName);
       shelf = { id: r.lastInsertRowid };
     }
+
+    // Record OPDS origin and sync timestamp so the shelf stays linked to its source folder
+    db.prepare('UPDATE shelves SET opds_server_id = ?, opds_folder_url = ?, last_synced_at = ? WHERE id = ?')
+      .run(parseInt(serverId, 10), folderUrl || null, Math.floor(Date.now() / 1000), shelf.id);
 
     const headers = buildAuthHeaders(server.username, server.password);
     let added = 0, skipped = 0, refreshed = 0, errors = 0;
@@ -151,10 +164,17 @@ router.get('/sync-sse', async (req, res) => {
 
         const r = await fetch(entry.acqHref, { headers, signal: AbortSignal.timeout(60000) });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const buf = Buffer.from(await r.arrayBuffer());
+        let buf = Buffer.from(await r.arrayBuffer());
         if (buf.length < 100) throw new Error('error.file_empty');
 
-        const tmpPath = path.join(TMP_DIR, `sse_${Date.now()}_${user.id}.epub`);
+        let format = 'epub';
+        if (isCbrBuffer(buf)) {
+          console.log('[opds/sse] converting CBR → CBZ:', entry.title);
+          buf = await convertCbrToCbz(buf);
+          format = 'cbz';
+        }
+
+        const tmpPath = path.join(TMP_DIR, `sse_${Date.now()}_${user.id}.tmp`);
         fs.writeFileSync(tmpPath, buf);
         try {
           const fileHash    = computeFileHash(tmpPath);
@@ -166,10 +186,13 @@ router.get('/sync-sse', async (req, res) => {
             if (src) {
               const existingBook = db.prepare('SELECT * FROM books WHERE id = ? AND user_id = ?').get(src.book_id, user.id);
               if (existingBook) {
-                const destPath = path.join(userDir, existingBook.file_hash + '.epub');
+                const destPath = path.join(userDir, existingBook.filename || (existingBook.file_hash + '.epub'));
                 try { fs.renameSync(tmpPath, destPath); }
                 catch { fs.copyFileSync(tmpPath, destPath); fs.unlinkSync(tmpPath); }
-                const meta = extractEpubMetadata(destPath, COVERS_DIR, existingBook.file_hash);
+                const isCbzExisting = existingBook.format === 'cbz' || existingBook.filename?.endsWith('.cbz');
+                const meta = isCbzExisting
+                  ? extractCbzMetadata(destPath, COVERS_DIR, existingBook.file_hash)
+                  : extractEpubMetadata(destPath, COVERS_DIR, existingBook.file_hash);
                 db.prepare(`UPDATE books SET
                   file_hash_md5 = ?, kosync_hash = '',
                   cover_path  = ?,
@@ -200,23 +223,26 @@ router.get('/sync-sse', async (req, res) => {
 
           let book = db.prepare('SELECT id FROM books WHERE user_id = ? AND file_hash = ?').get(user.id, fileHash);
           if (!book) {
-            const filename = `${fileHash}.epub`;
+            const ext      = format === 'cbz' ? '.cbz' : '.epub';
+            const filename = `${fileHash}${ext}`;
             const destPath = path.join(userDir, filename);
             try { fs.renameSync(tmpPath, destPath); }
             catch { fs.copyFileSync(tmpPath, destPath); fs.unlinkSync(tmpPath); }
-            const meta      = extractEpubMetadata(destPath, COVERS_DIR, fileHash);
+            const meta = format === 'cbz'
+              ? extractCbzMetadata(destPath, COVERS_DIR, fileHash)
+              : extractEpubMetadata(destPath, COVERS_DIR, fileHash);
             const bookTitle  = meta.title  || entry.title  || 'Unknown';
             const bookAuthor = meta.author || entry.author || '';
             const fileSize   = fs.statSync(destPath).size;
             const ins = db.prepare(`
               INSERT INTO books (user_id, title, author, series_name, series_number, description,
                                  file_hash, file_hash_md5, filename, cover_path, file_size,
-                                 publisher, language, isbn, genres, pages)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 publisher, language, isbn, genres, pages, format)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(user.id, bookTitle, bookAuthor,
                    meta.series_name || '', meta.series_number || '', meta.description || entry.summary || '',
                    fileHash, fileHashMd5, filename, meta.cover_path, fileSize,
-                   meta.publisher || '', meta.language || '', meta.isbn || '', meta.genres || '', meta.pages || null);
+                   meta.publisher || '', meta.language || '', meta.isbn || '', meta.genres || '', meta.pages || null, format);
             book = { id: ins.lastInsertRowid };
             added++;
           } else {
@@ -239,10 +265,9 @@ router.get('/sync-sse', async (req, res) => {
     }
 
     // Detect stale books: in shelf before sync but NOT touched by this sync.
-    // A book is NOT stale if its known OPDS source URL appears in the current feed
-    // (handles: book added manually, download failed, URL changed slightly, etc.)
+    // Skipped for silent (background) syncs — only shown on manual sync.
     const staleBooks = [];
-    if (preExistingBookIds.size > 0) {
+    if (!silent && preExistingBookIds.size > 0) {
       for (const bookId of preExistingBookIds) {
         if (syncedBookIds.has(bookId)) continue;
         // Fallback: check if any known acq_href for this book is in the current feed
@@ -703,8 +728,9 @@ router.post('/sync', async (req, res) => {
 
     const fs   = require('fs');
     const path = require('path');
-    const { DATA_DIR }                          = require('../db');
-    const { computeFileHash, computeFileMd5, extractEpubMetadata } = require('../utils/epub');
+    const { DATA_DIR }                                                           = require('../db');
+    const { computeFileHash, computeFileMd5, extractEpubMetadata, extractCbzMetadata } = require('../utils/epub');
+    const { isCbrBuffer, convertCbrToCbz }                                      = require('../utils/cbr');
     const db        = getDb();
     const TMP_DIR   = path.join(DATA_DIR, 'tmp');
     const BOOKS_DIR = path.join(DATA_DIR, 'books');
@@ -741,10 +767,17 @@ router.post('/sync', async (req, res) => {
 
         const r = await fetch(entry.acqHref, { headers, signal: AbortSignal.timeout(60000) });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const buf = Buffer.from(await r.arrayBuffer());
+        let buf = Buffer.from(await r.arrayBuffer());
         if (buf.length < 100) throw new Error('error.file_empty');
 
-        const tmpPath = path.join(TMP_DIR, `sync_${Date.now()}_${req.user.id}.epub`);
+        let format = 'epub';
+        if (isCbrBuffer(buf)) {
+          console.log('[opds/sync] converting CBR → CBZ:', entry.title);
+          buf = await convertCbrToCbz(buf);
+          format = 'cbz';
+        }
+
+        const tmpPath = path.join(TMP_DIR, `sync_${Date.now()}_${req.user.id}.tmp`);
         fs.writeFileSync(tmpPath, buf);
 
         try {
@@ -756,24 +789,27 @@ router.post('/sync', async (req, res) => {
           ).get(req.user.id, fileHash);
 
           if (!book) {
-            const filename = `${fileHash}.epub`;
+            const ext      = format === 'cbz' ? '.cbz' : '.epub';
+            const filename = `${fileHash}${ext}`;
             const destPath = path.join(userDir, filename);
             try { fs.renameSync(tmpPath, destPath); }
             catch { fs.copyFileSync(tmpPath, destPath); fs.unlinkSync(tmpPath); }
 
-            const meta      = extractEpubMetadata(destPath, COVERS_DIR, fileHash);
+            const meta = format === 'cbz'
+              ? extractCbzMetadata(destPath, COVERS_DIR, fileHash)
+              : extractEpubMetadata(destPath, COVERS_DIR, fileHash);
             const bookTitle  = meta.title  || entry.title  || 'Unknown';
             const bookAuthor = meta.author || entry.author || '';
             const fileSize   = fs.statSync(destPath).size;
 
             const ins = db.prepare(`
               INSERT INTO books (user_id, title, author, series_name, series_number, description, file_hash, file_hash_md5, filename, cover_path, file_size,
-                                 publisher, language, isbn, genres, pages)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 publisher, language, isbn, genres, pages, format)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(req.user.id, bookTitle, bookAuthor,
                    meta.series_name || '', meta.series_number || '', meta.description || entry.summary || '',
                    fileHash, fileHashMd5, filename, meta.cover_path, fileSize,
-                   meta.publisher || '', meta.language || '', meta.isbn || '', meta.genres || '', meta.pages || null);
+                   meta.publisher || '', meta.language || '', meta.isbn || '', meta.genres || '', meta.pages || null, format);
             book = { id: ins.lastInsertRowid };
             added++;
           } else {
@@ -821,26 +857,20 @@ router.post('/download/:id', async (req, res) => {
     const r       = await fetch(resolvedHref, { headers, signal: AbortSignal.timeout(60000) });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
 
-    const ct = r.headers.get('content-type') || '';
-    if (!ct.includes('epub') && !ct.includes('octet-stream')) {
-      // Some servers redirect; check content-type loosely
-      const check = ct.toLowerCase();
-      if (!check.includes('epub') && !check.includes('zip') && !check.includes('octet')) {
-        console.warn('[opds] unexpected content-type:', ct);
-        throw new Error('error.unexpected_content_type');
-      }
+    const ct    = r.headers.get('content-type') || '';
+    const ctLow = ct.toLowerCase();
+    if (!ctLow.includes('epub') && !ctLow.includes('octet') &&
+        !ctLow.includes('zip')  && !ctLow.includes('rar')   &&
+        !ctLow.includes('cbr')  && !ctLow.includes('cbz')) {
+      console.warn('[opds] unexpected content-type:', ct);
+      throw new Error('error.unexpected_content_type');
     }
 
-    const buf  = Buffer.from(await r.arrayBuffer());
-    const size = buf.length;
-    if (size < 100) throw new Error('error.file_empty');
-
-    // Pipe into the books upload handler via internal multipart-like approach.
-    // We write the buffer to a temp file and then invoke the same logic as upload.
     const fs   = require('fs');
     const path = require('path');
-    const { DATA_DIR }                          = require('../db');
-    const { computeFileHash, computeFileMd5, extractEpubMetadata } = require('../utils/epub');
+    const { DATA_DIR }                                                      = require('../db');
+    const { computeFileHash, computeFileMd5, extractEpubMetadata, extractCbzMetadata } = require('../utils/epub');
+    const { isCbrBuffer, convertCbrToCbz }                                 = require('../utils/cbr');
     const db       = getDb();
     const TMP_DIR  = path.join(DATA_DIR, 'tmp');
     const BOOKS_DIR = path.join(DATA_DIR, 'books');
@@ -848,7 +878,19 @@ router.post('/download/:id', async (req, res) => {
     const userDir  = path.join(BOOKS_DIR, String(req.user.id));
     fs.mkdirSync(userDir, { recursive: true });
 
-    const tmpPath = path.join(TMP_DIR, `opds_${Date.now()}_${req.user.id}.epub`);
+    let buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length < 100) throw new Error('error.file_empty');
+
+    let format = 'epub';
+    if (isCbrBuffer(buf)) {
+      console.log('[opds] converting CBR → CBZ...');
+      buf = await convertCbrToCbz(buf);
+      format = 'cbz';
+    } else if (ctLow.includes('cbz') || ctLow.includes('comicbook+zip')) {
+      format = 'cbz';
+    }
+
+    const tmpPath = path.join(TMP_DIR, `opds_${Date.now()}_${req.user.id}.tmp`);
     fs.writeFileSync(tmpPath, buf);
 
     try {
@@ -860,23 +902,26 @@ router.post('/download/:id', async (req, res) => {
         return res.status(409).json({ error: 'error.book_already_in_library' });
       }
 
-      const filename = `${fileHash}.epub`;
+      const ext      = format === 'cbz' ? '.cbz' : '.epub';
+      const filename = `${fileHash}${ext}`;
       const destPath = path.join(userDir, filename);
       try { fs.renameSync(tmpPath, destPath); }
       catch { fs.copyFileSync(tmpPath, destPath); fs.unlinkSync(tmpPath); }
 
-      const meta     = extractEpubMetadata(destPath, COVERS_DIR, fileHash);
+      const meta = format === 'cbz'
+        ? extractCbzMetadata(destPath, COVERS_DIR, fileHash)
+        : extractEpubMetadata(destPath, COVERS_DIR, fileHash);
       const bookTitle  = meta.title  || title  || 'Unknown';
       const bookAuthor = meta.author || author || '';
       const fileSize   = fs.statSync(destPath).size;
 
       const result = db.prepare(`
         INSERT INTO books (user_id, title, author, series_name, series_number, description, file_hash, file_hash_md5, filename, cover_path, file_size,
-                           publisher, language, isbn, genres, pages)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           publisher, language, isbn, genres, pages, format)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(req.user.id, bookTitle, bookAuthor, meta.series_name || '', meta.series_number || '', meta.description || '',
              fileHash, fileHashMd5, filename, meta.cover_path, fileSize,
-             meta.publisher || '', meta.language || '', meta.isbn || '', meta.genres || '', meta.pages || null);
+             meta.publisher || '', meta.language || '', meta.isbn || '', meta.genres || '', meta.pages || null, format);
 
       res.status(201).json({ id: result.lastInsertRowid, title: bookTitle, author: bookAuthor, file_hash: fileHash });
     } catch (err) {

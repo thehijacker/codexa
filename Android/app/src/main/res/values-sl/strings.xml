@@ -8,4 +8,5 @@
     <string name="dialog_cancel">Prekliči</string>
     <string name="error_invalid_url">Prosim vnesite veljaven URL naslov, ki se začne s http:// ali https://</string>
     <string name="back_press_hint">Dvakrat pritisnite nazaj za spremembo URL-ja strežnika.</string>
+    <string name="file_chooser_unavailable">Na voljo ni nobene aplikacije za izbiro datotek</string>
 </resources>

@@ -1,8 +1,10 @@
 import { apiFetch } from './api.js';
 import { toast, confirmDialog, setButtonLoading, showProgressToast } from './ui.js';
-import { reloadShelves, getShelves, setActive, updateDownloadedCount, updateNavCounts } from './sidebar.js';
+import { reloadShelves, getShelves, setActive, updateDownloadedCount, updateNavCounts, setShelfBadge } from './sidebar.js';
 import { t } from './i18n.js';
 import { showPanel } from './router.js';
+import { openSyncModal, openOpdsBrowserAtFolder } from './opds.js';
+import { clearProgress } from './progress-outbox.js';
 import {
   isOfflineSupported,
   getAllBooks as getOfflineBooks,
@@ -10,7 +12,9 @@ import {
   downloadBook,
   deleteDownload,
   autoDownloadCurrentlyReading,
+  pruneStaleDownloads,
   saveBookMeta,
+  getCachedBookIds,
 } from './offline.js';
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -18,6 +22,8 @@ let books               = [];
 let booksLoaded         = false; // true only after first successful loadBooks()
 let currentShelfId      = 'all';
 let currentShelfBookIds = null; // null = use category logic
+let currentLinkedOpds   = null; // { serverId, folderUrl, shelfId, shelfName, lastSyncedAt } or null
+const _autoSyncCooldown = new Map(); // shelfId → timestamp of last auto-sync
 let editMode            = false;
 let selectedBooks       = new Set();
 let seriesFilter        = null; // active series name filter
@@ -41,6 +47,11 @@ const initialShelf  = urlParams.get('shelf') || sessionStorage.getItem('br_last_
 const initialSearch = sessionStorage.getItem('br_last_search') || '';
 sessionStorage.removeItem('br_last_shelf');
 sessionStorage.removeItem('br_last_search');
+// Restore book info modal when returning from a bookmark/highlight jump
+const returnBookId = Number(sessionStorage.getItem('br_return_book_id')) || 0;
+const returnTab    = sessionStorage.getItem('br_return_tab') || '';
+sessionStorage.removeItem('br_return_book_id');
+sessionStorage.removeItem('br_return_tab');
 if (urlParams.has('shelf')) history.replaceState(null, '', '/');
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -559,7 +570,7 @@ function openCoverPreview(book) {
 }
 
 // ── Book info modal ───────────────────────────────────────────────────────────
-async function openInfoModal(book) {
+async function openInfoModal(book, startTab = '') {
   document.getElementById('book-info-modal')?.remove();
 
   let fullBook = book;
@@ -611,9 +622,12 @@ async function openInfoModal(book) {
       <button class="modal-close" id="info-modal-close" aria-label="${t('common.close')}">&times;</button>
 
       <div class="info-modal-header">
-        ${fullBook.cover_path
-          ? `<img class="info-modal-cover info-modal-cover-clickable" src="/covers/${fullBook.cover_path}" alt="" />`
-          : `<div class="info-modal-cover info-modal-cover-ph">\u{1F4D6}</div>`}
+        <div class="info-modal-cover-wrap">
+          ${fullBook.cover_path
+            ? `<img class="info-modal-cover info-modal-cover-clickable" src="/covers/${fullBook.cover_path}" alt="" />`
+            : `<div class="info-modal-cover info-modal-cover-ph">\u{1F4D6}</div>`}
+          <span class="book-format-badge book-format-badge--${escHtml(fullBook.format || 'epub')}">${escHtml((fullBook.format || 'epub').toUpperCase())}</span>
+        </div>
         <div class="info-modal-hero">
           <h3 class="info-modal-title">${escHtml(fullBook.title)}</h3>
           <div class="info-modal-author">${escHtml(fullBook.author || t('library.unknown_author'))}</div>
@@ -732,6 +746,21 @@ async function openInfoModal(book) {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
+  // Save return state when a Jump link is clicked so the library re-opens this modal on back.
+  backdrop.addEventListener('click', e => {
+    if (e.target.closest('.imt-jump-btn')) {
+      try {
+        sessionStorage.setItem('br_return_book_id', String(fullBook.id));
+        sessionStorage.setItem('br_return_tab',     'reading');
+        sessionStorage.setItem('br_last_shelf',     String(currentShelfId));
+        sessionStorage.setItem('br_last_search',    document.getElementById('search-input')?.value || '');
+      } catch { /* ignore */ }
+    }
+  });
+
+  // If opened with a requested tab (e.g. returning from a jump), activate it now.
+  if (startTab) switchTab(startTab);
+
   // ── Prevent wheel scroll from leaking through the semi-transparent backdrop area
   const tabContent = backdrop.querySelector('.info-modal-tab-content');
   backdrop.addEventListener('wheel', e => {
@@ -807,10 +836,28 @@ async function openInfoModal(book) {
     const btn = e.currentTarget;
     btn.disabled = true;
     try {
-      await apiFetch(`/progress/${fullBook.file_hash}`, {
+      // App's own progress store. force=1 so 0% overwrites the high-water mark.
+      await apiFetch(`/progress/${fullBook.file_hash}?force=1`, {
         method: 'PUT',
-        body: JSON.stringify({ cfi_position: '', percentage: 0, device: 'web' }),
+        body: JSON.stringify({ cfi_position: '', percentage: 0, device: 'web', force: true }),
       });
+      // Also reset KOReader sync (internal store + external server) to 0%.
+      const docKey = fullBook.kosync_hash || fullBook.file_hash_md5;
+      if (docKey) {
+        const dk = encodeURIComponent(docKey);
+        // Internal store: force=1 so it bypasses the high-water mark too.
+        await apiFetch(`/kosync/internal/${dk}?force=1`, {
+          method: 'PUT',
+          body: JSON.stringify({ progress: '', percentage: 0, device: 'web' }),
+        }).catch(() => {});
+        // External server (no-ops if unconfigured). Best-effort.
+        await apiFetch(`/kosync/remote/${dk}`, {
+          method: 'PUT',
+          body: JSON.stringify({ document: docKey, progress: '', percentage: 0, device: 'web', device_id: 'codexa-web' }),
+        }).catch(() => {});
+      }
+      // Drop any pending offline position so it can't resync the old spot later.
+      clearProgress(fullBook.id);
       const cached = books.find(b => b.id === fullBook.id);
       if (cached) { cached.percentage = 0; cached.cfi_position = ''; }
       applyFilter();
@@ -1070,17 +1117,34 @@ export async function selectShelf(shelfId) {
   if (shelfId === 'all') {
     titleEl.innerHTML = `<img src="/images/all_library.svg" class="nav-icon nav-icon-all-library" alt=""> ${t('sidebar.all_library')}`;
     currentShelfBookIds = null;
+    currentLinkedOpds = null;
   } else if (shelfId === 'reading') {
     titleEl.innerHTML = `<img src="/images/currently_reading.svg" class="nav-icon nav-icon-currently-reading" alt=""> ${t('sidebar.currently_reading')}`;
     currentShelfBookIds = null;
+    currentLinkedOpds = null;
   } else if (shelfId === 'downloaded') {
     titleEl.innerHTML = `<img src="/images/download.svg" class="nav-icon nav-icon-download" alt=""> ${t('sidebar.downloaded')}`;
     currentShelfBookIds = null;
+    currentLinkedOpds = null;
   } else {
     const shelf = getShelves().find(s => s.id === shelfId);
-    titleEl.innerHTML = `<img src="/images/shelf.svg" class="nav-icon nav-icon-shelf" alt=""> ${escHtml(shelf ? shelf.name : 'Polica')}`;
+    const shelfIcon = shelf?.opds_folder_url ? 'opds_shelf' : 'shelf';
+    const shelfIconClass = shelf?.opds_folder_url ? 'nav-icon nav-icon-shelf nav-icon-opds-shelf' : 'nav-icon nav-icon-shelf';
+    titleEl.innerHTML = `<img src="/images/${shelfIcon}.svg" class="${shelfIconClass}" alt=""> ${escHtml(shelf ? shelf.name : 'Polica')}`;
+    currentLinkedOpds = shelf?.opds_folder_url
+      ? { serverId: shelf.opds_server_id, folderUrl: shelf.opds_folder_url,
+          shelfId: shelf.id, shelfName: shelf.name, lastSyncedAt: shelf.last_synced_at || null }
+      : null;
+    if (currentLinkedOpds) {
+      setShelfBadge(shelf.id, 0); // clear badge when user opens the shelf
+      _updateSyncDateDisplay(currentLinkedOpds.lastSyncedAt);
+      _autoSyncLinkedShelf(currentLinkedOpds); // fire-and-forget background sync
+    }
     await refreshShelfFilter(false);
   }
+
+  const banner = document.getElementById('opds-shelf-banner');
+  if (banner) banner.classList.toggle('hidden', !currentLinkedOpds);
 
   if (editMode) toggleEditMode();
   applyFilter();
@@ -1362,8 +1426,12 @@ function openShelfEditModal(shelf) {
         <label for="shelf-edit-input">${t('library.shelf_name_label')}</label>
         <input type="text" id="shelf-edit-input" maxlength="100" value="${escHtml(shelf.name)}" autofocus />
       </div>
+      ${shelf.opds_folder_url ? `
+      <div style="margin-top:1.25rem;margin-bottom:.75rem">
+        <button class="btn btn-sm btn-outline" id="shelf-edit-unlink">${t('library.opds_unlink')}</button>
+      </div>` : ''}
       <div class="modal-footer" style="justify-content:space-between">
-        <button class="btn btn-danger"    id="shelf-edit-delete">${t('library.shelf_btn_delete')}</button>
+        <button class="btn btn-danger" id="shelf-edit-delete">${t('library.shelf_btn_delete')}</button>
         <div style="display:flex;gap:.5rem">
           <button class="btn btn-secondary" id="shelf-edit-cancel">${t('common.cancel')}</button>
           <button class="btn btn-primary"   id="shelf-edit-save">${t('common.save')}</button>
@@ -1402,6 +1470,76 @@ function openShelfEditModal(shelf) {
       }
     );
   });
+
+  backdrop.querySelector('#shelf-edit-unlink')?.addEventListener('click', () => {
+    close();
+    confirmDialog(t('library.opds_unlink_confirm'), async () => {
+      try {
+        await apiFetch(`/shelves/${shelf.id}/opds-link`, { method: 'DELETE' });
+        toast.success(t('library.opds_unlinked'));
+        if (currentShelfId === shelf.id) {
+          currentLinkedOpds = null;
+          document.getElementById('opds-shelf-banner')?.classList.add('hidden');
+          document.getElementById('page-title').innerHTML =
+            `<img src="/images/shelf.svg" class="nav-icon nav-icon-shelf" alt=""> ${escHtml(shelf.name)}`;
+        }
+        await reloadShelves();
+      } catch (err) { toast.error(t('common.err_prefix') + err.message); }
+    });
+  });
+}
+
+// ── OPDS-linked shelf helpers ─────────────────────────────────────────────────
+function _formatSyncDate(unixSecs) {
+  if (!unixSecs) return '';
+  const d = new Date(unixSecs * 1000);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  const dateStr = sameDay
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return t('library.opds_last_synced', { date: dateStr });
+}
+
+function _updateSyncDateDisplay(ts) {
+  const el = document.getElementById('opds-shelf-sync-date');
+  if (el) el.textContent = ts ? _formatSyncDate(ts) : '';
+}
+
+function _autoSyncLinkedShelf(linked) {
+  const now = Date.now();
+  const last = _autoSyncCooldown.get(linked.shelfId) || 0;
+  if (now - last < 60 * 60 * 1000) return; // one sync per shelf per hour
+  _autoSyncCooldown.set(linked.shelfId, now);
+
+  const params = new URLSearchParams({
+    serverId:  String(linked.serverId),
+    folderUrl: linked.folderUrl,
+    shelfId:   String(linked.shelfId),
+    shelfName: linked.shelfName,
+    silent:    '1',
+    token:     getToken(),
+  });
+  const es = new EventSource(`/api/opds/sync-sse?${params}`);
+  es.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'done') {
+        es.close();
+        const newBooks = msg.added || 0;
+        const nowSec = Math.floor(Date.now() / 1000);
+        if (currentShelfId === linked.shelfId) {
+          _updateSyncDateDisplay(nowSec);
+          if (newBooks > 0) loadBooks();
+        }
+        if (newBooks > 0 && currentShelfId !== linked.shelfId) {
+          setShelfBadge(linked.shelfId, newBooks);
+        }
+      } else if (msg.type === 'error') {
+        es.close();
+      }
+    } catch { /* ignore parse errors */ }
+  };
+  es.onerror = () => es.close();
 }
 
 // ── Offline helpers ───────────────────────────────────────────────────────────
@@ -1412,8 +1550,8 @@ function getToken() {
 async function refreshDownloadedIds() {
   if (!isOfflineSupported) return;
   try {
-    const stored = await getOfflineBooks();
-    downloadedIds = new Set(stored.filter(b => b.downloadStatus === 'complete').map(b => b.id));
+    // A book is "downloaded" only if its EPUB blob is actually cached.
+    downloadedIds = await getCachedBookIds();
     updateDownloadedCount(downloadedIds.size);
   } catch { /* non-critical */ }
 }
@@ -1448,21 +1586,35 @@ async function loadBooks() {
     }
     // Refresh offline state, then auto-download currently-reading books silently
     await refreshDownloadedIds();
+    // Background: remove cached books that are no longer in the library, then re-count.
+    pruneStaleDownloads(new Set(books.map(b => b.id)))
+      .then(() => refreshDownloadedIds())
+      .catch(() => {});
     autoDownloadCurrentlyReading(books, getToken()).catch(() => {});
     if (wasOffline) {
       reloadShelves().catch(() => {});
       document.dispatchEvent(new CustomEvent('app:network-restored'));
     }
     applyFilter();
+    // Re-open book info modal when returning from a bookmark/highlight jump
+    if (returnBookId) {
+      const rb = books.find(b => b.id === returnBookId);
+      if (rb) openInfoModal(rb, returnTab || 'reading').catch(() => {});
+    }
   } catch (err) {
     // Server unreachable — try loading from IndexedDB
     try {
-      offlineBooks = await getOfflineBooks();
+      // Only books with an actually-cached EPUB blob are usable offline. IDB may
+      // also hold metadata-only entries (opened but never downloaded) — exclude
+      // those so the grid never shows un-openable, cover-less books.
+      const cachedIds = await getCachedBookIds();
+      const allMeta = await getOfflineBooks();
+      offlineBooks = allMeta.filter(b => cachedIds.has(b.id));
       if (offlineBooks.length > 0) {
         isOfflineMode = true;
         booksLoaded = true;
         document.body.classList.add('is-offline');
-        downloadedIds = new Set(offlineBooks.filter(b => b.downloadStatus === 'complete').map(b => b.id));
+        downloadedIds = new Set(cachedIds);
         updateDownloadedCount(downloadedIds.size);
         updateNavCounts(offlineBooks.length, offlineBooks.filter(b => (b.percentage || 0) > 0).length);
         showOfflineBanner();
@@ -1504,7 +1656,7 @@ function showDropZone() {
 }
 
 async function handleFiles(fileList) {
-  const epubs = [...fileList].filter(f => f.name.endsWith('.epub'));
+  const epubs = [...fileList].filter(f => f.name.endsWith('.epub') || f.name.endsWith('.cbz') || f.name.endsWith('.cbr'));
   if (!epubs.length) { toast.error(t('library.err_not_epub')); return; }
 
   setButtonLoading(uploadBtn, true, '+ Dodaj knjigo ▾');
@@ -1795,8 +1947,22 @@ export async function initLibrary() {
     uploadMenu.classList.add('hidden');
     showPanel('opds');
   });
+
+  // OPDS-linked shelf banner buttons
+  document.getElementById('opds-shelf-go-btn')?.addEventListener('click', () => {
+    if (!currentLinkedOpds) return;
+    openOpdsBrowserAtFolder(currentLinkedOpds.serverId, currentLinkedOpds.folderUrl);
+  });
+  document.getElementById('opds-shelf-sync-btn')?.addEventListener('click', () => {
+    if (!currentLinkedOpds) return;
+    openSyncModal(currentLinkedOpds.folderUrl, currentLinkedOpds.shelfName, currentLinkedOpds.shelfId, currentLinkedOpds.serverId);
+  });
   document.getElementById('empty-upload-btn').addEventListener('click', showDropZone);
-  dropZone.addEventListener('click', () => fileInput.click());
+  // The visible content is wrapped in a <label for="file-input">, so tapping it
+  // opens the chooser via native label activation (reliable on old WebViews, where
+  // a programmatic fileInput.click() often does nothing). Only the thin padding ring
+  // around the label — where e.target is the drop-zone itself — uses the JS fallback.
+  dropZone.addEventListener('click', (e) => { if (e.target === dropZone) fileInput.click(); });
   fileInput.addEventListener('change', () => handleFiles(fileInput.files));
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));

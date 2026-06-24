@@ -256,4 +256,56 @@ function extractEpubMetadata(epubPath, coversDir, fileHash) {
   return result;
 }
 
-module.exports = { computeFileHash, computeFileMd5, extractEpubMetadata };
+// ── CBZ metadata extraction ───────────────────────────────────────────────────
+function extractCbzMetadata(cbzPath, coversDir, fileHash) {
+  const IMAGE_EXT = /\.(jpe?g|png|webp|gif|avif)$/i;
+  const result = {
+    title: path.basename(cbzPath, '.cbz'), author: '', cover_path: '',
+    series_name: '', series_number: '', description: '', publisher: '',
+    language: '', isbn: '', genres: '', pages: '',
+  };
+
+  try {
+    const zip = new AdmZip(cbzPath);
+
+    // ComicInfo.xml for title/author
+    const ci = zip.getEntry('ComicInfo.xml');
+    if (ci) {
+      try {
+        const parsed = xmlParser.parse(ci.getData().toString('utf8'));
+        const info   = parsed?.ComicInfo || parsed?.comicinfo || {};
+        const txt    = (v) => (v !== undefined && v !== null) ? String(v).trim() : '';
+        if (txt(info.Title))   result.title       = txt(info.Title);
+        if (txt(info.Series))  result.series_name = txt(info.Series);
+        if (txt(info.Number))  result.series_number = txt(info.Number);
+        if (txt(info.Summary)) result.description = txt(info.Summary);
+        if (txt(info.Genre))   result.genres      = txt(info.Genre);
+        // Combine writer and penciller into author field
+        const writers = [txt(info.Writer), txt(info.Penciller)].filter(Boolean);
+        if (writers.length) result.author = writers.join(', ');
+      } catch { /* ignore */ }
+    }
+
+    // First sorted image → cover
+    const imageEntries = zip.getEntries()
+      .filter(e => !e.isDirectory && IMAGE_EXT.test(e.entryName))
+      .sort((a, b) => a.entryName.localeCompare(b.entryName, undefined, { numeric: true }));
+
+    if (imageEntries.length > 0) {
+      result.pages = String(imageEntries.length);
+      const first = imageEntries[0];
+      const ext = path.extname(first.entryName).toLowerCase() || '.jpg';
+      const coverFilename = `${fileHash}${ext}`;
+      try {
+        fs.writeFileSync(path.join(coversDir, coverFilename), first.getData());
+        result.cover_path = coverFilename;
+      } catch { /* cover extraction failed */ }
+    }
+  } catch (err) {
+    console.error('[cbz] metadata extraction failed:', err.message);
+  }
+
+  return result;
+}
+
+module.exports = { computeFileHash, computeFileMd5, extractEpubMetadata, extractCbzMetadata };

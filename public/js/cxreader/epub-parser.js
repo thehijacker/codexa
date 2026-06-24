@@ -4,9 +4,10 @@
 
 export class EpubParser {
   constructor() {
-    this._zip     = null;
-    this._opfBase = '';        // directory prefix for resolving OPF-relative hrefs
-    this._blobUrls = new Map(); // absPath → blob URL (all manifest resources)
+    this._zip       = null;
+    this._opfBase   = '';
+    this._blobUrls  = new Map(); // absPath → blob URL (all manifest resources)
+    this._fileSizes = new Map(); // absPath → blob.size (for content-weighted spine %)
   }
 
   // ── Main entry point ─────────────────────────────────────────────────────────
@@ -32,6 +33,12 @@ export class EpubParser {
     const opfDoc = new DOMParser().parseFromString(opfXml, 'application/xml');
 
     const metadata = this._parseMetadata(opfDoc);
+    const _fl = (sel) => opfDoc.querySelector(sel);
+    const isFixedLayout =
+      _fl('[property="rendition:layout"]')?.textContent?.trim() === 'pre-paginated' ||
+      _fl('meta[name="fixed-layout"]')?.getAttribute('content') === 'true';
+    const pageWidth  = parseInt(_fl('[property="rendition:width"]')?.textContent?.trim()  || '0', 10) || 0;
+    const pageHeight = parseInt(_fl('[property="rendition:height"]')?.textContent?.trim() || '0', 10) || 0;
     const rawManifest = this._parseRawManifest(opfDoc);
     const spineIds    = this._parseSpineOrder(opfDoc);
 
@@ -65,6 +72,9 @@ export class EpubParser {
       };
     });
 
+    // 5b. Content-proportional spine weights (uncompressed file size as text-length proxy).
+    const spineWeights = spine.map(item => this._fileSizes.get(item.absPath) || 1);
+
     // 6. TOC — prefer EPUB3 nav document, fall back to EPUB2 NCX
     const navItem = [...manifest.values()].find(m => m.properties.includes('nav'));
     const ncxItem = (() => {
@@ -79,8 +89,9 @@ export class EpubParser {
       toc = await this._parseNcx(ncxItem.absPath);
     }
 
+    if (isFixedLayout) console.log(`[CXReader] fixed-layout: ${pageWidth}×${pageHeight}`);
     console.log(`[CXReader] parsed: "${metadata.title}" by "${metadata.author}" | spine=${spine.length} toc=${toc.length}`);
-    return { spine, manifest, metadata, toc, opfBase: this._opfBase };
+    return { spine, manifest, metadata, toc, opfBase: this._opfBase, spineWeights, isFixedLayout, pageWidth, pageHeight };
   }
 
   // Revoke all blob URLs (call on destroy)
@@ -103,10 +114,18 @@ export class EpubParser {
   _resolve(href) {
     const clean = href.split('#')[0].split('?')[0];
     if (!clean) return '';
-    // Absolute path (starts with /): strip all leading slashes — ZIP entries never have them.
     if (clean.startsWith('/')) return this._normalizePath(clean.replace(/^\/+/, ''));
-    // Relative: join with the OPF directory and normalise . / .. segments.
     return this._normalizePath(this._opfBase + clean);
+  }
+
+  // Resolve a TOC/NCX-relative href to a ZIP-absolute path.
+  // Unlike _resolve(), docBase is already ZIP-absolute (the nav/ncx file's directory),
+  // so _opfBase must NOT be prepended a second time.
+  _resolveRel(docBase, href) {
+    const clean = href.split('#')[0].split('?')[0];
+    if (!clean) return '';
+    if (clean.startsWith('/')) return this._normalizePath(clean.replace(/^\/+/, ''));
+    return this._normalizePath(docBase + clean);
   }
 
   // Collapse . and .. segments and remove any remaining leading slashes.
@@ -170,6 +189,7 @@ export class EpubParser {
       try {
         const blob = await file.async('blob');
         this._blobUrls.set(absPath, URL.createObjectURL(blob));
+        this._fileSizes.set(absPath, blob.size);
       } catch { /* skip unreadable entries */ }
     }));
   }
@@ -179,8 +199,27 @@ export class EpubParser {
   async _parseNav(absPath) {
     const html = await this._readText(absPath);
     const doc  = new DOMParser().parseFromString(html, 'application/xhtml+xml');
-    const navEl = doc.querySelector('nav[epub\\:type="toc"], nav[*|type="toc"], nav');
+
+    // epub:type is a namespaced attribute in the IDPF ops namespace; CSS attribute selectors
+    // are unreliable for namespaced attrs in DOMParser XHTML output (browser-dependent).
+    // Check getAttributeNS first, then plain getAttribute, then fall back to the nav with
+    // the most <li> items (typically the TOC, not the landmarks nav which has only one entry).
+    const navEls = [...doc.querySelectorAll('nav')];
+    if (!navEls.length) return [];
+    const OPS_NS = 'http://www.idpf.org/2007/ops';
+    let navEl =
+      navEls.find(n => n.getAttributeNS(OPS_NS, 'type') === 'toc') ||
+      navEls.find(n => n.getAttribute('epub:type') === 'toc') ||
+      navEls.find(n => n.getAttribute('type') === 'toc');
+    if (!navEl) {
+      let maxLi = 0;
+      for (const n of navEls) {
+        const count = n.querySelectorAll('li').length;
+        if (count > maxLi) { maxLi = count; navEl = n; }
+      }
+    }
     if (!navEl) return [];
+
     const navBase = absPath.includes('/') ? absPath.slice(0, absPath.lastIndexOf('/') + 1) : '';
     return this._parseNavList(navEl.querySelector('ol'), navBase);
   }
@@ -192,7 +231,7 @@ export class EpubParser {
       const span = li.querySelector(':scope > span');
       const label = (aEl || span)?.textContent.trim() || '';
       const href  = aEl?.getAttribute('href') || '';
-      const absHref = href ? this._resolve(base + href.split('#')[0]) + (href.includes('#') ? '#' + href.split('#')[1] : '') : '';
+      const absHref = href ? this._resolveRel(base, href.split('#')[0]) + (href.includes('#') ? '#' + href.split('#')[1] : '') : '';
       const children = this._parseNavList(li.querySelector(':scope > ol'), base);
       return { label, href: absHref, children };
     }).filter(item => item.label);
@@ -209,7 +248,7 @@ export class EpubParser {
     return [...navPoints].map(np => {
       const label = np.querySelector('navLabel text')?.textContent.trim() || '';
       const src   = np.querySelector('content')?.getAttribute('src') || '';
-      const absHref = src ? this._resolve(base + src.split('#')[0]) + (src.includes('#') ? '#' + src.split('#')[1] : '') : '';
+      const absHref = src ? this._resolveRel(base, src.split('#')[0]) + (src.includes('#') ? '#' + src.split('#')[1] : '') : '';
       const children = this._parseNcxPoints(np.querySelectorAll(':scope > navPoint'), base);
       return { label, href: absHref, children };
     }).filter(item => item.label);

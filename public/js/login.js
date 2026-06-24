@@ -9,6 +9,21 @@ import { initI18n, t, initIconLangPicker } from '/js/i18n.js';
   // Apply e-ink theme when running inside the Android app with e-ink mode enabled
   if (typeof window.AndroidCodexa?.isEinkMode === 'function' && window.AndroidCodexa.isEinkMode()) {
     document.documentElement.setAttribute('data-lib-theme', 'eink');
+  } else {
+    // Resolve the library theme the same way the app does, so the login screen matches
+    // it. Old WebViews don't support prefers-color-scheme, so 'system' must be resolved
+    // here in JS — otherwise login is stuck on the dark :root default while the app
+    // (which resolves to day/night) shows light.
+    const savedTheme = localStorage.getItem('br_library_theme') || 'system';
+    let resolved = savedTheme;
+    if (resolved === 'system') {
+      if (typeof window.AndroidCodexa?.isNightMode === 'function') {
+        resolved = window.AndroidCodexa.isNightMode() ? 'night' : 'day';
+      } else {
+        resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+      }
+    }
+    document.documentElement.setAttribute('data-lib-theme', resolved);
   }
 
   // E-ink toggle row (only visible inside Android app)
@@ -97,13 +112,31 @@ import { initI18n, t, initIconLangPicker } from '/js/i18n.js';
     window.visualViewport.addEventListener('resize', setVH);
     setVH();
   }
-  // Always scroll the focused input into view — old WebViews may have visualViewport but
-  // its resize event fires unreliably, so the --login-vh approach alone isn't enough.
-  document.querySelectorAll('input').forEach(input => {
-    input.addEventListener('focus', () => {
-      setTimeout(() => input.scrollIntoView({ behavior: 'auto', block: 'center' }), 500);
+  // Old WebViews (Android 8 ships ~Chrome 60) may lack visualViewport entirely, or
+  // fire its resize event unreliably, so the --login-vh shrink above isn't enough —
+  // the keyboard overlays the page and there's nothing to scroll. When a field is
+  // focused on a touch device we give the page real scroll room (body.kb-focus adds
+  // a tall bottom margin and switches off vertical centering) and then scroll the
+  // field into view, which lifts it above the keyboard.
+  if (window.matchMedia('(pointer: coarse)').matches) {
+    let blurTimer;
+    document.querySelectorAll('input').forEach(input => {
+      input.addEventListener('focus', () => {
+        clearTimeout(blurTimer);
+        document.body.classList.add('kb-focus');
+        // Delay so the keyboard has appeared before we measure/scroll.
+        setTimeout(() => input.scrollIntoView({ behavior: 'auto', block: 'center' }), 400);
+      });
+      input.addEventListener('blur', () => {
+        // Keep the scroll room while tabbing between fields; collapse only once
+        // no input remains focused.
+        blurTimer = setTimeout(() => {
+          const a = document.activeElement;
+          if (!a || a.tagName !== 'INPUT') document.body.classList.remove('kb-focus');
+        }, 200);
+      });
     });
-  });
+  }
 
   // ── Register ──────────────────────────────────────────────────────────────
   document.getElementById('register-form').addEventListener('submit', async (e) => {

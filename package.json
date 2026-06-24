@@ -21,7 +21,8 @@
     "express-rate-limit": "^7.5.0",
     "fast-xml-parser": "^5.7.2",
     "jsonwebtoken": "^9.0.2",
-    "multer": "^2.0.0"
+    "multer": "^2.0.0",
+    "node-unrar-js": "^2.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.0",

@@ -4,7 +4,8 @@ const path     = require('path');
 const fs       = require('fs');
 const { getDb, DATA_DIR }              = require('../db');
 const { authenticateToken }            = require('../middleware/auth');
-const { computeFileHash, computeFileMd5, extractEpubMetadata } = require('../utils/epub');
+const { computeFileHash, computeFileMd5, extractEpubMetadata, extractCbzMetadata } = require('../utils/epub');
+const { isCbrBuffer, convertCbrToCbz } = require('../utils/cbr');
 
 const router    = express.Router();
 const BOOKS_DIR = path.join(DATA_DIR, 'books');
@@ -18,8 +19,16 @@ const upload = multer({
   dest: TMP_DIR,
   limits: { fileSize: 300 * 1024 * 1024 }, // 300 MB
   fileFilter: (_req, file, cb) => {
+    const name = file.originalname.toLowerCase();
     const ok = file.mimetype === 'application/epub+zip'
-            || file.originalname.toLowerCase().endsWith('.epub');
+            || file.mimetype === 'application/x-cbz'
+            || file.mimetype === 'application/x-cbr'
+            || file.mimetype === 'application/zip'
+            || file.mimetype === 'application/rar'
+            || file.mimetype === 'application/x-rar-compressed'
+            || name.endsWith('.epub')
+            || name.endsWith('.cbz')
+            || name.endsWith('.cbr');
     cb(ok ? null : new Error('error.epub_required'), ok);
   },
 });
@@ -86,7 +95,8 @@ router.get('/:id/file', (req, res) => {
     return res.status(404).json({ error: 'error.book_file_not_found' });
   }
 
-  res.setHeader('Content-Type', 'application/epub+zip');
+  const isCbzFile = book.filename?.endsWith('.cbz') || book.format === 'cbz';
+  res.setHeader('Content-Type', isCbzFile ? 'application/x-cbz' : 'application/epub+zip');
   res.setHeader('Accept-Ranges', 'bytes');
 
   // ?download=1 → trigger browser Save-As with a nice human-readable filename
@@ -100,7 +110,7 @@ router.get('/:id/file', (req, res) => {
       const sNum  = sanitize(book.series_number);
       fname += ` (${sName}${sNum ? ` #${sNum}` : ''})`;
     }
-    fname += '.epub';
+    fname += isCbzFile ? '.cbz' : '.epub';
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fname)}`);
   }
 
@@ -118,6 +128,16 @@ router.post('/', upload.single('epub'), async (req, res) => {
   fs.mkdirSync(userDir, { recursive: true });
 
   try {
+    // Detect and convert CBR → CBZ BEFORE hashing so the stored hash matches the CBZ content.
+    const origName = req.file.originalname.toLowerCase();
+    let isCbz = origName.endsWith('.cbz');
+    if (origName.endsWith('.cbr') || isCbrBuffer(fs.readFileSync(tmpPath).slice(0, 8))) {
+      console.log('[books] converting CBR → CBZ...');
+      const cbzBuf = await convertCbrToCbz(fs.readFileSync(tmpPath));
+      fs.writeFileSync(tmpPath, cbzBuf);
+      isCbz = true;
+    }
+
     const fileHash    = computeFileHash(tmpPath);
     const fileHashMd5 = computeFileMd5(tmpPath);
     const db       = getDb();
@@ -130,7 +150,9 @@ router.post('/', upload.single('epub'), async (req, res) => {
       return res.status(409).json({ error: 'error.book_already_in_library' });
     }
 
-    const filename = `${fileHash}.epub`;
+    const ext      = isCbz ? '.cbz' : '.epub';
+    const format   = isCbz ? 'cbz'  : 'epub';
+    const filename = `${fileHash}${ext}`;
     const destPath = path.join(userDir, filename);
 
     // Move from tmp to permanent location (cross-device safe)
@@ -141,13 +163,15 @@ router.post('/', upload.single('epub'), async (req, res) => {
       fs.unlinkSync(tmpPath);
     }
 
-    const { title, author, cover_path, series_name, series_number, description, publisher, language, isbn, genres, pages } = extractEpubMetadata(destPath, COVERS_DIR, fileHash);
+    const { title, author, cover_path, series_name, series_number, description, publisher, language, isbn, genres, pages } =
+      isCbz ? extractCbzMetadata(destPath, COVERS_DIR, fileHash)
+             : extractEpubMetadata(destPath, COVERS_DIR, fileHash);
     const fileSize = fs.statSync(destPath).size;
 
     const result = db.prepare(`
-      INSERT INTO books (user_id, title, author, series_name, series_number, description, publisher, language, isbn, genres, pages, file_hash, file_hash_md5, filename, cover_path, file_size)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(req.user.id, title, author, series_name, series_number, description, publisher, language, isbn, genres, pages, fileHash, fileHashMd5, filename, cover_path, fileSize);
+      INSERT INTO books (user_id, title, author, series_name, series_number, description, publisher, language, isbn, genres, pages, file_hash, file_hash_md5, filename, cover_path, file_size, format)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.user.id, title, author, series_name, series_number, description, publisher, language, isbn, genres, pages, fileHash, fileHashMd5, filename, cover_path, fileSize, format);
 
     res.status(201).json({ id: result.lastInsertRowid, title, author, series_name, series_number, cover_path, file_hash: fileHash, file_hash_md5: fileHashMd5 });
   } catch (err) {

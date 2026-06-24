@@ -12,7 +12,11 @@ function applyTheme(theme) {
   if (theme === 'light') html.classList.add('theme-light');
   if (theme === 'dark')  html.classList.add('theme-dark');
   const btn = document.getElementById('theme-btn');
-  if (btn) btn.innerHTML = `${THEME_ICONS[theme]} ${THEME_LABELS[theme]}`;
+  if (btn) {
+    btn.textContent = THEME_ICONS[theme];
+    btn.title = `Theme: ${THEME_LABELS[theme]} — click to change`;
+    btn.setAttribute('aria-label', `Theme: ${THEME_LABELS[theme]}, click to change`);
+  }
 }
 
 function cycleTheme() {

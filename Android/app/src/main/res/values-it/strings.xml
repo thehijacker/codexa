@@ -8,4 +8,5 @@
     <string name="dialog_cancel">Annulla</string>
     <string name="error_invalid_url">Inserisci un URL valido che inizi con http:// o https://</string>
     <string name="back_press_hint">Premi due volte indietro per modificare l\'URL del server.</string>
+    <string name="file_chooser_unavailable">Nessuna app disponibile per scegliere i file</string>
 </resources>

@@ -3,6 +3,22 @@
 <head>
   <meta charset="UTF-8" />
   <script>document.documentElement.style.visibility='hidden'</script>
+  <script>
+    /* Detect missing flexbox `gap` (Chrome < 84) and flag <html> so the margin
+       fallbacks in main.css kick in. No reliable CSS feature query exists for it. */
+    (function () {
+      try {
+        var f = document.createElement('div');
+        f.style.cssText = 'display:flex;flex-direction:column;row-gap:1px;position:absolute;visibility:hidden';
+        f.appendChild(document.createElement('div'));
+        f.appendChild(document.createElement('div'));
+        document.documentElement.appendChild(f);
+        var ok = f.scrollHeight === 1;
+        document.documentElement.removeChild(f);
+        if (!ok) document.documentElement.className += ' no-flexgap';
+      } catch (e) {}
+    })();
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Prijava — Codexa</title>
   <link rel="manifest" href="/manifest.json" />
@@ -70,6 +86,14 @@
     .tab-panel.active { display: block; }
     .form-group { margin-bottom: 1rem; }
     .submit-btn { width: 100%; margin-top: .5rem; justify-content: center; }
+    /* Keyboard-open state (touch). The on-screen keyboard on older Android WebViews
+       overlays the page without shrinking the viewport, so we manufacture scroll
+       room ourselves: stop vertical centering (which clips overflow at the top and
+       can't be scrolled to) and add a tall bottom margin so the focused field can
+       be scrolled up above the keyboard. Margin is used, not padding, because the
+       global box-sizing:border-box absorbs padding into min-height. */
+    body.kb-focus { align-items: flex-start; }
+    body.kb-focus .login-wrap { margin-bottom: 60vh; }
   </style>
 </head>
 <body>

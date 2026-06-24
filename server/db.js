@@ -178,6 +178,10 @@ function initDb() {
     [`ALTER TABLE books          ADD COLUMN pages                    TEXT    DEFAULT ''`,  'books.pages'],
     [`ALTER TABLE user_settings  ADD COLUMN kosync_internal_enabled  INTEGER DEFAULT 0`,   'user_settings.kosync_internal_enabled'],
     [`ALTER TABLE books          ADD COLUMN last_opened_at          INTEGER`, 'books.last_opened_at'],
+    [`ALTER TABLE books          ADD COLUMN format                  TEXT    DEFAULT 'epub'`, 'books.format'],
+    [`ALTER TABLE shelves        ADD COLUMN opds_server_id          INTEGER DEFAULT NULL`,   'shelves.opds_server_id'],
+    [`ALTER TABLE shelves        ADD COLUMN opds_folder_url         TEXT    DEFAULT NULL`,   'shelves.opds_folder_url'],
+    [`ALTER TABLE shelves        ADD COLUMN last_synced_at          INTEGER DEFAULT NULL`,   'shelves.last_synced_at'],
   ];
   for (const [sql, label] of migrations) {
     try {
