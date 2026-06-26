@@ -4,8 +4,13 @@
   "description": "EPUB web reader with OPDS browsing and KOReader sync support",
   "main": "server/index.js",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=24.0.0"
   },
+  "allowScripts": {
+     "bcrypt": true,
+     "better-sqlite3": true,
+     "esbuild": true
+   },  
   "scripts": {
     "start": "node server/index.js",
     "dev": "nodemon server/index.js",
@@ -14,7 +19,7 @@
   "dependencies": {
     "adm-zip": "^0.5.16",
     "bcrypt": "^6.0.0",
-    "better-sqlite3": "^9.4.3",
+    "better-sqlite3": "^11.10.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",

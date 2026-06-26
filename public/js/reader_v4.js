@@ -7780,6 +7780,13 @@ async function init() {
     // All navigation is done — reveal the viewer at the correct page.
     clearTimeout(_revealTimer);
     _revealViewer();
+    // Re-paginate after reveal so measurements are taken with the element visible.
+    // The paginator ran at opacity:0; on some mobile WebViews this causes the last
+    // line of the first page to be clipped on first open. setLayout({}) re-runs the
+    // paginator preserving position via fractional page index (see cxreader/index.js).
+    if (prefs.experimentalReader && _cxReader) {
+      requestAnimationFrame(() => _cxReader.setLayout({}));
+    }
     // Peek mode: always notify user that progress is not saved
     if (isPeekMode) toast.info(t('reader.peek_mode_hint'));
     cancelDebouncedSync();

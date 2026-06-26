@@ -1,7 +1,7 @@
 # ── Build stage ───────────────────────────────────────────────────────────────
 # Installs all deps (including devDeps for esbuild), transpiles public/ → dist/
 # for Chrome 69 / older Android WebView, then prunes devDeps before handoff.
-FROM node:18-alpine AS build
+FROM node:24-alpine AS build
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ RUN npm run build
 RUN npm prune --omit=dev
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
-FROM node:18-alpine
+FROM node:24-alpine
 
 WORKDIR /app
 

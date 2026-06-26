@@ -477,6 +477,15 @@ function openCardMenu(book, btn) {
       ${t('library.btn_cover_info')}
     </button>
     ${offlineItem}
+    ${isOfflineMode ? '' : `
+    <a class="bcm-item" href="/api/books/${book.id}/file?download=1&token=${getToken()}" download>
+      <img src="/images/download.svg" class="nav-icon bcm-icon nav-icon-download" alt="">
+      ${t('library.btn_download')}
+    </a>
+    <button class="bcm-item bcm-delete">
+      <img src="/images/delete.svg" class="nav-icon bcm-icon nav-icon-delete" alt="">
+      ${t('library.btn_del_book')}
+    </button>`}
   `;
   document.body.appendChild(popup);
 
@@ -503,6 +512,14 @@ function openCardMenu(book, btn) {
   popup.querySelector('.bcm-info').addEventListener('click', () => {
     closeCardMenu();
     openInfoModal(book);
+  });
+
+  popup.querySelector('.bcm-delete')?.addEventListener('click', () => {
+    closeCardMenu();
+    confirmDialog(
+      t('library.confirm_del_book', { title: escHtml(book.title) }),
+      () => deleteBook(book.id)
+    );
   });
 
   popup.querySelector('.bcm-offline-download')?.addEventListener('click', async () => {
@@ -999,15 +1016,22 @@ async function openInfoModal(book, startTab = '') {
         });
         fullBook.file_hash_md5 = result.file_hash_md5;
         fullBook.kosync_hash   = '';
+        fullBook.cover_path    = result.cover_path;
         backdrop.querySelector('#ik-md5').textContent = result.file_hash_md5;
         backdrop.querySelector('#ik-override-row').style.display = 'none';
         ikClear.style.display = 'none';
         ikInput.value = result.file_hash_md5;
+        // Refresh the cover image in the still-open modal (?v= busts cache if hash unchanged)
+        const coverImg = backdrop.querySelector('.info-modal-cover');
+        if (coverImg instanceof HTMLImageElement && result.cover_path) {
+          coverImg.src = `/covers/${result.cover_path}?v=${Date.now()}`;
+        }
         if (navigator.serviceWorker?.controller) {
           navigator.serviceWorker.controller.postMessage({ type: 'DELETE_BOOK', bookId: fullBook.id });
         }
         toast.success(t('library.kosync_replace_done', { md5: result.file_hash_md5 }));
         setButtonLoading(btn, false, '✓');
+        void loadBooks();
       } catch (err) {
         toast.error(t('common.err_prefix') + err.message);
         setButtonLoading(btn, false, t('library.kosync_replace_btn'));
@@ -1686,7 +1710,7 @@ async function handleFiles(fileList) {
   }
 
   uploadStatus.innerHTML = `<div class="alert alert-${failed ? 'error' : 'success'}">
-    ${t('library.upload_result', { ok: uploaded, err: failed })}</div>`;
+    ${t('library.upload_result', { uploaded, failed })}</div>`;
   setTimeout(() => { uploadStatus.classList.add('hidden'); uploadStatus.innerHTML = ''; }, 4000);
   setButtonLoading(uploadBtn, false, '+ Dodaj knjigo ▾');
   fileInput.value = '';

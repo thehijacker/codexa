@@ -17,6 +17,24 @@ if (!requireAuth()) {
 // later reflow corrects it (it looked like the page "jumped down" once books loaded).
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
+async function checkForUpdate(localVersion) {
+  if (sessionStorage.getItem('br_update_checked')) return;
+  sessionStorage.setItem('br_update_checked', '1');
+  try {
+    const r = await fetch('https://raw.githubusercontent.com/thehijacker/codexa/refs/heads/main/package.json');
+    if (!r.ok) return;
+    const { version: remote } = await r.json();
+    if (remote && remote !== localVersion) {
+      document.querySelectorAll('a.logo').forEach(logo => {
+        if (logo.querySelector('.update-badge')) return;
+        logo.insertAdjacentHTML('beforeend',
+          `<a class="update-badge" href="https://github.com/thehijacker/codexa/releases" target="_blank" rel="noopener">v${remote} ↑</a>`
+        );
+      });
+    }
+  } catch { /* network unavailable — silently skip */ }
+}
+
 function fetchAndShowVersion() {
   fetch('/api/version').then(r => r.json()).then(({ version }) => {
     document.title = `Codexa v${version}`;
@@ -25,6 +43,7 @@ function fetchAndShowVersion() {
       if (ver) { ver.textContent = `v${version}`; }
       else { logo.insertAdjacentHTML('beforeend', ` <span class="app-version">v${version}</span>`); }
     });
+    checkForUpdate(version);
   }).catch(() => {});
 }
 fetchAndShowVersion();
