@@ -259,7 +259,6 @@ const DEFAULT_PREFS = {
   edgePadding:    { top: 0, bottom: 0, left: 0, right: 0 },   // px inset for curved screens
   navZoneLeftPct:  0,          // % of screen width — tap/click to go back
   navZoneRightPct: 0,          // % of screen width — tap/click to go forward
-  headerRevealZonePct: 12,      // % of screen height — tap reveals auto-hidden toolbar
   headerButtonScalePct: 100,    // % of default responsive size (36 desktop / 44 mobile)
   headerBtnAnnotations:  true,  // show annotations button in header
   headerBtnSearch:       true,  // show search button in header
@@ -275,6 +274,7 @@ const DEFAULT_PREFS = {
   vertNavZones:          false, // top/bottom half tap navigation
   vertNavZonesReversed:  false, // true = top:next, bottom:prev
   statusBar:      null,         // deep-merged in loadPrefs()
+  pageTurnAnim:   'fade',       // 'none' | 'fade' | 'slide'
 };
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -451,17 +451,11 @@ function loadPrefs() {
     const s = localStorage.getItem('br_reader_prefs');
     const saved = s ? JSON.parse(s) : {};
     const sb = saved.statusBar || {};
-    const legacyRevealPx = typeof saved.headerRevealZone === 'number' ? saved.headerRevealZone : null;
     const legacyBtnPx = typeof saved.headerButtonSize === 'number' ? saved.headerButtonSize : null;
     const btnBase = window.matchMedia('(max-width: 640px)').matches ? 44 : 36;
     const merged = {
       ...DEFAULT_PREFS,
       ...saved,
-      headerRevealZonePct: saved.headerRevealZonePct ?? (
-        legacyRevealPx != null
-          ? Math.min(40, Math.max(2, Math.round(legacyRevealPx / 8)))
-          : DEFAULT_PREFS.headerRevealZonePct
-      ),
       headerButtonScalePct: saved.headerButtonScalePct ?? (
         legacyBtnPx != null && legacyBtnPx > 0
           ? Math.min(225, Math.max(75, Math.round(legacyBtnPx / btnBase * 100)))
@@ -960,7 +954,8 @@ body {
   font-family:   ${prefs.fontFamily} !important;
   line-height:   ${prefs.lineHeight} !important;
 }
-p, li, td, th, dt, dd, blockquote, span {
+p, li, td, th, dt, dd, blockquote,
+p span:not(.codexa-dropcap), li span, td span, th span, dt span, dd span, blockquote span {
   font-size:   ${prefs.fontSize}px !important;
   font-family: ${prefs.fontFamily} !important;
   line-height: ${prefs.lineHeight} !important;
@@ -1007,7 +1002,7 @@ ${_supportsWhere
   ? ':where(p) { margin-top: 0; margin-bottom: 0.3em; }'
   : 'p { margin-top: 0; margin-bottom: 0.3em; }'}
 ${fontOverrides}
-img {
+img:not(.codexa-dropcap-img) {
   max-width:   100% !important;
   max-height:  75vh !important;
   width:       auto !important;
@@ -1073,7 +1068,83 @@ mark.br-press-hl {
 .br-bionic-focus {
   font-weight: 700 !important;
 }
+/* Drop cap layout — classes applied by fixDropCaps() */
+.codexa-dropcap-para { text-indent: 0 !important; }
+.codexa-dropcap {
+  float: left !important;
+  line-height: 0.85 !important;
+  margin-right: 0.06em !important;
+  margin-top:   0.05em !important;
+  margin-bottom: 0 !important;
+  text-indent:   0 !important;
+}
+.codexa-dropcap-img {
+  float: left !important;
+  display: block !important;
+  margin: 0 0.3em 0.1em 0 !important;
+  max-height: 4em !important;
+  max-width: 25% !important;
+  width: auto !important;
+  height: auto !important;
+  object-fit: contain !important;
+  mix-blend-mode: multiply !important;
+}
 `.trim();
+}
+
+// ── Drop cap detection ────────────────────────────────────────────────────────
+const _DROP_CAP_CLS_RE = /drop.?cap|lettrine|chapinit|firstletter|initial.?cap|bigcap|lead.?cap/i;
+
+function _checkBookSheets(doc, el, test) {
+  try {
+    for (const sheet of doc.styleSheets) {
+      let rules;
+      try { rules = sheet.cssRules; } catch { continue; }
+      for (const rule of rules) {
+        if (rule.type !== 1) continue; // CSSStyleRule only
+        try { if (el.matches(rule.selectorText) && test(rule.style)) return true; }
+        catch { /* invalid selector */ }
+      }
+    }
+  } catch { /* ignore */ }
+  return false;
+}
+
+function fixDropCaps(doc) {
+  if (doc.documentElement.dataset.brDropCapsFixed) return;
+  doc.documentElement.dataset.brDropCapsFixed = '1';
+
+  // Text drop caps: first-child <span> inside <p> containing 1–4 characters
+  doc.querySelectorAll('p > span:first-child').forEach(span => {
+    const text = span.textContent.trim();
+    if (text.length === 0 || text.length > 4) return;
+    const byClass = _DROP_CAP_CLS_RE.test(span.className) || _DROP_CAP_CLS_RE.test(span.id);
+    const byStyle = !byClass && _checkBookSheets(doc, span, s =>
+      s.float === 'left' ||
+      (s.fontSize && (
+        (s.fontSize.endsWith('em')  && parseFloat(s.fontSize) > 1.5) ||
+        (s.fontSize.endsWith('px')  && parseFloat(s.fontSize) > 28)  ||
+        (s.fontSize.endsWith('rem') && parseFloat(s.fontSize) > 1.5)
+      ))
+    );
+    if (byClass || byStyle) {
+      span.classList.add('codexa-dropcap');
+      span.parentElement.classList.add('codexa-dropcap-para');
+    }
+  });
+
+  // Image drop caps: floated <img> as first child of <p> (directly or inside a span)
+  doc.querySelectorAll('p > img:first-child, p > span:first-child > img:only-child').forEach(img => {
+    const anchor = img.parentElement?.tagName === 'SPAN' ? img.parentElement : img;
+    const isFloat =
+      _checkBookSheets(doc, anchor, s => s.float === 'left') ||
+      (anchor !== img && _checkBookSheets(doc, img, s => s.float === 'left'));
+    if (!isFloat) return;
+    img.classList.add('codexa-dropcap-img');
+    img.closest('p').classList.add('codexa-dropcap-para');
+    // Unwrap single-img span so the float is directly on the img
+    if (anchor !== img && anchor.childNodes.length === 1) anchor.replaceWith(img);
+  });
 }
 
 function injectIntoContents(contents) {
@@ -1113,6 +1184,7 @@ function injectIntoContents(contents) {
     // cycle from the 'rendered' re-inject that fires after hooks.content.
     el.textContent = newCss;
   }
+  fixDropCaps(doc);
   if (prefs.bionicReading) {
     applyBionicToDocument(doc);
     markBionicPageCached(contents.location?.start ? { start: contents.location.start } : rendition?.currentLocation?.());
@@ -2472,14 +2544,6 @@ function refreshStatusBarTime() {
 }
 setInterval(refreshStatusBarTime, 30000);
 
-function getHeaderRevealZonePct() {
-  return prefs.headerRevealZonePct ?? 12;
-}
-
-function getHeaderRevealZonePx() {
-  return window.innerHeight * getHeaderRevealZonePct() / 100;
-}
-
 function inNavZone(x) {
   const w = window.innerWidth;
   const leftPct  = prefs.navZoneLeftPct  ?? 20;
@@ -2489,18 +2553,10 @@ function inNavZone(x) {
   return null;
 }
 
-function inHeaderRevealZone(y) {
-  return y < getHeaderRevealZonePx();
-}
-
 function applyNavZones() {
   const root = document.documentElement;
   root.style.setProperty('--nav-zone-left-pct',  (prefs.navZoneLeftPct  ?? 20) + '%');
   root.style.setProperty('--nav-zone-right-pct', (prefs.navZoneRightPct ?? 20) + '%');
-}
-
-function applyHeaderRevealZone() {
-  document.documentElement.style.setProperty('--header-reveal-zone-pct', getHeaderRevealZonePct() + '%');
 }
 
 function getHeaderButtonBasePx() {
@@ -4011,10 +4067,20 @@ function populateFontSelect() {
       onSelect: val => {
         prefs.fontFamily = val;
         setFontPickerLabel('font-family-picker', val, [...customFonts, ...SYSTEM_FONTS]);
-        reapplyStyles(); persistPrefs();
+        reapplyStyles(); persistPrefs(); updateFontPreview();
       },
     });
   };
+}
+
+function updateFontPreview() {
+  const box = document.getElementById('font-preview-box');
+  if (!box) return;
+  box.textContent         = t('reader.font_preview_text');
+  box.style.fontFamily    = prefs.fontFamily || '';
+  box.style.fontSize      = prefs.fontSize + 'px';
+  box.style.lineHeight    = prefs.lineHeight;
+  box.style.letterSpacing = prefs.letterSpacing > 0 ? (prefs.letterSpacing / 10) + 'px' : '';
 }
 
 function syncSettingsUi() {
@@ -4040,8 +4106,10 @@ function syncSettingsUi() {
   const customTextEl = document.getElementById('custom-text-color');
   if (customBgEl)   customBgEl.value   = prefs.customBg   || '#000000';
   if (customTextEl) customTextEl.value = prefs.customText || '#c8b89a';
-  document.querySelectorAll('.spread-btn').forEach(b =>
+  document.querySelectorAll('.spread-btn[data-spread]').forEach(b =>
     b.classList.toggle('active', b.dataset.spread === prefs.spread));
+  document.querySelectorAll('.page-anim-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.anim === prefs.pageTurnAnim));
   // Edge padding
   ['top','bottom','left','right'].forEach(side => {
     const el = document.getElementById('edge-pad-' + side);
@@ -4057,10 +4125,6 @@ function syncSettingsUi() {
   const navRightVl = document.getElementById('nav-zone-right-value');
   if (navRightEl) navRightEl.value = prefs.navZoneRightPct ?? 20;
   if (navRightVl) navRightVl.textContent = (prefs.navZoneRightPct ?? 20) + '%';
-  const headerRevealEl = document.getElementById('header-reveal-zone-slider');
-  const headerRevealVl = document.getElementById('header-reveal-zone-value');
-  if (headerRevealEl) headerRevealEl.value = prefs.headerRevealZonePct ?? 12;
-  if (headerRevealVl) headerRevealVl.textContent = (prefs.headerRevealZonePct ?? 12) + '%';
   const headerBtnEl = document.getElementById('header-button-size-slider');
   const headerBtnVl = document.getElementById('header-button-size-value');
   if (headerBtnEl) headerBtnEl.value = prefs.headerButtonScalePct ?? 100;
@@ -4137,6 +4201,7 @@ function syncSettingsUi() {
   if (hbbb) hbbb.checked = prefs.bookmarkBadge;
   if (hbab) hbab.checked = prefs.annotationBadge;
   syncStatusBarSettings();
+  updateFontPreview();
 }
 
 // ── Status bar settings UI ────────────────────────────────────────────────────
@@ -4504,12 +4569,12 @@ function initSettingsUi() {
   document.getElementById('font-size-slider').addEventListener('input', (e) => {
     prefs.fontSize = parseInt(e.target.value);
     document.getElementById('font-size-value').textContent = prefs.fontSize + 'px';
-    reapplyStyles(); persistPrefs();
+    reapplyStyles(); persistPrefs(); updateFontPreview();
   });
   document.getElementById('line-height-slider').addEventListener('input', (e) => {
     prefs.lineHeight = parseFloat(parseFloat(e.target.value).toFixed(1));
     document.getElementById('line-height-value').textContent = prefs.lineHeight;
-    reapplyStyles(); persistPrefs();
+    reapplyStyles(); persistPrefs(); updateFontPreview();
   });
   document.getElementById('margin-slider').addEventListener('input', (e) => {
     prefs.margin = parseInt(e.target.value);
@@ -4568,7 +4633,7 @@ function initSettingsUi() {
     prefs.letterSpacing = parseFloat(e.target.value);
     const vl = document.getElementById('letter-spacing-value');
     if (vl) vl.textContent = (prefs.letterSpacing / 10).toFixed(1) + 'px';
-    reapplyStyles(); persistPrefs();
+    reapplyStyles(); persistPrefs(); updateFontPreview();
   });
   document.getElementById('chap-head-spacing-toggle')?.addEventListener('change', (e) => {
     prefs.chapHeadSpacing = e.target.checked;
@@ -4692,11 +4757,6 @@ function initSettingsUi() {
     document.getElementById('nav-zone-right-value').textContent = prefs.navZoneRightPct + '%';
     applyNavZones(); persistPrefs();
   });
-  document.getElementById('header-reveal-zone-slider')?.addEventListener('input', (e) => {
-    prefs.headerRevealZonePct = parseInt(e.target.value);
-    document.getElementById('header-reveal-zone-value').textContent = prefs.headerRevealZonePct + '%';
-    applyHeaderRevealZone(); persistPrefs();
-  });
   document.getElementById('header-button-size-slider')?.addEventListener('input', (e) => {
     prefs.headerButtonScalePct = parseInt(e.target.value);
     const vl = document.getElementById('header-button-size-value');
@@ -4785,12 +4845,18 @@ function initSettingsUi() {
     });
   });
 
+  document.querySelectorAll('.page-anim-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      prefs.pageTurnAnim = btn.dataset.anim;
+      syncSettingsUi(); persistPrefs();
+    });
+  });
+
   syncSettingsUi();
   initStatusBarSettings();
   applyStatusBarStyles();
   applyEdgePadding();
   applyNavZones();
-  applyHeaderRevealZone();
   applyHeaderButtonSize();
   applyHeaderBtnVisibility();
   initFloatNavBtn();
@@ -4801,6 +4867,7 @@ function initSettingsUi() {
 
 // ── Progress ──────────────────────────────────────────────────────────────────
 function updateProgress(location) {
+  if (pendingNavDirection) _pageEnter(pendingNavDirection);
   const wasAutoAdvance = _autoAdvancePending;
   _autoAdvancePending = false;
   const cfi = location?.start?.cfi;
@@ -5484,6 +5551,8 @@ function _cxSyncLayout() {
 }
 
 function _cxRelocatedHandler(e) {
+  if (pendingNavDirection) _pageEnter(pendingNavDirection);
+  pendingNavDirection = null;
   const oldSpineIndex = currentSpineIndex;
   const { spineIndex, href, page, pageCount, endPage, twoColumn } = e.detail;
   currentSpineIndex = spineIndex;
@@ -5947,6 +6016,33 @@ async function startRendition(displayCfi = null) {
   }
 }
 
+// ── Page turn animation ───────────────────────────────────────────────────────
+function _pageTurnAnimClass() {
+  return prefs.pageTurnAnim === 'slide' ? 'anim-slide' : 'anim-fade';
+}
+
+function _pageExit(dir) {
+  if (prefs.eink || !prefs.pageTurnAnim || prefs.pageTurnAnim === 'none') return;
+  const v = document.getElementById('epub-viewer');
+  if (!v) return;
+  v.classList.remove('page-exit', 'page-enter', 'dir-next', 'dir-prev', 'anim-fade', 'anim-slide');
+  v.classList.add('page-exit', _pageTurnAnimClass(), dir === 'prev' ? 'dir-prev' : 'dir-next');
+}
+
+function _pageEnter(dir) {
+  if (prefs.eink || !prefs.pageTurnAnim || prefs.pageTurnAnim === 'none') return;
+  const v = document.getElementById('epub-viewer');
+  if (!v) return;
+  v.classList.remove('page-exit', 'page-enter', 'dir-next', 'dir-prev', 'anim-fade', 'anim-slide');
+  v.classList.add('page-enter', _pageTurnAnimClass(), dir === 'prev' ? 'dir-prev' : 'dir-next');
+  // Remove enter classes after animation completes to leave element clean
+  const onEnd = () => {
+    v.classList.remove('page-enter', 'dir-next', 'dir-prev', 'anim-fade', 'anim-slide');
+    v.removeEventListener('animationend', onEnd);
+  };
+  v.addEventListener('animationend', onEnd, { once: true });
+}
+
 // ── Navigation ────────────────────────────────────────────────────────────────
 // On Android (BOOX e-ink devices) hardware page-turn buttons can fire multiple
 // events per physical press. Throttle to one navigation per 400ms on Android.
@@ -5961,8 +6057,10 @@ function _navThrottle() {
 function goNext() {
   if (deferredNextPending) return;
   if (_navThrottle()) return;
+  _pageExit('next');
 
   if (prefs.experimentalReader && _cxReader) {
+    pendingNavDirection = 'next';
     sessionPageCount++;
     void _cxReader.next();
     return;
@@ -6009,8 +6107,10 @@ function goNext() {
 function goPrev() {
   if (_navThrottle()) return;
   deferredNextPending = false;
+  _pageExit('prev');
 
   if (prefs.experimentalReader && _cxReader) {
+    pendingNavDirection = 'prev';
     sessionPageCount++;
     void _cxReader.prev();
     return;
@@ -6050,6 +6150,7 @@ function handleTouchStart(e) {
   touchStartX = e.changedTouches[0].clientX;
   touchStartY = e.changedTouches[0].clientY;
 }
+
 function handleTouchEnd(e) {
   if (suppressNextTap) { suppressNextTap = false; return; }
   const dx    = e.changedTouches[0].clientX - touchStartX;
@@ -6071,10 +6172,6 @@ function handleTouchEnd(e) {
   }
   if (absDx < TAP_MAX_DRIFT && absDy < TAP_MAX_DRIFT) {
     const x = e.changedTouches[0].clientX;
-    if (prefs.autoHideHeader && inHeaderRevealZone(y)) {
-      revealHeader();
-      return;
-    }
     const nav = inNavZone(x);
     if (nav === 'prev') { goPrev(); return; }
     if (nav === 'next') { goNext(); return; }
@@ -6116,9 +6213,9 @@ function attachIframeTouchNav(view) {
     // selection — preventDefault kills Android drag handles when a range is active.
     const sel = win.getSelection?.();
     if (_selectSuppressNav || (sel && !sel.isCollapsed)) return;
-    const dx = Math.abs(e.touches[0].clientX + iframeOffX - touchStartX);
-    const dy = Math.abs(e.touches[0].clientY + iframeOffY - touchStartY);
-    if (dx > 8 && dx > dy) e.preventDefault();
+    const absDx = Math.abs(e.touches[0].clientX + iframeOffX - touchStartX);
+    const absDy = Math.abs(e.touches[0].clientY + iframeOffY - touchStartY);
+    if (absDx > 8 && absDx > absDy) e.preventDefault();
   }, { passive: false });
 
   // Zone-click navigation from inside the iframe (desktop + any pointer type).
@@ -6182,11 +6279,6 @@ function attachIframeTouchNav(view) {
     if (absDx < TAP_MAX_DRIFT && absDy < TAP_MAX_DRIFT) {
       // Footnote links take priority over navigation hot zones — let the click fire
       if (e.changedTouches[0].target?.closest?.('a[data-footnote-href]')) return;
-      if (prefs.autoHideHeader && inHeaderRevealZone(cy)) {
-        if (e.cancelable) e.preventDefault();
-        revealHeader();
-        return;
-      }
       const nav = inNavZone(cx);
       if (nav) {
         if (e.cancelable) e.preventDefault();
@@ -7130,11 +7222,6 @@ function bindJumpChapNav(btnId, direction) {
 bindJumpChapNav('btn-prev-chap', 'prev');
 bindJumpChapNav('btn-next-chap', 'next');
 function handleNavZoneActivate(direction, e) {
-  const y = e.clientY ?? e.changedTouches?.[0]?.clientY;
-  if (prefs.autoHideHeader && y != null && inHeaderRevealZone(y)) {
-    revealHeader();
-    return;
-  }
   if (direction === 'prev') goPrev(); else goNext();
 }
 document.querySelector('.nav-zone-prev')?.addEventListener('click', e => { e.stopPropagation(); handleNavZoneActivate('prev', e); });

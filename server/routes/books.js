@@ -37,7 +37,7 @@ const upload = multer({
 router.get('/', (req, res) => {
   const db    = getDb();
   const books = db.prepare(`
-    SELECT b.id, b.title, b.author, b.series_name, b.series_number, b.file_hash, b.file_hash_md5, b.cover_path, b.file_size, b.added_at,
+    SELECT b.id, b.title, b.author, b.series_name, b.series_number, b.file_hash, b.file_hash_md5, b.cover_path, b.file_size, b.added_at, b.genres,
            COALESCE(b.last_opened_at, b.added_at) AS last_opened_at,
            COALESCE(p.percentage, 0)    AS percentage,
            COALESCE(p.cfi_position, '') AS cfi_position,

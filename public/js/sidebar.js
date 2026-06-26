@@ -18,6 +18,7 @@ let _onShelfSelect    = null;
 let _activeShelfId    = 'all';
 let _readingCount     = 0;
 let _downloadedCount  = 0;
+let _shelfEditMode    = false;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -98,6 +99,8 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
     if (!navigator.onLine) return;
     document.dispatchEvent(new CustomEvent('sidebar:addshelf'));
   });
+
+  _attachShelfEditBtn();
 
   // Nav: Settings and OPDS panels — blocked when offline (both require live API)
   sidebar.querySelector('#nav-settings')?.addEventListener('click', e => {
@@ -248,7 +251,10 @@ function buildSidebarHtml() {
       <div class="sidebar-section">
         <div class="sidebar-section-header">
           <span class="sidebar-section-title">${t('sidebar.shelves')}</span>
-          <button id="add-shelf-btn" class="sidebar-add-btn" title="${t('sidebar.add_shelf')}">+</button>
+          <div class="sidebar-section-btns">
+            <button id="shelf-edit-btn" class="sidebar-add-btn${_shelfEditMode ? ' active' : ''}" title="${t('sidebar.edit_shelves')}">✎</button>
+            <button id="add-shelf-btn" class="sidebar-add-btn" title="${t('sidebar.add_shelf')}">+</button>
+          </div>
         </div>
         <div id="shelves-list"></div>
       </div>
@@ -284,17 +290,35 @@ function buildSidebarHtml() {
     </div>`;
 }
 
+let _dragSrcId = null; // shelf id being dragged
+
+function _attachShelfEditBtn() {
+  document.getElementById('shelf-edit-btn')?.addEventListener('click', () => {
+    _shelfEditMode = !_shelfEditMode;
+    document.getElementById('shelf-edit-btn')?.classList.toggle('active', _shelfEditMode);
+    const list = document.getElementById('shelves-list');
+    list?.classList.toggle('shelves-edit-mode', _shelfEditMode);
+    // Update draggable on existing items without a full re-render
+    list?.querySelectorAll('.sidebar-shelf-item').forEach(el => {
+      el.draggable = _shelfEditMode;
+    });
+  });
+}
+
 function renderShelves() {
   const list = document.getElementById('shelves-list');
   if (!list) return;
   list.innerHTML = '';
+  list.classList.toggle('shelves-edit-mode', _shelfEditMode);
   shelves.forEach(shelf => {
     const item = document.createElement('div');
     item.className = 'sidebar-shelf-item' + (_activeShelfId === shelf.id ? ' sidebar-item-active' : '');
     item.dataset.id = shelf.id;
+    item.draggable  = _shelfEditMode;
     const shelfIcon = shelf.opds_folder_url ? 'opds_shelf' : 'shelf';
     const shelfIconClass = shelf.opds_folder_url ? 'nav-icon nav-icon-shelf nav-icon-opds-shelf' : 'nav-icon nav-icon-shelf';
     item.innerHTML = `
+      <span class="shelf-drag-handle" title="${t('sidebar.drag_to_reorder')}" aria-hidden="true">⠿</span>
       <span class="sidebar-item-icon"><img src="/images/${shelfIcon}.svg" class="${shelfIconClass}" alt=""></span>
       <span class="sidebar-item-label">${escHtml(shelf.name)}</span>
       <span class="shelf-new-badge hidden" id="shelf-badge-${shelf.id}"></span>
@@ -311,6 +335,47 @@ function renderShelves() {
       if (!navigator.onLine) return;
       document.dispatchEvent(new CustomEvent('sidebar:editshelf', { detail: shelf }));
     });
+
+    // Drag-to-reorder
+    item.addEventListener('dragstart', e => {
+      _dragSrcId = shelf.id;
+      item.classList.add('drag-active');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(shelf.id));
+    });
+    item.addEventListener('dragend', () => {
+      _dragSrcId = null;
+      document.querySelectorAll('.sidebar-shelf-item').forEach(el => {
+        el.classList.remove('drag-active', 'drag-over');
+      });
+    });
+    item.addEventListener('dragover', e => {
+      if (_dragSrcId === null || _dragSrcId === shelf.id) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      document.querySelectorAll('.sidebar-shelf-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+      item.classList.add('drag-over');
+    });
+    item.addEventListener('dragleave', e => {
+      if (!item.contains(e.relatedTarget)) item.classList.remove('drag-over');
+    });
+    item.addEventListener('drop', e => {
+      e.preventDefault();
+      if (_dragSrcId === null || _dragSrcId === shelf.id) return;
+      item.classList.remove('drag-over');
+      const srcIdx  = shelves.findIndex(s => s.id === _dragSrcId);
+      const destIdx = shelves.findIndex(s => s.id === shelf.id);
+      if (srcIdx === -1 || destIdx === -1) return;
+      // Optimistic reorder
+      const [moved] = shelves.splice(srcIdx, 1);
+      shelves.splice(destIdx, 0, moved);
+      renderShelves();
+      // Persist to server
+      const order = shelves.map(s => s.id);
+      apiFetch('/shelves/reorder', { method: 'PUT', body: JSON.stringify({ order }) })
+        .catch(() => reloadShelves()); // revert on failure
+    });
+
     list.appendChild(item);
   });
   // Reapply badge counts that survived the re-render
@@ -390,6 +455,7 @@ document.addEventListener('langchange', () => {
     if (!navigator.onLine) return;
     document.dispatchEvent(new CustomEvent('sidebar:addshelf'));
   });
+  _attachShelfEditBtn();
   sidebar.querySelector('#nav-settings')?.addEventListener('click', e => {
     e.preventDefault();
     if (!navigator.onLine) return;

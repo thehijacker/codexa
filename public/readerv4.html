@@ -520,10 +520,26 @@
             </label>
           </div>
         </div>
+        <div class="settings-divider"></div>
+
+        <!-- Page turn animation -->
+        <div class="setting-row">
+          <div class="setting-label" data-i18n="reader.page_turn_anim">Animacija obračanja strani</div>
+          <div class="spread-buttons">
+            <button class="spread-btn page-anim-btn" data-anim="none"  data-i18n="reader.page_turn_none">Nič</button>
+            <button class="spread-btn page-anim-btn" data-anim="fade"  data-i18n="reader.page_turn_fade">Zaton</button>
+            <button class="spread-btn page-anim-btn" data-anim="slide" data-i18n="reader.page_turn_slide">Drsenje</button>
+          </div>
+        </div>
       </div><!-- /.settings-tab-pane[theme] -->
 
       <!-- TAB: Text -->
       <div class="settings-tab-pane" data-tab="text">
+        <!-- Font preview -->
+        <div class="setting-row">
+          <div class="setting-label" data-i18n="reader.font_preview_label">Predogled pisave</div>
+          <div id="font-preview-box" class="font-preview-box"></div>
+        </div>
         <!-- Font family -->
         <div class="setting-row">
           <div class="setting-label" data-i18n="reader.sb_font">Pisava</div>
@@ -790,18 +806,8 @@
 
         <div class="settings-divider"></div>
 
-        <!-- Toolbar reveal zone & button size -->
+        <!-- Toolbar button size -->
         <div class="setting-section-title" data-i18n="reader.sb_section_toolbar">Toolbar</div>
-        <div class="setting-row">
-          <div class="setting-row-inline">
-            <div>
-              <div class="setting-label" data-i18n="reader.sb_header_reveal_zone">Toolbar reveal zone</div>
-              <div style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_header_reveal_hint">Percentage of screen height from the top where tap reveals the toolbar</div>
-            </div>
-            <span id="header-reveal-zone-value" class="setting-value">12%</span>
-          </div>
-          <input type="range" id="header-reveal-zone-slider" min="2" max="30" step="1" value="12" />
-        </div>
         <div class="setting-row">
           <div class="setting-row-inline">
             <div>

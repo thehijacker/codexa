@@ -9,13 +9,13 @@ router.use(authenticateToken);
 router.get('/', (req, res) => {
   const db = getDb();
   const shelves = db.prepare(`
-    SELECT s.id, s.name, s.created_at, s.opds_server_id, s.opds_folder_url, s.last_synced_at,
+    SELECT s.id, s.name, s.created_at, s.opds_server_id, s.opds_folder_url, s.last_synced_at, s.sort_order,
            COUNT(bs.book_id) AS book_count
       FROM shelves s
       LEFT JOIN book_shelves bs ON bs.shelf_id = s.id
      WHERE s.user_id = ?
      GROUP BY s.id
-     ORDER BY s.created_at ASC
+     ORDER BY s.sort_order ASC, s.created_at ASC
   `).all(req.user.id);
   res.json(shelves);
 });
@@ -26,15 +26,40 @@ router.post('/', (req, res) => {
   if (!name || !String(name).trim()) {
     return res.status(400).json({ error: 'error.shelf_name_required' });
   }
-  const db     = getDb();
+  const db = getDb();
+  const maxOrder = db.prepare(
+    'SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM shelves WHERE user_id = ?'
+  ).get(req.user.id).next;
   const result = db.prepare(
-    'INSERT INTO shelves (user_id, name) VALUES (?, ?)'
-  ).run(req.user.id, String(name).trim().slice(0, 100));
+    'INSERT INTO shelves (user_id, name, sort_order) VALUES (?, ?, ?)'
+  ).run(req.user.id, String(name).trim().slice(0, 100), maxOrder);
 
   const shelf = db.prepare(
-    'SELECT id, name, created_at, 0 AS book_count FROM shelves WHERE id = ?'
+    'SELECT id, name, created_at, sort_order, 0 AS book_count FROM shelves WHERE id = ?'
   ).get(result.lastInsertRowid);
   res.status(201).json(shelf);
+});
+
+// ── PUT /api/shelves/reorder — save new display order ─────────────────────────
+router.put('/reorder', (req, res) => {
+  const { order } = req.body || {};
+  if (!Array.isArray(order) || order.length === 0) {
+    return res.status(400).json({ error: 'error.invalid_order' });
+  }
+  const db = getDb();
+  // Validate all IDs belong to this user before touching any row
+  const ownedIds = new Set(
+    db.prepare('SELECT id FROM shelves WHERE user_id = ?').all(req.user.id).map(r => r.id)
+  );
+  for (const id of order) {
+    if (!ownedIds.has(Number(id))) return res.status(403).json({ error: 'error.shelf_not_found' });
+  }
+  const update = db.prepare('UPDATE shelves SET sort_order = ? WHERE id = ?');
+  const tx = db.transaction(() => {
+    order.forEach((id, idx) => update.run(idx, Number(id)));
+  });
+  tx();
+  res.json({ success: true });
 });
 
 // ── PUT /api/shelves/:id ──────────────────────────────────────────────────────

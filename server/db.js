@@ -182,6 +182,7 @@ function initDb() {
     [`ALTER TABLE shelves        ADD COLUMN opds_server_id          INTEGER DEFAULT NULL`,   'shelves.opds_server_id'],
     [`ALTER TABLE shelves        ADD COLUMN opds_folder_url         TEXT    DEFAULT NULL`,   'shelves.opds_folder_url'],
     [`ALTER TABLE shelves        ADD COLUMN last_synced_at          INTEGER DEFAULT NULL`,   'shelves.last_synced_at'],
+    [`ALTER TABLE shelves        ADD COLUMN sort_order              INTEGER DEFAULT 0`,      'shelves.sort_order'],
   ];
   for (const [sql, label] of migrations) {
     try {

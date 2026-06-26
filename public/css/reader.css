@@ -49,7 +49,7 @@ html, body {
 #header-sensor {
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: calc(var(--header-reveal-zone-pct, 12%) + var(--sat));
+  height: calc(5% + var(--sat));
   z-index: 19;
   pointer-events: none;
 }
@@ -542,6 +542,7 @@ html, body {
   position: relative;
   overflow: hidden;
   touch-action: pan-y; /* iOS: we own horizontal swipes; overridden below for Android */
+  will-change: transform;
   /* Edge inset: shrinks viewer away from curved screen edges.
      --sab is set by JS after safe-area probe. On iOS 26 PWA this starts at 0
      and updates to ~34px after 500-1000ms. The status bar overlay sits inside this gap. */
@@ -553,6 +554,31 @@ html, body {
 /* epub.js injects an iframe — give it a bg matching current theme */
 #epub-viewer iframe {
   background: var(--reader-page-bg, #1a1a2e) !important;
+}
+
+/* ── Page turn animations ────────────────────────────────────────────────────── */
+/* Fade */
+#epub-viewer.page-exit.anim-fade  { animation: rdr-fade-out 120ms ease forwards; }
+#epub-viewer.page-enter.anim-fade { animation: rdr-fade-in  160ms ease forwards; }
+@keyframes rdr-fade-out { to   { opacity: 0; } }
+@keyframes rdr-fade-in  { from { opacity: 0; } to { opacity: 1; } }
+
+/* Slide */
+#epub-viewer.page-exit.anim-slide.dir-next  { animation: rdr-slide-out-left  140ms ease forwards; }
+#epub-viewer.page-exit.anim-slide.dir-prev  { animation: rdr-slide-out-right 140ms ease forwards; }
+#epub-viewer.page-enter.anim-slide.dir-next { animation: rdr-slide-in-right  160ms ease forwards; }
+#epub-viewer.page-enter.anim-slide.dir-prev { animation: rdr-slide-in-left   160ms ease forwards; }
+@keyframes rdr-slide-out-left  { to   { transform: translateX(-6%); opacity: 0; } }
+@keyframes rdr-slide-out-right { to   { transform: translateX(6%);  opacity: 0; } }
+@keyframes rdr-slide-in-right  { from { transform: translateX(4%);  opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes rdr-slide-in-left   { from { transform: translateX(-4%); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* E-ink: always suppress — must come last */
+[data-reader-eink] #epub-viewer.page-exit,
+[data-reader-eink] #epub-viewer.page-enter {
+  animation: none !important;
+  opacity: 1 !important;
+  transform: none !important;
 }
 
 
@@ -1134,6 +1160,20 @@ body.page-gap-shadow-on .dict-popup {
   flex-direction: column;
   flex-shrink: 0; /* never compress to fit the body — keep full height so it scrolls */
   gap: .7rem;
+}
+
+/* ── Font preview box ─────────────────────────────────────────────────────── */
+.font-preview-box {
+  padding: .55rem .75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 16px;
+  line-height: 1.6;
+  min-height: 3em;
+  word-break: break-word;
+  transition: font-family .1s, font-size .05s;
 }
 
 /* ── Font picker (custom dropdown for font lists) ─────────────────────────── */

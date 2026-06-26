@@ -182,11 +182,185 @@ function initSortMenu() {
 }
 
 // ── Render grid ───────────────────────────────────────────────────────────────
+const GRID_CHUNK = 48;
+let _gridList     = [];   // full sorted list from last renderGrid call
+let _gridOffset   = 0;    // how many cards have been appended so far
+let _gridObserver = null; // IntersectionObserver for progressive loading
+
+function _makeCard(book, globalIndex, isEink) {
+  const pct   = Math.round((book.percentage || 0) * 100);
+  const cover = book.cover_path
+    ? `<img class="book-cover" src="/covers/${book.cover_path}" alt="" loading="lazy" />`
+    : `<div class="book-cover-placeholder">📖</div>`;
+
+  const isDownloaded  = downloadedIds.has(book.id);
+  const isDownloading = downloadingIds.has(book.id);
+  let offlineBtn = '';
+  if (isOfflineSupported && !isOfflineMode) {
+    if (isDownloading) {
+      offlineBtn = `<button class="btn-icon offline-btn downloading" disabled title="${t('library.downloading')}" data-id="${book.id}"><span class="spinner spinner-sm"></span></button>`;
+    } else if (isDownloaded) {
+      offlineBtn = `<button class="btn-icon offline-btn offline-btn-delete" title="${t('library.btn_delete_offline')}" data-id="${book.id}"><img src="/images/delete.svg" class="nav-icon nav-icon-delete" alt=""></button>`;
+    } else {
+      offlineBtn = `<button class="btn-icon offline-btn offline-btn-download" title="${t('library.btn_download_offline')}" data-id="${book.id}"><img src="/images/download.svg" class="nav-icon nav-icon-download" alt=""></button>`;
+    }
+  }
+
+  const card = document.createElement('div');
+  card.className  = 'book-card';
+  card.dataset.id = book.id;
+  card.tabIndex   = 0;
+  if (selectedBooks.has(book.id)) card.classList.add('selected');
+  if (!isEink) card.style.setProperty('--card-index', Math.min(globalIndex % GRID_CHUNK, 15));
+
+  card.innerHTML = `
+    <div class="book-cover-area">
+      ${cover}
+      ${isDownloaded ? '<div class="book-offline-badge" title="Offline available">✓</div>' : ''}
+      <a class="book-card-peek-btn" href="/readerv4.html?id=${book.id}&peek=1" title="${t('library.btn_peek')}"><img src="/images/peek.svg" class="nav-icon nav-icon-peek" alt="${t('library.btn_peek')}"></a>
+    </div>
+    <label class="book-card-checkbox-wrap" title="${t('library.btn_cover_select')}">
+      <input type="checkbox" class="book-card-checkbox" ${selectedBooks.has(book.id) ? 'checked' : ''} />
+    </label>
+    <div class="book-card-actions">
+      ${book.cover_path ? `<button class="btn-icon cover-preview-btn" title="${t('library.btn_cover_preview')}" data-id="${book.id}"><img src="/images/zoom.svg" class="nav-icon nav-icon-zoom" alt=""></button>` : ''}
+      <button class="btn-icon info-btn"  title="${t('library.btn_cover_info')}" data-id="${book.id}">ℹ</button>
+      ${offlineBtn}
+      <button class="btn-icon read-btn"  title="${t('library.btn_read')}" data-id="${book.id}"><img src="/images/read.svg" class="nav-icon nav-icon-read" alt=""></button>
+    </div>
+    <div class="book-info">
+      <div class="book-title">${escHtml(book.title)}</div>
+      <div class="book-author">${escHtml(book.author || t('library.unknown_author'))}</div>
+      ${book.series_name ? `<div class="book-series">${escHtml(book.series_name)}${book.series_number ? ` <span class="book-series-num">#${escHtml(book.series_number)}</span>` : ''}</div>` : ''}
+      <div class="book-progress-bar">
+        <div class="book-progress-fill" style="width:${pct}%"></div>
+      </div>
+      <div class="book-progress-text">${pct > 0 ? t('library.pct_read', { n: pct }) : t('library.not_started')}</div>
+    </div>
+    <button class="book-card-menu-btn" data-id="${book.id}" aria-label="More options">⋮</button>`;
+
+  const checkbox = card.querySelector('.book-card-checkbox');
+
+  card.querySelector('.book-card-checkbox-wrap').addEventListener('click', e => {
+    e.stopPropagation();
+    toggleBookSelect(book.id, checkbox.checked);
+  });
+
+  card.querySelector('.book-card-menu-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    openCardMenu(book, e.currentTarget);
+  });
+
+  card.addEventListener('click', e => {
+    if (e.target.closest('.read-btn') || e.target.closest('.info-btn') ||
+        e.target.closest('.cover-preview-btn') || e.target.closest('.book-card-checkbox-wrap') ||
+        e.target.closest('.book-card-peek-btn') || e.target.closest('.book-card-menu-btn')) return;
+    if (editMode) {
+      const newChecked = !checkbox.checked;
+      checkbox.checked = newChecked;
+      toggleBookSelect(book.id, newChecked);
+      return;
+    }
+    // Touch devices: first tap reveals action icons, second tap opens the book
+    if (window.matchMedia('(pointer: coarse)').matches && !card.classList.contains('tapped')) {
+      document.querySelectorAll('.book-card.tapped').forEach(c => c.classList.remove('tapped'));
+      card.classList.add('tapped');
+      return;
+    }
+    window.location.href = `/readerv4.html?id=${book.id}`;
+    sessionStorage.setItem('br_last_shelf', String(currentShelfId));
+    sessionStorage.setItem('br_last_search', document.getElementById('search-input')?.value || '');
+  });
+
+  card.querySelector('.read-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    sessionStorage.setItem('br_last_shelf', String(currentShelfId));
+    sessionStorage.setItem('br_last_search', document.getElementById('search-input')?.value || '');
+    window.location.href = `/readerv4.html?id=${book.id}`;
+  });
+
+  card.querySelector('.info-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    openInfoModal(book);
+  });
+
+  card.querySelector('.cover-preview-btn')?.addEventListener('click', e => {
+    e.stopPropagation();
+    openCoverPreview(book);
+  });
+
+  card.querySelector('.offline-btn-download')?.addEventListener('click', async e => {
+    e.stopPropagation();
+    downloadingIds.add(book.id);
+    applyFilter();
+    try {
+      await downloadBook(book, getToken());
+      downloadedIds.add(book.id);
+      toast.success(t('library.toast_downloaded'));
+      updateDownloadedCount(downloadedIds.size);
+    } catch (err) {
+      console.error('[offline] download failed:', err.message);
+      toast.error(t('library.toast_download_err'));
+    } finally {
+      downloadingIds.delete(book.id);
+      applyFilter();
+    }
+  });
+
+  card.querySelector('.offline-btn-delete')?.addEventListener('click', e => {
+    e.stopPropagation();
+    confirmDialog(
+      t('library.btn_delete_offline'),
+      async () => {
+        await deleteDownload(book.id);
+        downloadedIds.delete(book.id);
+        toast.success(t('library.toast_deleted_offline'));
+        updateDownloadedCount(downloadedIds.size);
+        applyFilter();
+      },
+      t('library.btn_delete_offline'),
+      true
+    );
+  });
+
+  return card;
+}
+
+function _appendGridChunk() {
+  const grid = document.getElementById('book-grid');
+  if (!grid) return;
+  const isEink = document.documentElement.dataset.libTheme === 'eink';
+  document.getElementById('grid-sentinel')?.remove();
+
+  const chunk = _gridList.slice(_gridOffset, _gridOffset + GRID_CHUNK);
+  const frag  = document.createDocumentFragment();
+  chunk.forEach((book, ci) => frag.appendChild(_makeCard(book, _gridOffset + ci, isEink)));
+  grid.appendChild(frag);
+  _gridOffset += chunk.length;
+
+  if (_gridOffset < _gridList.length) {
+    const sentinel = document.createElement('div');
+    sentinel.id = 'grid-sentinel';
+    grid.appendChild(sentinel);
+    if (!_gridObserver) {
+      _gridObserver = new IntersectionObserver(entries => {
+        if (entries[0].isIntersecting) _appendGridChunk();
+      }, { rootMargin: '300px' });
+    }
+    _gridObserver.disconnect();
+    _gridObserver.observe(sentinel);
+  }
+}
+
 function renderGrid(list) {
   const grid       = document.getElementById('book-grid');
   const emptyState = document.getElementById('empty-state');
+  if (_gridObserver) _gridObserver.disconnect();
   grid.innerHTML   = '';
   grid.classList.toggle('edit-mode', editMode);
+
+  _gridList   = list;
+  _gridOffset = 0;
 
   if (!list.length) {
     // Don't show the empty-state message until we know books have been fetched —
@@ -195,143 +369,7 @@ function renderGrid(list) {
     return;
   }
   emptyState.classList.add('hidden');
-
-  list.forEach(book => {
-    const pct   = Math.round((book.percentage || 0) * 100);
-    const cover = book.cover_path
-      ? `<img class="book-cover" src="/covers/${book.cover_path}" alt="" loading="lazy" />`
-      : `<div class="book-cover-placeholder">📖</div>`;
-
-    const isDownloaded  = downloadedIds.has(book.id);
-    const isDownloading = downloadingIds.has(book.id);
-    let offlineBtn = '';
-    if (isOfflineSupported && !isOfflineMode) {
-      if (isDownloading) {
-        offlineBtn = `<button class="btn-icon offline-btn downloading" disabled title="${t('library.downloading')}" data-id="${book.id}"><span class="spinner spinner-sm"></span></button>`;
-      } else if (isDownloaded) {
-        offlineBtn = `<button class="btn-icon offline-btn offline-btn-delete" title="${t('library.btn_delete_offline')}" data-id="${book.id}"><img src="/images/delete.svg" class="nav-icon nav-icon-delete" alt=""></button>`;
-      } else {
-        offlineBtn = `<button class="btn-icon offline-btn offline-btn-download" title="${t('library.btn_download_offline')}" data-id="${book.id}"><img src="/images/download.svg" class="nav-icon nav-icon-download" alt=""></button>`;
-      }
-    }
-
-    const card = document.createElement('div');
-    card.className  = 'book-card';
-    card.dataset.id = book.id;
-    if (selectedBooks.has(book.id)) card.classList.add('selected');
-
-    card.innerHTML = `
-      <div class="book-cover-area">
-        ${cover}
-        ${isDownloaded ? '<div class="book-offline-badge" title="Offline available">✓</div>' : ''}
-        <a class="book-card-peek-btn" href="/readerv4.html?id=${book.id}&peek=1" title="${t('library.btn_peek')}"><img src="/images/peek.svg" class="nav-icon nav-icon-peek" alt="${t('library.btn_peek')}"></a>
-      </div>
-      <label class="book-card-checkbox-wrap" title="${t('library.btn_cover_select')}">
-        <input type="checkbox" class="book-card-checkbox" ${selectedBooks.has(book.id) ? 'checked' : ''} />
-      </label>
-      <div class="book-card-actions">
-        ${book.cover_path ? `<button class="btn-icon cover-preview-btn" title="${t('library.btn_cover_preview')}" data-id="${book.id}"><img src="/images/zoom.svg" class="nav-icon nav-icon-zoom" alt=""></button>` : ''}
-        <button class="btn-icon info-btn"  title="${t('library.btn_cover_info')}" data-id="${book.id}">ℹ</button>
-        ${offlineBtn}
-        <button class="btn-icon read-btn"  title="${t('library.btn_read')}" data-id="${book.id}"><img src="/images/read.svg" class="nav-icon nav-icon-read" alt=""></button>
-      </div>
-      <div class="book-info">
-        <div class="book-title">${escHtml(book.title)}</div>
-        <div class="book-author">${escHtml(book.author || t('library.unknown_author'))}</div>
-        ${book.series_name ? `<div class="book-series">${escHtml(book.series_name)}${book.series_number ? ` <span class="book-series-num">#${escHtml(book.series_number)}</span>` : ''}</div>` : ''}
-        <div class="book-progress-bar">
-          <div class="book-progress-fill" style="width:${pct}%"></div>
-        </div>
-        <div class="book-progress-text">${pct > 0 ? t('library.pct_read', { n: pct }) : t('library.not_started')}</div>
-      </div>
-      <button class="book-card-menu-btn" data-id="${book.id}" aria-label="More options">⋮</button>`;
-
-    const checkbox = card.querySelector('.book-card-checkbox');
-
-    card.querySelector('.book-card-checkbox-wrap').addEventListener('click', e => {
-      e.stopPropagation();
-      toggleBookSelect(book.id, checkbox.checked);
-    });
-
-    card.querySelector('.book-card-menu-btn').addEventListener('click', e => {
-      e.stopPropagation();
-      openCardMenu(book, e.currentTarget);
-    });
-
-    card.addEventListener('click', e => {
-      if (e.target.closest('.read-btn') || e.target.closest('.info-btn') ||
-          e.target.closest('.cover-preview-btn') || e.target.closest('.book-card-checkbox-wrap') ||
-          e.target.closest('.book-card-peek-btn') || e.target.closest('.book-card-menu-btn')) return;
-      if (editMode) {
-        const newChecked = !checkbox.checked;
-        checkbox.checked = newChecked;
-        toggleBookSelect(book.id, newChecked);
-        return;
-      }
-      // Touch devices: first tap reveals action icons, second tap opens the book
-      if (window.matchMedia('(pointer: coarse)').matches && !card.classList.contains('tapped')) {
-        document.querySelectorAll('.book-card.tapped').forEach(c => c.classList.remove('tapped'));
-        card.classList.add('tapped');
-        return;
-      }
-      window.location.href = `/readerv4.html?id=${book.id}`;
-      sessionStorage.setItem('br_last_shelf', String(currentShelfId));
-      sessionStorage.setItem('br_last_search', document.getElementById('search-input')?.value || '');
-    });
-
-    card.querySelector('.read-btn').addEventListener('click', e => {
-      e.stopPropagation();
-      sessionStorage.setItem('br_last_shelf', String(currentShelfId));
-      sessionStorage.setItem('br_last_search', document.getElementById('search-input')?.value || '');
-      window.location.href = `/readerv4.html?id=${book.id}`;
-    });
-
-    card.querySelector('.info-btn').addEventListener('click', e => {
-      e.stopPropagation();
-      openInfoModal(book);
-    });
-
-    card.querySelector('.cover-preview-btn')?.addEventListener('click', e => {
-      e.stopPropagation();
-      openCoverPreview(book);
-    });
-
-    card.querySelector('.offline-btn-download')?.addEventListener('click', async e => {
-      e.stopPropagation();
-      downloadingIds.add(book.id);
-      applyFilter();
-      try {
-        await downloadBook(book, getToken());
-        downloadedIds.add(book.id);
-        toast.success(t('library.toast_downloaded'));
-        updateDownloadedCount(downloadedIds.size);
-      } catch (err) {
-        console.error('[offline] download failed:', err.message);
-        toast.error(t('library.toast_download_err'));
-      } finally {
-        downloadingIds.delete(book.id);
-        applyFilter();
-      }
-    });
-
-    card.querySelector('.offline-btn-delete')?.addEventListener('click', e => {
-      e.stopPropagation();
-      confirmDialog(
-        t('library.btn_delete_offline'),
-        async () => {
-          await deleteDownload(book.id);
-          downloadedIds.delete(book.id);
-          toast.success(t('library.toast_deleted_offline'));
-          updateDownloadedCount(downloadedIds.size);
-          applyFilter();
-        },
-        t('library.btn_delete_offline'),
-        true
-      );
-    });
-
-    grid.appendChild(card);
-  });
+  _appendGridChunk();
 }
 
 // ── Edit mode ─────────────────────────────────────────────────────────────────
@@ -1222,6 +1260,8 @@ function updateSeriesFilterBar() {
   }
 }
 
+let _applyFilterTimer = null;
+
 function applyFilter() {
   const allCountEl = document.getElementById('nav-all-count');
   const readingCountEl = document.getElementById('nav-reading-count');
@@ -1246,11 +1286,26 @@ function applyFilter() {
     list = list.filter(b =>
       b.title.toLowerCase().includes(q) ||
       (b.author || '').toLowerCase().includes(q) ||
-      (b.series_name || '').toLowerCase().includes(q)
+      (b.series_name || '').toLowerCase().includes(q) ||
+      (b.genres || '').toLowerCase().includes(q)
     );
   }
 
-  renderGrid(sortBooks(list));
+  const sorted = sortBooks(list);
+  const grid   = document.getElementById('book-grid');
+  const isEink = document.documentElement.dataset.libTheme === 'eink';
+
+  if (!isEink && grid && grid.children.length > 0) {
+    grid.classList.add('grid-exit');
+    if (_applyFilterTimer) clearTimeout(_applyFilterTimer);
+    _applyFilterTimer = setTimeout(() => {
+      _applyFilterTimer = null;
+      grid.classList.remove('grid-exit');
+      renderGrid(sorted);
+    }, 110);
+  } else {
+    renderGrid(sorted);
+  }
 }
 
 
@@ -1718,6 +1773,110 @@ async function handleFiles(fileList) {
   await reloadShelves();
 }
 
+// ── Keyboard navigation ───────────────────────────────────────────────────────
+function initGridKeyboard() {
+  const grid = document.getElementById('book-grid');
+  if (!grid) return;
+
+  function getFocusedCard() {
+    const el = document.activeElement;
+    return el?.classList.contains('book-card') ? el : null;
+  }
+
+  function getAllCards() {
+    return [...document.querySelectorAll('#book-grid .book-card')];
+  }
+
+  function focusCard(card) {
+    if (card) { card.focus({ preventScroll: false }); }
+  }
+
+  function focusAdjacentCard(dir) {
+    const current = getFocusedCard();
+    if (!current) return;
+    const cards = getAllCards();
+    const idx   = cards.indexOf(current);
+    const next  = cards[idx + dir];
+    if (next) focusCard(next);
+  }
+
+  function focusCardAboveBelow(dir) {
+    const current = getFocusedCard();
+    if (!current) return;
+    const cards  = getAllCards();
+    const curIdx = cards.indexOf(current);
+    const curRect = current.getBoundingClientRect();
+    // Find card whose left edge is closest to current card and is above/below
+    let best = null, bestDist = Infinity;
+    cards.forEach((card, i) => {
+      if (i === curIdx) return;
+      const r = card.getBoundingClientRect();
+      if (dir === -1 && r.top >= curRect.top) return; // looking up
+      if (dir ===  1 && r.top <= curRect.top) return; // looking down
+      const dist = Math.abs(r.left - curRect.left) + Math.abs(r.top - curRect.top) * 0.3;
+      if (dist < bestDist) { bestDist = dist; best = card; }
+    });
+    if (best) focusCard(best);
+  }
+
+  document.addEventListener('keydown', e => {
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    // Only handle when a card is focused or when no modal is open (for arrow focus start)
+    const focused = getFocusedCard();
+    const hasModal = !!document.querySelector('.modal-backdrop');
+    if (hasModal) return;
+
+    switch (e.key) {
+      case 'ArrowRight': if (focused) { e.preventDefault(); focusAdjacentCard(1); } break;
+      case 'ArrowLeft':  if (focused) { e.preventDefault(); focusAdjacentCard(-1); } break;
+      case 'ArrowDown':  if (focused) { e.preventDefault(); focusCardAboveBelow(1); } break;
+      case 'ArrowUp':    if (focused) { e.preventDefault(); focusCardAboveBelow(-1); } break;
+      case 'Enter': {
+        if (!focused) break;
+        e.preventDefault();
+        const id = Number(focused.dataset.id);
+        const book = _gridList.find(b => b.id === id);
+        if (!book) break;
+        if (editMode) {
+          const chk = focused.querySelector('.book-card-checkbox');
+          if (chk) { chk.checked = !chk.checked; toggleBookSelect(id, chk.checked); }
+        } else {
+          sessionStorage.setItem('br_last_shelf', String(currentShelfId));
+          sessionStorage.setItem('br_last_search', document.getElementById('search-input')?.value || '');
+          window.location.href = `/readerv4.html?id=${id}`;
+        }
+        break;
+      }
+      case 'i': case 'I': {
+        if (!focused) break;
+        e.preventDefault();
+        const id   = Number(focused.dataset.id);
+        const book = _gridList.find(b => b.id === id);
+        if (book) openInfoModal(book);
+        break;
+      }
+      case 'e': case 'E': {
+        if (focused && !isOfflineMode) { e.preventDefault(); toggleEditMode(); }
+        break;
+      }
+      case 'Delete': case 'Backspace': {
+        if (focused && editMode) {
+          e.preventDefault();
+          const id = Number(focused.dataset.id);
+          const chk = focused.querySelector('.book-card-checkbox');
+          if (chk) { chk.checked = true; toggleBookSelect(id, true); }
+        }
+        break;
+      }
+      case 'Escape': {
+        if (editMode) { e.preventDefault(); toggleEditMode(); }
+        break;
+      }
+    }
+  });
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 let _initialized = false;
 
@@ -2011,6 +2170,7 @@ export async function initLibrary() {
     if (searchEl) searchEl.value = initialSearch;
   }
 
+  initGridKeyboard();
   loadBooks();
   checkInterruptedSession();
 }
