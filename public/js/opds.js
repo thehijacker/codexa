@@ -2,7 +2,7 @@ import { apiFetch } from './api.js';
 import { toast, setButtonLoading } from './ui.js';
 import { t, applyTranslations } from './i18n.js';
 import { reloadShelves } from './sidebar.js';
-import { reloadLibrary } from './library.js';
+import { reloadLibrary, openInfoModal } from './library.js';
 import { showPanel } from './router.js';
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -165,6 +165,18 @@ function renderPagination() {
   bar.appendChild(nextBtn);
 }
 
+function showBookActions(actionsEl, bookId) {
+  actionsEl.innerHTML = `
+    <a class="btn btn-read btn-sm" href="/readerv4.html?id=${bookId}">${escHtml(t('opds.btn_read'))}</a>
+    <a class="btn btn-secondary btn-sm" href="/readerv4.html?id=${bookId}&peek=1">${escHtml(t('opds.btn_peek'))}</a>
+    <button class="btn btn-secondary btn-sm btn-opds-info">${escHtml(t('opds.btn_book_info'))}</button>
+  `;
+  actionsEl.querySelector('.btn-opds-info').addEventListener('click', e => {
+    e.stopPropagation();
+    openInfoModal({ id: bookId }).catch(() => {});
+  });
+}
+
 // Resolve a next URL that may be relative — use the last page URL as base
 function resolveClientUrl(href) {
   if (!href) return '';
@@ -253,16 +265,17 @@ function renderFeed(feed) {
             body: JSON.stringify({ href: entry.acqHref, title: entry.title, author: entry.author }),
           });
           toast.success(t('opds.toast_book_added', { title: entry.title }));
-          const actionsEl = row.querySelector('.book-row-actions');
-          actionsEl.innerHTML = `
-            <a class="btn btn-read btn-sm" href="/readerv4.html?id=${data.id}">${escHtml(t('opds.btn_read'))}</a>
-            <a class="btn btn-secondary btn-sm" href="/readerv4.html?id=${data.id}&peek=1">${escHtml(t('opds.btn_peek'))}</a>
-          `;
+          showBookActions(row.querySelector('.book-row-actions'), data.id);
           reloadLibrary().catch(e => console.error('[opds] reloadLibrary failed:', e));
         } catch (err) {
-          const msg = err.message?.includes('v vaši') || err.message?.includes('already') ? t('opds.err_already_in_library') : err.message;
-          toast.error(msg);
-          setButtonLoading(btn, false, t('opds.btn_add'));
+          const bookId = err.data?.id;
+          if (bookId) {
+            toast.info(t('opds.err_already_in_library'));
+            showBookActions(row.querySelector('.book-row-actions'), bookId);
+          } else {
+            toast.error(err.message);
+            setButtonLoading(btn, false, t('opds.btn_add'));
+          }
         }
       });
     }

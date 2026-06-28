@@ -438,6 +438,7 @@
   "opds.btn_add": "+ Adicionar à biblioteca",
   "opds.btn_read": "Ler",
   "opds.btn_peek": "Pré-visualizar",
+  "opds.btn_book_info": "Info do livro",
   "opds.no_description": "Sem descrição.",
   "opds.btn_downloading": "A descarregar…",
   "opds.toast_book_added": "\"{title}\" adicionado à biblioteca.",

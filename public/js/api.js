@@ -58,15 +58,18 @@ export async function apiFetch(path, options = {}) {
 
   if (!res.ok) {
     let msg = t('error.http_error', { status: res.status });
+    let body = null;
     try {
-      const body = await res.json();
+      body = await res.json();
       // body.error may be an i18n key (e.g. 'error.wrong_credentials') or a plain message
       if (body.error) {
         const translated = t(body.error);
         msg = (translated !== body.error) ? translated : body.error;
       }
     } catch { /* ignore */ }
-    throw new Error(msg);
+    const err = new Error(msg);
+    if (body) err.data = body;
+    throw err;
   }
 
   // 204 No Content

@@ -625,7 +625,7 @@ function openCoverPreview(book) {
 }
 
 // ── Book info modal ───────────────────────────────────────────────────────────
-async function openInfoModal(book, startTab = '') {
+export async function openInfoModal(book, startTab = '') {
   document.getElementById('book-info-modal')?.remove();
 
   let fullBook = book;
@@ -1608,9 +1608,11 @@ function _autoSyncLinkedShelf(linked) {
         const nowSec = Math.floor(Date.now() / 1000);
         if (currentShelfId === linked.shelfId) {
           _updateSyncDateDisplay(nowSec);
-          if (newBooks > 0) loadBooks();
-        }
-        if (newBooks > 0 && currentShelfId !== linked.shelfId) {
+          if (newBooks > 0) {
+            reloadLibrary().catch(() => {});
+            reloadShelves().catch(() => {});
+          }
+        } else if (newBooks > 0) {
           setShelfBadge(linked.shelfId, newBooks);
         }
       } else if (msg.type === 'error') {

@@ -897,9 +897,10 @@ router.post('/download/:id', async (req, res) => {
       const fileHash    = computeFileHash(tmpPath);
       const fileHashMd5 = computeFileMd5(tmpPath);
 
-      if (db.prepare('SELECT id FROM books WHERE user_id = ? AND file_hash = ?').get(req.user.id, fileHash)) {
+      const existing = db.prepare('SELECT id FROM books WHERE user_id = ? AND file_hash = ?').get(req.user.id, fileHash);
+      if (existing) {
         fs.unlinkSync(tmpPath);
-        return res.status(409).json({ error: 'error.book_already_in_library' });
+        return res.status(409).json({ error: 'error.book_already_in_library', id: existing.id });
       }
 
       const ext      = format === 'cbz' ? '.cbz' : '.epub';

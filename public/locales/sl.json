@@ -438,6 +438,7 @@
   "opds.btn_add": "+ Dodaj v knjižnico",
   "opds.btn_read": "Beri",
   "opds.btn_peek": "Predogled",
+  "opds.btn_book_info": "Podatki o knjigi",
   "opds.no_description": "Ni opisa.",
   "opds.btn_downloading": "Prenašam…",
   "opds.toast_book_added": "\"{title}\" dodana v knjižnico.",

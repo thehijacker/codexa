@@ -1571,6 +1571,17 @@ function attachIframeDictionary(contents) {
       const result = getWordRangeAtPoint(pressX, pressY);
       if (!result) return;
       const { word, range } = result;
+      // If the tapped word is inside an existing annotation mark, open its edit sheet
+      const _tappedNode = range.commonAncestorContainer;
+      const _existingMark = (_tappedNode.nodeType === 3 ? _tappedNode.parentElement : _tappedNode)
+        ?.closest?.('mark[data-annot-id]');
+      if (_existingMark) {
+        const _annotId = parseInt(_existingMark.dataset.annotId);
+        if (!isNaN(_annotId)) {
+          window.parent.postMessage({ type: 'annotation-click', id: _annotId }, '*');
+          return;
+        }
+      }
       win.getSelection?.()?.removeAllRanges?.();
       let cfiRange = '';
       if (prefs.bionicReading) {
@@ -2128,25 +2139,31 @@ function reapplyAnnotations() {
   } catch { /* ignore */ }
 }
 
-// Remove <mark> wrappers for a deleted annotation from all loaded views
-function removeAnnotationFromDom(id) {
+// Call callback(doc) for every currently-loaded iframe document across all reader modes.
+function forEachAnnotationDoc(callback) {
+  if (prefs.experimentalReader && _cxReader?.iframe?.contentDocument) {
+    try { callback(_cxReader.iframe.contentDocument); } catch { /* ignore */ }
+    return;
+  }
   try {
-    const contents = rendition?.getContents?.() || [];
-    contents.forEach(c => {
-      c.document?.querySelectorAll(`mark[data-annot-id="${id}"]`).forEach(m => {
-        while (m.firstChild) m.parentNode.insertBefore(m.firstChild, m);
-        m.remove();
-      });
-    });
-  } catch { /* ignore */ }
+    const contents = rendition?.getContents?.();
+    if (contents?.length) { contents.forEach(c => { if (c.document) try { callback(c.document); } catch { /* ignore */ } }); return; }
+  } catch { /* fall through */ }
   try {
     rendition?.manager?.views?.forEach?.(view => {
-      view?.contents?.document?.querySelectorAll(`mark[data-annot-id="${id}"]`).forEach(m => {
-        while (m.firstChild) m.parentNode.insertBefore(m.firstChild, m);
-        m.remove();
-      });
+      if (view?.contents?.document) try { callback(view.contents.document); } catch { /* ignore */ }
     });
   } catch { /* ignore */ }
+}
+
+// Remove <mark> wrappers for a deleted annotation from all loaded views
+function removeAnnotationFromDom(id) {
+  forEachAnnotationDoc(doc => {
+    doc.querySelectorAll(`mark[data-annot-id="${id}"]`).forEach(m => {
+      while (m.firstChild) m.parentNode.insertBefore(m.firstChild, m);
+      m.remove();
+    });
+  });
 }
 
 function showAnnotationEditSheet(a) {
@@ -2182,6 +2199,8 @@ async function createAnnotation(cfiRange, text, color, note) {
     enqueueOfflineOp(`br_ann_q_${currentBook.id}`, 'create', payload);
   }
   try { localStorage.setItem(`br_ann_${currentBook.id}`, JSON.stringify(annotationsCache)); } catch { /* ignore */ }
+  clearTimeout(_clearHlTimer); _clearHlTimer = null;
+  clearPressHighlight();
   reapplyAnnotations();
   renderAnnotationList();
   applyHeaderBtnVisibility();
@@ -2203,14 +2222,11 @@ async function updateAnnotation(id, updates) {
   Object.assign(a, updates);
   try { localStorage.setItem(`br_ann_${currentBook.id}`, JSON.stringify(annotationsCache)); } catch { /* ignore */ }
   // Update mark classes in DOM
-  try {
-    const contents = rendition?.getContents?.() || [];
-    contents.forEach(c => {
-      c.document?.querySelectorAll(`mark[data-annot-id="${id}"]`).forEach(m => {
-        m.className = 'annot-hl annot-' + a.color + (a.note ? ' has-note' : '');
-      });
+  forEachAnnotationDoc(doc => {
+    doc.querySelectorAll(`mark[data-annot-id="${id}"]`).forEach(m => {
+      m.className = 'annot-hl annot-' + a.color + (a.note ? ' has-note' : '');
     });
-  } catch { /* ignore */ }
+  });
   renderAnnotationList();
 }
 
