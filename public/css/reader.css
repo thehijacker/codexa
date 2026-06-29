@@ -573,6 +573,22 @@ html, body {
 @keyframes rdr-slide-in-right  { from { transform: translateX(4%);  opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes rdr-slide-in-left   { from { transform: translateX(-4%); opacity: 0; } to { transform: none; opacity: 1; } }
 
+/* Zoom (host-level scale + fade) */
+#epub-viewer.page-exit.anim-zoom  { animation: rdr-zoom-out 110ms ease forwards; }
+#epub-viewer.page-enter.anim-zoom { animation: rdr-zoom-in  200ms ease forwards; }
+@keyframes rdr-zoom-out { to   { opacity: 0; transform: scale(1.03); } }
+@keyframes rdr-zoom-in  { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+
+/* Paper: soft shadow pulse cast at the spine edge while the cxReader engine
+   slides the page (built/driven from reader_v4.js — see _cxSlideTurn). */
+#turn-shadow {
+  position: absolute; top: 0; bottom: 0; width: 26%;
+  pointer-events: none; opacity: 0; z-index: 30;
+}
+#turn-shadow.dir-next { left: 0;  background: linear-gradient(90deg,  rgba(0,0,0,.33), rgba(0,0,0,0)); }
+#turn-shadow.dir-prev { right: 0; background: linear-gradient(270deg, rgba(0,0,0,.33), rgba(0,0,0,0)); }
+@keyframes turn-shadow-pulse { 0% { opacity: 0; } 35% { opacity: 1; } 100% { opacity: 0; } }
+
 /* E-ink: always suppress — must come last */
 [data-reader-eink] #epub-viewer.page-exit,
 [data-reader-eink] #epub-viewer.page-enter {
@@ -580,6 +596,7 @@ html, body {
   opacity: 1 !important;
   transform: none !important;
 }
+[data-reader-eink] #turn-shadow { display: none !important; }
 
 
 /* Panel/popup shadow policy:
@@ -1396,6 +1413,14 @@ input[type="range"]::-moz-range-thumb {
   display: flex;
   gap: .5rem;
 }
+/* Page-turn animation picker: 3-column grid so the 6 options wrap into 2 rows. */
+.spread-buttons.page-anim-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: .5rem;
+}
+.spread-buttons.page-anim-grid .spread-btn { flex: none; }
+html.no-flexgap .spread-buttons.page-anim-grid > * + * { margin-left: 0; }
 .theme-btn,
 .spread-btn {
   flex: 1;

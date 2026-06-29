@@ -5,7 +5,7 @@ import ePub from './flow/index.js';
 import { isBookDownloaded, downloadBook, fetchOfflineBookFile, getBookMeta, saveBookMeta } from './offline.js';
 import { queueProgress, clearProgress, flushProgressOutbox } from './progress-outbox.js';
 
-const READER_BUILD = 'br-v84';
+const READER_BUILD = 'br-v85-anim';
 const _i18nReady = initI18n();
 console.log('[codexa] reader build', READER_BUILD);
 
@@ -274,7 +274,7 @@ const DEFAULT_PREFS = {
   vertNavZones:          false, // top/bottom half tap navigation
   vertNavZonesReversed:  false, // true = top:next, bottom:prev
   statusBar:      null,         // deep-merged in loadPrefs()
-  pageTurnAnim:   'fade',       // 'none' | 'fade' | 'slide'
+  pageTurnAnim:   'fade',       // 'none' | 'fade' | 'slide' | 'paper' | 'momentum' | 'zoom'
 };
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -6060,30 +6060,90 @@ async function startRendition(displayCfi = null) {
 }
 
 // ── Page turn animation ───────────────────────────────────────────────────────
+// Host-level animations (fade / slide / zoom) animate the #epub-viewer host as one
+// layer and work on both engines. 'paper' and 'momentum' instead animate the
+// cxReader engine's own page slide (see _cxSlideTurn) so the next page genuinely
+// scrolls in; on the epub.js engine they fall back to the host-level slide.
+const _HOST_ANIM_CLASSES = ['anim-fade', 'anim-slide', 'anim-zoom'];
 function _pageTurnAnimClass() {
-  return prefs.pageTurnAnim === 'slide' ? 'anim-slide' : 'anim-fade';
+  if (prefs.pageTurnAnim === 'zoom') return 'anim-zoom';
+  if (prefs.pageTurnAnim === 'slide' || prefs.pageTurnAnim === 'paper' || prefs.pageTurnAnim === 'momentum') return 'anim-slide';
+  return 'anim-fade';
 }
 
 function _pageExit(dir) {
+  if (_useEngineSlide()) return;   // cxReader paper/momentum handled by the engine slide
   if (prefs.eink || !prefs.pageTurnAnim || prefs.pageTurnAnim === 'none') return;
   const v = document.getElementById('epub-viewer');
   if (!v) return;
-  v.classList.remove('page-exit', 'page-enter', 'dir-next', 'dir-prev', 'anim-fade', 'anim-slide');
+  v.classList.remove('page-exit', 'page-enter', 'dir-next', 'dir-prev', ..._HOST_ANIM_CLASSES);
   v.classList.add('page-exit', _pageTurnAnimClass(), dir === 'prev' ? 'dir-prev' : 'dir-next');
 }
 
 function _pageEnter(dir) {
+  if (_useEngineSlide()) return;
   if (prefs.eink || !prefs.pageTurnAnim || prefs.pageTurnAnim === 'none') return;
   const v = document.getElementById('epub-viewer');
   if (!v) return;
-  v.classList.remove('page-exit', 'page-enter', 'dir-next', 'dir-prev', 'anim-fade', 'anim-slide');
+  v.classList.remove('page-exit', 'page-enter', 'dir-next', 'dir-prev', ..._HOST_ANIM_CLASSES);
   v.classList.add('page-enter', _pageTurnAnimClass(), dir === 'prev' ? 'dir-prev' : 'dir-next');
   // Remove enter classes after animation completes to leave element clean
   const onEnd = () => {
-    v.classList.remove('page-enter', 'dir-next', 'dir-prev', 'anim-fade', 'anim-slide');
+    v.classList.remove('page-enter', 'dir-next', 'dir-prev', ..._HOST_ANIM_CLASSES);
     v.removeEventListener('animationend', onEnd);
   };
   v.addEventListener('animationend', onEnd, { once: true });
+}
+
+// ── Engine page-slide (cxReader 'paper' / 'momentum') ─────────────────────────
+// cxReader holds the whole chapter in one iframe and pages by sliding the body
+// with translateX. Easing that transform gives a real page slide where the next
+// page scrolls in — no second layer, no capture. 'paper' adds a soft spine
+// shadow; 'momentum' uses a weightier easing. Touches no engine code: we set the
+// transition on the live body, let the engine change the transform, then clear it.
+let _slideClrTimer = 0;
+
+function _slideCapable() { return !prefs.eink && !_isLegacyWv; }
+
+function _useEngineSlide() {
+  return (prefs.pageTurnAnim === 'paper' || prefs.pageTurnAnim === 'momentum')
+    && prefs.experimentalReader && !!_cxReader
+    && !_cxReader._isCbz && !_cxReader._isFixedLayout
+    && _slideCapable();
+}
+
+function _showTurnShadow(dir, dur) {
+  const v = document.getElementById('epub-viewer');
+  if (!v) return;
+  let sh = document.getElementById('turn-shadow');
+  if (!sh) { sh = document.createElement('div'); sh.id = 'turn-shadow'; v.appendChild(sh); }
+  sh.className = dir === 'prev' ? 'dir-prev' : 'dir-next';
+  sh.style.animation = 'none';
+  void sh.offsetWidth;                 // reflow to restart the pulse
+  sh.style.animation = `turn-shadow-pulse ${dur}ms ease`;
+}
+
+function _cxSlideTurn(dir) {
+  const pag  = _cxReader?._paginator;
+  const body = _cxReader?.iframe?.contentDocument?.body;
+  sessionPageCount++;
+  if (!pag || !body) { pendingNavDirection = dir; void _cxReader?.[dir]?.(); return; }
+  // At a chapter edge the turn re-renders the iframe, so there's nothing to slide
+  // in place — just advance and let the new chapter appear.
+  const atBoundary = dir === 'next' ? pag.isAtEnd : pag.isAtStart;
+  if (atBoundary) { pendingNavDirection = null; void _cxReader[dir](); return; }
+  pendingNavDirection = null;          // the engine slide is the visual — skip host _pageEnter
+  const momentum = prefs.pageTurnAnim === 'momentum';
+  const dur  = momentum ? 300 : 270;
+  const ease = momentum ? 'cubic-bezier(.16,1,.3,1)' : 'cubic-bezier(.33,0,.25,1)';
+  body.style.transition = `transform ${dur}ms ${ease}`;
+  if (prefs.pageTurnAnim === 'paper') _showTurnShadow(dir, dur);
+  void _cxReader[dir]();                // synchronously changes body transform → animates
+  clearTimeout(_slideClrTimer);
+  _slideClrTimer = setTimeout(() => {
+    const b = _cxReader?.iframe?.contentDocument?.body;
+    if (b) b.style.transition = '';
+  }, dur + 80);
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
@@ -6100,15 +6160,17 @@ function _navThrottle() {
 function goNext() {
   if (deferredNextPending) return;
   if (_navThrottle()) return;
-  _pageExit('next');
 
   if (prefs.experimentalReader && _cxReader) {
+    if (_useEngineSlide()) { _cxSlideTurn('next'); return; }
+    _pageExit('next');
     pendingNavDirection = 'next';
     sessionPageCount++;
     void _cxReader.next();
     return;
   }
 
+  _pageExit('next');
   const _lL        = rendition?.currentLocation?.();
   const _liveEnd   = _lL?.end?.displayed?.page;
   const _liveTotal = _lL?.start?.displayed?.total;
@@ -6150,15 +6212,17 @@ function goNext() {
 function goPrev() {
   if (_navThrottle()) return;
   deferredNextPending = false;
-  _pageExit('prev');
 
   if (prefs.experimentalReader && _cxReader) {
+    if (_useEngineSlide()) { _cxSlideTurn('prev'); return; }
+    _pageExit('prev');
     pendingNavDirection = 'prev';
     sessionPageCount++;
     void _cxReader.prev();
     return;
   }
 
+  _pageExit('prev');
   console.log(`[nav] PREV | page=${currentChapPage}/${currentChapTotal}`);
   pendingNavDirection = 'prev';
   sessionPageCount++;
