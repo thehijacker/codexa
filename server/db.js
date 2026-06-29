@@ -159,6 +159,22 @@ function initDb() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
     );
+
+    -- Per-book BookOrbit sync state: match map (bo_book_id) plus per-feature
+    -- ack watermarks, so an interrupted sync resumes and resends are no-ops.
+    CREATE TABLE IF NOT EXISTS bookorbit_sync_state (
+      user_id            INTEGER NOT NULL,
+      book_id            INTEGER NOT NULL,
+      bo_book_id         INTEGER DEFAULT NULL,
+      bo_file_id         INTEGER DEFAULT NULL,
+      ann_watermark      INTEGER DEFAULT 0,
+      sessions_watermark INTEGER DEFAULT 0,
+      state_watermark    INTEGER DEFAULT 0,
+      last_sync          INTEGER DEFAULT 0,
+      PRIMARY KEY (user_id, book_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+    );
   `);
 
   console.log(`[db] SQLite initialized at ${DB_PATH}`);
@@ -183,6 +199,20 @@ function initDb() {
     [`ALTER TABLE shelves        ADD COLUMN opds_folder_url         TEXT    DEFAULT NULL`,   'shelves.opds_folder_url'],
     [`ALTER TABLE shelves        ADD COLUMN last_synced_at          INTEGER DEFAULT NULL`,   'shelves.last_synced_at'],
     [`ALTER TABLE shelves        ADD COLUMN sort_order              INTEGER DEFAULT 0`,      'shelves.sort_order'],
+    // BookOrbit extended sync (highlights, reading log, status & rating)
+    [`ALTER TABLE user_settings  ADD COLUMN bookorbit_sync_enabled  INTEGER DEFAULT 0`,      'user_settings.bookorbit_sync_enabled'],
+    // BookOrbit web-API account login (separate from the KOReader sync sub-account)
+    [`ALTER TABLE user_settings  ADD COLUMN bookorbit_account_username     TEXT DEFAULT ''`, 'user_settings.bookorbit_account_username'],
+    [`ALTER TABLE user_settings  ADD COLUMN bookorbit_account_password_enc TEXT DEFAULT ''`, 'user_settings.bookorbit_account_password_enc'],
+    [`ALTER TABLE annotations    ADD COLUMN bo_id                   TEXT    DEFAULT ''`,     'annotations.bo_id'],
+    [`ALTER TABLE annotations    ADD COLUMN style                   TEXT    DEFAULT 'lighten'`, 'annotations.style'],
+    [`ALTER TABLE annotations    ADD COLUMN updated_at              INTEGER`,                 'annotations.updated_at'],
+    [`ALTER TABLE annotations    ADD COLUMN deleted                 INTEGER DEFAULT 0`,       'annotations.deleted'],
+    [`ALTER TABLE annotations    ADD COLUMN origin                  TEXT    DEFAULT 'web'`,   'annotations.origin'],
+    [`ALTER TABLE books          ADD COLUMN read_status             TEXT    DEFAULT ''`,     'books.read_status'],
+    [`ALTER TABLE books          ADD COLUMN rating                  INTEGER`,                 'books.rating'],
+    [`ALTER TABLE books          ADD COLUMN status_modified         INTEGER`,                 'books.status_modified'],
+    [`ALTER TABLE bookorbit_sync_state ADD COLUMN bo_file_id        INTEGER DEFAULT NULL`,    'bookorbit_sync_state.bo_file_id'],
   ];
   for (const [sql, label] of migrations) {
     try {
@@ -204,6 +234,14 @@ function initDb() {
     `);
   } catch (e) {
     console.warn('[db] last_opened_at backfill:', e.message);
+  }
+
+  // Seed annotations.updated_at from created_at so pre-existing highlights have
+  // a sync timestamp the first time BookOrbit sync is enabled.
+  try {
+    database.exec(`UPDATE annotations SET updated_at = created_at WHERE updated_at IS NULL`);
+  } catch (e) {
+    console.warn('[db] annotations.updated_at backfill:', e.message);
   }
 }
 

@@ -27,6 +27,7 @@ const _autoSyncCooldown = new Map(); // shelfId → timestamp of last auto-sync
 let editMode            = false;
 let selectedBooks       = new Set();
 let seriesFilter        = null; // active series name filter
+let _autoOpenDone       = false; // fire auto-open-last only once per page load
 let sortBeforeSeriesFilter = null; // sort value saved before auto-switching to series_asc
 
 // ── Card context-menu state ───────────────────────────────────────────────────
@@ -47,9 +48,9 @@ const initialShelf  = urlParams.get('shelf') || sessionStorage.getItem('br_last_
 const initialSearch = sessionStorage.getItem('br_last_search') || '';
 sessionStorage.removeItem('br_last_shelf');
 sessionStorage.removeItem('br_last_search');
-// Restore book info modal when returning from a bookmark/highlight jump
-const returnBookId = Number(sessionStorage.getItem('br_return_book_id')) || 0;
-const returnTab    = sessionStorage.getItem('br_return_tab') || '';
+// Restore book info modal when returning from a bookmark/highlight jump (one-shot — cleared after first use)
+let returnBookId = Number(sessionStorage.getItem('br_return_book_id')) || 0;
+let returnTab    = sessionStorage.getItem('br_return_tab') || '';
 sessionStorage.removeItem('br_return_book_id');
 sessionStorage.removeItem('br_return_tab');
 if (urlParams.has('shelf')) history.replaceState(null, '', '/');
@@ -236,6 +237,7 @@ function _makeCard(book, globalIndex, isEink) {
         <div class="book-progress-fill" style="width:${pct}%"></div>
       </div>
       <div class="book-progress-text">${pct > 0 ? t('library.pct_read', { n: pct }) : t('library.not_started')}</div>
+      <div class="book-card-badges" data-id="${book.id}" data-status="${book.read_status || ''}" data-rating="${book.rating || 0}" style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-top:.25rem">${renderCardBadges(book)}</div>
     </div>
     <button class="book-card-menu-btn" data-id="${book.id}" aria-label="More options">⋮</button>`;
 
@@ -380,7 +382,14 @@ function toggleEditMode() {
   if (editBtnLabel) editBtnLabel.textContent = editMode ? t('common.cancel') : t('library.btn_edit');
   document.getElementById('edit-toolbar').classList.toggle('hidden', !editMode);
   updateEditToolbar();
-  applyFilter();
+  // Edit mode is a pure visual toggle (CSS keys off .edit-mode on the grid, and
+  // every card already carries its checkbox) — no need to re-render/re-fade the grid.
+  const grid = document.getElementById('book-grid');
+  if (grid) {
+    grid.classList.toggle('edit-mode', editMode);
+    grid.querySelectorAll('.book-card.selected').forEach(c => c.classList.remove('selected'));
+    grid.querySelectorAll('.book-card-checkbox:checked').forEach(cb => { cb.checked = false; });
+  }
 }
 
 function toggleBookSelect(bookId, selected) {
@@ -469,6 +478,39 @@ function openBulkAssignModal() {
     close();
     await reloadShelves();
   });
+}
+
+// ── Read-status pill + star rating badges on a book card ──────────────────────
+function renderCardBadges(book) {
+  const status = book.read_status || '';
+  const rating = Number(book.rating) || 0;
+  const labels = {
+    want_to_read: t('library.status_want'),
+    reading:      t('library.status_reading'),
+    read:         t('library.status_finished'),
+    abandoned:    t('library.status_abandoned'),
+  };
+  const colors = { want_to_read: '#6c7a89', reading: '#2196f3', read: '#4caf50', abandoned: '#b0653a' };
+  const parts = [];
+  if (status && labels[status]) {
+    parts.push(`<span style="display:inline-block;font-size:.66rem;font-weight:600;color:#fff;background:${colors[status]};padding:.05rem .4rem;border-radius:10px">${labels[status]}</span>`);
+  }
+  if (rating) {
+    parts.push(`<span title="${rating}/5" style="font-size:.75rem;letter-spacing:-1px;color:#f5c518">${'★'.repeat(rating)}<span style="color:#ccc">${'★'.repeat(5 - rating)}</span></span>`);
+  }
+  return parts.join('');
+}
+
+function refreshCardBadges(id, partial) {
+  const el = document.querySelector(`.book-card-badges[data-id="${id}"]`);
+  if (!el) return;
+  const merged = {
+    read_status: 'read_status' in partial ? (partial.read_status || '') : (el.dataset.status || ''),
+    rating:      'rating'      in partial ? (partial.rating || 0)        : Number(el.dataset.rating || 0),
+  };
+  el.dataset.status = merged.read_status;
+  el.dataset.rating = merged.rating || 0;
+  el.innerHTML = renderCardBadges(merged);
 }
 
 // ── Card context menu (three-dots button) ─────────────────────────────────────
@@ -710,6 +752,20 @@ export async function openInfoModal(book, startTab = '') {
       <div class="info-modal-tab-content">
 
         <div class="imt-panel" id="imt-details">
+          ${isOfflineMode ? '' : `
+          <div class="imt-status-rating-row" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:.75rem">
+            <select id="imt-read-status" class="imt-status-select" aria-label="${t('library.status_title')}" style="padding:.3rem .5rem;border-radius:6px">
+              <option value="">${t('library.status_none')}</option>
+              <option value="want_to_read">${t('library.status_want')}</option>
+              <option value="reading">${t('library.status_reading')}</option>
+              <option value="read">${t('library.status_finished')}</option>
+              <option value="abandoned">${t('library.status_abandoned')}</option>
+            </select>
+            <div class="imt-rating" id="imt-rating" role="radiogroup" aria-label="${t('library.rating_label')}" style="display:inline-flex;align-items:center;gap:.1rem">
+              ${[1,2,3,4,5].map(n => `<button type="button" class="imt-star" data-val="${n}" aria-label="${n}" style="background:none;border:none;cursor:pointer;font-size:1.35rem;line-height:1;padding:0 .05rem;color:#ccc">★</button>`).join('')}
+              <button type="button" class="imt-star-clear" id="imt-rating-clear" title="${t('library.rating_clear')}" style="background:none;border:none;cursor:pointer;font-size:1rem;color:var(--color-text-muted,#888);margin-left:.25rem">✕</button>
+            </div>
+          </div>`}
           ${progressPct > 0 ? `
           <div class="info-modal-section-title">${t('library.info_progress')}</div>
           <div class="info-modal-progress-row">
@@ -787,6 +843,45 @@ export async function openInfoModal(book, startTab = '') {
     </div>`;
 
   document.body.appendChild(backdrop);
+
+  // ── Read status + star rating (stored locally; synced when BookOrbit on) ──────
+  if (!isOfflineMode) {
+    const statusSel  = backdrop.querySelector('#imt-read-status');
+    const ratingWrap = backdrop.querySelector('#imt-rating');
+    const stars      = ratingWrap ? [...ratingWrap.querySelectorAll('.imt-star')] : [];
+    let curRating    = fullBook.rating || 0;
+
+    if (statusSel) statusSel.value = fullBook.read_status || '';
+    const paintStars = (val) => stars.forEach(s => { s.style.color = Number(s.dataset.val) <= val ? '#f5c518' : '#ccc'; });
+    paintStars(curRating);
+
+    statusSel?.addEventListener('change', async () => {
+      const status = statusSel.value;
+      try {
+        await apiFetch(`/books/${fullBook.id}/read-status`, { method: 'PUT', body: JSON.stringify({ status }) });
+        fullBook.read_status = status;
+        book.read_status = status;
+        refreshCardBadges(fullBook.id, { read_status: status });
+      } catch (err) { toast.error(t('common.error_msg', { msg: err.message })); }
+    });
+
+    const setRating = async (val) => {
+      try {
+        await apiFetch(`/books/${fullBook.id}/rating`, { method: 'PUT', body: JSON.stringify({ rating: val || null }) });
+        curRating = val;
+        fullBook.rating = val || null;
+        book.rating = val || null;
+        paintStars(val);
+        refreshCardBadges(fullBook.id, { rating: val || null });
+      } catch (err) { toast.error(t('common.error_msg', { msg: err.message })); }
+    };
+    stars.forEach(s => {
+      s.addEventListener('mouseenter', () => paintStars(Number(s.dataset.val)));
+      s.addEventListener('mouseleave', () => paintStars(curRating));
+      s.addEventListener('click', () => setRating(Number(s.dataset.val)));
+    });
+    backdrop.querySelector('#imt-rating-clear')?.addEventListener('click', () => setRating(0));
+  }
 
   // ── Tab switching ─────────────────────────────────────────────────────────────
   let readingLoaded = false;
@@ -1659,7 +1754,8 @@ async function loadBooks() {
     document.body.classList.remove('is-offline');
     document.getElementById('offline-mode-banner')?.remove();
     booksLoaded = true;
-    if (!returningFromReader && !urlParams.has('shelf') && localStorage.getItem('br_auto_open_last') === 'true') {
+    if (!_autoOpenDone && !returningFromReader && !urlParams.has('shelf') && localStorage.getItem('br_auto_open_last') === 'true') {
+      _autoOpenDone = true;
       const lastRead = books
         .filter(b => (b.percentage || 0) > 0 && (b.percentage || 0) < 1 && b.progress_updated_at)
         .sort((a, b) => b.progress_updated_at - a.progress_updated_at)[0];
@@ -1679,8 +1775,12 @@ async function loadBooks() {
     applyFilter();
     // Re-open book info modal when returning from a bookmark/highlight jump
     if (returnBookId) {
-      const rb = books.find(b => b.id === returnBookId);
-      if (rb) openInfoModal(rb, returnTab || 'reading').catch(() => {});
+      const id  = returnBookId;
+      const tab = returnTab;
+      returnBookId = 0;
+      returnTab    = '';
+      const rb = books.find(b => b.id === id);
+      if (rb) openInfoModal(rb, tab || 'reading').catch(() => {});
     }
   } catch (err) {
     // Server unreachable — try loading from IndexedDB

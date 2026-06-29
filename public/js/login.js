@@ -40,7 +40,14 @@ import { initI18n, t, initIconLangPicker } from '/js/i18n.js';
         if (toggle.checked) {
           document.documentElement.setAttribute('data-lib-theme', 'eink');
         } else {
-          document.documentElement.removeAttribute('data-lib-theme');
+          const saved = localStorage.getItem('br_library_theme') || 'system';
+          let resolved = saved;
+          if (resolved === 'system') {
+            resolved = (typeof window.AndroidCodexa?.isNightMode === 'function')
+              ? (window.AndroidCodexa.isNightMode() ? 'night' : 'day')
+              : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day');
+          }
+          document.documentElement.setAttribute('data-lib-theme', resolved);
         }
       });
     }

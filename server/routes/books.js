@@ -6,6 +6,10 @@ const { getDb, DATA_DIR }              = require('../db');
 const { authenticateToken }            = require('../middleware/auth');
 const { computeFileHash, computeFileMd5, extractEpubMetadata, extractCbzMetadata } = require('../utils/epub');
 const { isCbrBuffer, convertCbrToCbz } = require('../utils/cbr');
+const bookorbit = require('../services/bookorbitSync');
+
+// Aligned with BookOrbit's ReadStatus vocabulary so values sync 1:1.
+const VALID_READ_STATUS = ['', 'want_to_read', 'reading', 'read', 'abandoned'];
 
 const router    = express.Router();
 const BOOKS_DIR = path.join(DATA_DIR, 'books');
@@ -38,6 +42,7 @@ router.get('/', (req, res) => {
   const db    = getDb();
   const books = db.prepare(`
     SELECT b.id, b.title, b.author, b.series_name, b.series_number, b.file_hash, b.file_hash_md5, b.cover_path, b.file_size, b.added_at, b.genres,
+           b.read_status, b.rating,
            COALESCE(b.last_opened_at, b.added_at) AS last_opened_at,
            COALESCE(p.percentage, 0)    AS percentage,
            COALESCE(p.cfi_position, '') AS cfi_position,
@@ -57,6 +62,37 @@ router.post('/:id/opened', (req, res) => {
   const book = db.prepare('SELECT id FROM books WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
   if (!book) return res.status(404).json({ error: 'error.book_not_found' });
   db.prepare(`UPDATE books SET last_opened_at = strftime('%s', 'now') WHERE id = ?`).run(book.id);
+  bookorbit.triggerSync(req.user.id, book.id); // pull BookOrbit changes + push pending local
+  res.json({ success: true });
+});
+
+// ── PUT /api/books/:id/read-status — set read status (synced to BookOrbit) ─────
+router.put('/:id/read-status', (req, res) => {
+  const { status } = req.body || {};
+  if (!VALID_READ_STATUS.includes(status)) return res.status(400).json({ error: 'error.invalid_status' });
+  const db   = getDb();
+  const book = db.prepare('SELECT id FROM books WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+  if (!book) return res.status(404).json({ error: 'error.book_not_found' });
+  db.prepare(`UPDATE books SET read_status = ?, status_modified = strftime('%s','now') WHERE id = ?`)
+    .run(status, book.id);
+  bookorbit.triggerSync(req.user.id, book.id);
+  res.json({ success: true });
+});
+
+// ── PUT /api/books/:id/rating — set star rating 1-5 or null (synced) ───────────
+router.put('/:id/rating', (req, res) => {
+  let { rating } = req.body || {};
+  if (rating === '' || rating === 0) rating = null;
+  if (rating !== null && rating !== undefined) {
+    rating = parseInt(rating, 10);
+    if (Number.isNaN(rating) || rating < 1 || rating > 5) return res.status(400).json({ error: 'error.invalid_rating' });
+  }
+  const db   = getDb();
+  const book = db.prepare('SELECT id FROM books WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+  if (!book) return res.status(404).json({ error: 'error.book_not_found' });
+  db.prepare(`UPDATE books SET rating = ?, status_modified = strftime('%s','now') WHERE id = ?`)
+    .run(rating ?? null, book.id);
+  bookorbit.triggerSync(req.user.id, book.id);
   res.json({ success: true });
 });
 

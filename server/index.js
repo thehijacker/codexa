@@ -17,6 +17,7 @@ const shelvesRoutes    = require('./routes/shelves');
 const bookmarksRoutes    = require('./routes/bookmarks');
 const annotationsRoutes  = require('./routes/annotations');
 const statsRoutes        = require('./routes/stats');
+const bookorbitSync      = require('./services/bookorbitSync');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -126,3 +127,18 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`[server] Codexa running on http://localhost:${PORT}`);
 });
+
+// ── BookOrbit extended sync — periodic background reconcile ───────────────────
+// Event-driven triggers (on highlight/session/status change) sync just the
+// affected book promptly. This loop is the only FULL sweep — it backfills
+// server-side / other-device changes for every opted-in user, so it runs
+// infrequently and paces its requests. No-op for users without sync enabled.
+const { getDb } = require('./db');
+const BOOKORBIT_SYNC_INTERVAL_MS = 30 * 60 * 1000;
+setInterval(() => {
+  let users;
+  try {
+    users = getDb().prepare('SELECT user_id FROM user_settings WHERE bookorbit_sync_enabled = 1').all();
+  } catch { return; }
+  for (const u of users) bookorbitSync.triggerSync(u.user_id);
+}, BOOKORBIT_SYNC_INTERVAL_MS).unref();

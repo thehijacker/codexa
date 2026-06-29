@@ -68,11 +68,12 @@
         <li>
           <a href="#settings" data-section="settings">Settings</a>
           <ul class="nav-sub">
-            <li><a href="#settings-general"  data-section="settings" data-scroll="settings-general">General</a></li>
-            <li><a href="#settings-kosync"   data-section="settings" data-scroll="settings-kosync">KOReader Sync</a></li>
-            <li><a href="#settings-opds-srv" data-section="settings" data-scroll="settings-opds-srv">OPDS Servers</a></li>
-            <li><a href="#settings-dicts"    data-section="settings" data-scroll="settings-dicts">Dictionaries</a></li>
-            <li><a href="#settings-admin"    data-section="settings" data-scroll="settings-admin">Admin</a></li>
+            <li><a href="#settings-general"   data-section="settings" data-scroll="settings-general">General</a></li>
+            <li><a href="#settings-kosync"    data-section="settings" data-scroll="settings-kosync">KOReader Sync</a></li>
+            <li><a href="#settings-bookorbit" data-section="settings" data-scroll="settings-bookorbit">BookOrbit Sync</a></li>
+            <li><a href="#settings-opds-srv"  data-section="settings" data-scroll="settings-opds-srv">OPDS Servers</a></li>
+            <li><a href="#settings-dicts"     data-section="settings" data-scroll="settings-dicts">Dictionaries</a></li>
+            <li><a href="#settings-admin"     data-section="settings" data-scroll="settings-admin">Admin</a></li>
           </ul>
         </li>
         <li>
@@ -183,6 +184,17 @@
             <li><a href="#cxreader-features" data-section="cxreader" data-scroll="cxreader-features">What's Improved</a></li>
             <li><a href="#cxreader-position" data-section="cxreader" data-scroll="cxreader-position">Exact Position Restore</a></li>
             <li><a href="#cxreader-fixed"    data-section="cxreader" data-scroll="cxreader-fixed">Fixed-layout EPUBs</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#bookorbit-sync" data-section="bookorbit-sync">BookOrbit Sync</a>
+          <ul class="nav-sub">
+            <li><a href="#bo-what"    data-section="bookorbit-sync" data-scroll="bo-what">What Syncs</a></li>
+            <li><a href="#bo-setup"   data-section="bookorbit-sync" data-scroll="bo-setup">Setup</a></li>
+            <li><a href="#bo-status"  data-section="bookorbit-sync" data-scroll="bo-status">Status &amp; Rating</a></li>
+            <li><a href="#bo-annot"   data-section="bookorbit-sync" data-scroll="bo-annot">Highlights</a></li>
+            <li><a href="#bo-session" data-section="bookorbit-sync" data-scroll="bo-session">Reading Sessions</a></li>
+            <li><a href="#bo-limits"  data-section="bookorbit-sync" data-scroll="bo-limits">Limitations</a></li>
           </ul>
         </li>
         <li>
@@ -311,6 +323,7 @@
             <li><strong>Automatic position saving</strong> — on every device</li>
             <li><strong>Built-in KOSync-compatible server</strong> — for KOReader devices</li>
             <li><strong>External KOSync server support</strong> — with conflict resolution</li>
+            <li><strong>BookOrbit extended sync</strong> — optional two-way sync of highlights, reading sessions, and book status/rating to a self-hosted <a href="#bookorbit-sync" data-section="bookorbit-sync">BookOrbit</a> server</li>
             <li><strong>Interrupted session recovery banner</strong></li>
             <li><strong>Reading statistics</strong> — time read, pages turned, sessions, books started/finished</li>
           </ul>
@@ -811,7 +824,7 @@ data/<br>
     <!-- ═══════════════════════════════════════════════════════ Settings ══ -->
     <section id="settings">
       <h1>Settings</h1>
-      <p class="section-subtitle">Configure KOReader sync, OPDS servers, dictionaries, and admin options</p>
+      <p class="section-subtitle">Configure KOReader sync, BookOrbit sync, OPDS servers, dictionaries, and admin options</p>
 
       <p>
         Open Settings by by choosing gear icon <strong>Settings</strong> option from the left menu sidebar.
@@ -865,6 +878,25 @@ data/<br>
         connection</strong>. If the test passes, click <strong>Save</strong>.
       </p>
       <p>The <strong>Clear</strong> button removes all stored external server credentials.</p>
+
+      <h2 id="settings-bookorbit">BookOrbit Sync</h2>
+      <p>
+        Codexa can optionally sync highlights, reading sessions, and book status/rating with a
+        self-hosted <strong>BookOrbit</strong> server. This is an opt-in feature — it has no
+        effect unless you enable it and provide BookOrbit account credentials. See the
+        <a href="#bookorbit-sync" data-section="bookorbit-sync">BookOrbit Sync</a> section for
+        a full description of what syncs and how it works.
+      </p>
+      <ol class="steps">
+        <li>Make sure a BookOrbit server URL is already saved under <strong>KOReader Sync → External KOSync Server</strong> — the same server is used for BookOrbit Sync.</li>
+        <li>Enter your BookOrbit <strong>account username</strong> and <strong>account password</strong>. These are your BookOrbit web login credentials, which may differ from the KOReader sync sub-account credentials.</li>
+        <li>Tick <strong>Enable BookOrbit extended sync</strong> and click <strong>Save</strong>.</li>
+      </ol>
+      <p>
+        The toggle is disabled (greyed out) until a server URL and account password are saved.
+        Saving the credentials and the toggle in a single click is supported — you do not need
+        to save them separately first.
+      </p>
 
       <h2 id="settings-opds-srv">OPDS Servers</h2>
       <p>
@@ -1493,6 +1525,22 @@ data/<br>
         <li><strong>Currently Reading</strong> — books you have opened at least once, not yet at 100%.</li>
         <li><strong>Downloaded</strong> — books cached for offline reading.</li>
       </ul>
+
+      <h2>Read Status &amp; Rating</h2>
+      <p>
+        Each book can carry a <strong>read status</strong> and a <strong>star rating</strong>
+        (1–5). Open the book info dialog (ℹ button) to set them:
+      </p>
+      <ul>
+        <li><strong>Status</strong> — Want to Read, Reading, Read, or Abandoned.</li>
+        <li><strong>Rating</strong> — click a star to set 1–5; click the same star again to clear it.</li>
+      </ul>
+      <p>
+        Once set, a coloured status pill and star icons appear below the title on the book card
+        so you can see your status and rating at a glance without opening the info dialog. When
+        <a href="#bookorbit-sync" data-section="bookorbit-sync">BookOrbit Sync</a> is enabled,
+        status and rating are kept in sync with your BookOrbit library automatically.
+      </p>
 
       <h2 id="lib-edit">Edit Mode</h2>
       <p>
@@ -2271,6 +2319,154 @@ data/<br>
         <li>The reader's own CSS (fonts, margins, column layout) is <em>not</em> injected so the book's precise styling is preserved.</li>
         <li>Every page advance moves to the next spine item — one item equals one page.</li>
         <li>Reflowable EPUBs are completely unaffected.</li>
+      </ul>
+
+      <a class="back-top" href="#about">&#8593; Top</a>
+    </section>
+
+    <!-- ══════════════════════════════════════════════ BookOrbit Sync ═══ -->
+    <section id="bookorbit-sync">
+      <h1>BookOrbit Sync</h1>
+      <p class="section-subtitle">Optional two-way sync of highlights, reading sessions, and book status/rating with a self-hosted BookOrbit server</p>
+
+      <p>
+        If you self-host a <strong>BookOrbit</strong> server, Codexa can act as a second BookOrbit
+        web reader — keeping your highlights, reading log, and reading status/rating in sync across
+        all your clients (Codexa, BookOrbit's own web reader, and KOReader devices). This is
+        <strong>entirely optional</strong>: users without a BookOrbit server are completely unaffected.
+      </p>
+
+      <div class="callout">
+        <strong>Prerequisite</strong>
+        You must already have a BookOrbit server URL saved under
+        <strong>Settings → KOReader Sync → External KOSync Server</strong>. BookOrbit Sync
+        uses the same server; no additional URL is needed.
+      </div>
+
+      <h2 id="bo-what">What Syncs</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Data</th><th>Direction</th><th>Trigger</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Highlights &amp; notes</strong></td>
+              <td>Two-way</td>
+              <td>Automatically when you open a book, create, edit, or delete a highlight</td>
+            </tr>
+            <tr>
+              <td><strong>Reading sessions</strong></td>
+              <td>Codexa → BookOrbit</td>
+              <td>Automatically when you close a book (session ≥&nbsp;60&nbsp;s and ≥&nbsp;2 pages)</td>
+            </tr>
+            <tr>
+              <td><strong>Read status</strong></td>
+              <td>Two-way</td>
+              <td>Immediately when you change it in Codexa; adopted from BookOrbit when your local status is unset</td>
+            </tr>
+            <tr>
+              <td><strong>Star rating</strong></td>
+              <td>Two-way</td>
+              <td>Same as status</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        In addition to the per-action triggers above, Codexa runs a full background sweep every
+        <strong>30 minutes</strong> covering all books in your library. The sweep is paced to avoid
+        hitting BookOrbit's rate limits.
+      </p>
+
+      <h2 id="bo-setup">Setup</h2>
+      <ol class="steps">
+        <li>Go to <strong>Settings → KOReader Sync</strong> and save your BookOrbit server URL under <em>External KOSync Server</em> if you have not already done so.</li>
+        <li>Scroll down to <strong>Settings → BookOrbit Sync</strong>.</li>
+        <li>Enter your BookOrbit <strong>account username</strong> and <strong>account password</strong>. These are your BookOrbit web login credentials — not the KOReader sync sub-account credentials.</li>
+        <li>Tick <strong>Enable BookOrbit extended sync</strong>.</li>
+        <li>Click <strong>Save</strong>. Codexa immediately runs a first sync across your library.</li>
+      </ol>
+
+      <div class="callout warning">
+        <strong>&#9888; Account credentials vs. KOReader sync credentials</strong>
+        BookOrbit Sync uses your <strong>BookOrbit web account</strong> login (the same username
+        and password you use in BookOrbit's web reader). These may differ from the
+        <em>KOReader sync</em> sub-account credentials you entered for progress sync. Enter the
+        correct set for each.
+      </div>
+
+      <p>
+        To disable the sync, untick the toggle and save. From that point Codexa makes no further
+        calls to BookOrbit, and deleting a highlight performs a permanent hard-delete again
+        (instead of a soft-delete tombstone).
+      </p>
+
+      <h2 id="bo-status">Book Status &amp; Rating</h2>
+      <p>
+        Open the book info dialog (ℹ button) to set a book's status and rating. Changes are
+        pushed to BookOrbit immediately. When a book has no local status or rating yet, Codexa
+        adopts whatever BookOrbit has on the first sync.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Status value</th><th>Shown as</th></tr></thead>
+          <tbody>
+            <tr><td>Want to Read</td><td>Blue pill</td></tr>
+            <tr><td>Reading</td><td>Green pill</td></tr>
+            <tr><td>Read</td><td>Purple pill</td></tr>
+            <tr><td>Abandoned</td><td>Grey pill</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        The status pill and stars appear on the book card so you can see them at a glance
+        without opening the info dialog.
+      </p>
+
+      <h2 id="bo-annot">Highlights &amp; Annotations</h2>
+      <p>
+        Highlights you create in Codexa are pushed to BookOrbit automatically and appear in
+        BookOrbit's own web reader (and on your KOReader device if you sync it to BookOrbit).
+        Highlights created in BookOrbit's web reader are pulled into Codexa the next time you
+        open the book.
+      </p>
+      <ul>
+        <li><strong>Colors:</strong> yellow, green, blue, and pink map directly between Codexa and BookOrbit.</li>
+        <li><strong>Notes:</strong> the note text attached to a highlight is synced both ways.</li>
+        <li><strong>Deleting a highlight</strong> in Codexa when sync is enabled creates a soft-delete tombstone so the deletion is propagated to BookOrbit. The highlight disappears from the Codexa list immediately; BookOrbit removes it on the next sync. Deleting a highlight in BookOrbit's web reader removes it from Codexa on the next book open or background sweep.</li>
+        <li><strong>A highlight must contain text</strong> — BookOrbit does not accept empty-text highlights. Image-only selections are not synced.</li>
+        <li>Highlights pulled from BookOrbit show a chapter-level location percentage (based on the CFI spine position) in the annotations sidebar.</li>
+      </ul>
+
+      <div class="callout">
+        <strong>CFI compatibility</strong>
+        Codexa's CXReader engine produces standard EPUB CFI range positions, the same format
+        BookOrbit's own web reader uses. No position translation is needed — highlights land on
+        the exact same word on both sides.
+      </div>
+
+      <h2 id="bo-session">Reading Sessions</h2>
+      <p>
+        A reading session is recorded whenever you close a book and the session lasted at least
+        <strong>60 seconds</strong> with at least <strong>2 page turns</strong>. These thresholds
+        filter out accidental opens and previews. Qualifying sessions are uploaded to BookOrbit's
+        reading log and contribute to reading streaks, time-read statistics, and any other
+        BookOrbit features that consume reading-session data.
+      </p>
+      <p>
+        Sessions are one-way (Codexa → BookOrbit) and are deduplicated: re-opening a book that
+        was already synced never creates a duplicate session entry.
+      </p>
+
+      <h2 id="bo-limits">Limitations &amp; Notes</h2>
+      <ul>
+        <li><strong>Book matching</strong> — a book must exist in your BookOrbit library for Codexa to sync it. Books only in Codexa (not imported from the BookOrbit OPDS catalog) are skipped; the server log shows <em>"not in your BookOrbit library (skipping)"</em> for them.</li>
+        <li><strong>Rate limits</strong> — BookOrbit applies server-side rate limiting. Codexa paces its requests (150 ms between calls) and backs off automatically on HTTP 429 responses. The per-action trigger syncs only the affected book, never the entire library.</li>
+        <li><strong>Status/rating conflict</strong> — when both Codexa and BookOrbit have a value, the local Codexa value wins. Remote changes are only adopted when the local field is empty (no last-edit timestamp is available from BookOrbit's API).</li>
+        <li><strong>Annotation editing</strong> — only color, style, and note are editable after creation; the highlighted text range is immutable.</li>
+        <li><strong>API coupling</strong> — BookOrbit Sync calls BookOrbit's internal web API. Updates to the BookOrbit server may occasionally require a matching Codexa update.</li>
+        <li><strong>EPUB books only</strong> — comic books (CBZ/CBR) are not synced.</li>
       </ul>
 
       <a class="back-top" href="#about">&#8593; Top</a>

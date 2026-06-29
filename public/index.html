@@ -296,6 +296,29 @@
         <div class="card-actions" style="margin-top:.5rem">
           <button id="btn-save-internal" class="btn btn-primary btn-sm" data-i18n="common.save">Shrani</button>
         </div>
+        <hr class="section-divider">
+        <div style="display:flex;align-items:flex-start;gap:.85rem;margin-bottom:.75rem">
+          <label class="toggle" style="flex-shrink:0;margin-top:.15rem">
+            <input type="checkbox" id="bookorbit-sync-enabled">
+            <span class="toggle-slider"></span>
+          </label>
+          <div>
+            <div style="font-size:.875rem;font-weight:600;margin-bottom:.2rem" data-i18n="settings.bookorbit_title">BookOrbit razširjena sinhronizacija</div>
+            <div class="settings-hint" style="margin:0" data-i18n="settings.bookorbit_hint">Ko uporabljate BookOrbit kot strežnik, sinhronizira tudi označbe, dnevnik branja ter status in oceno knjig (ne le napredka). Vnesite prijavne podatke svojega BookOrbit računa spodaj.</div>
+            <div id="bookorbit-sync-needcreds" class="settings-hint" style="margin:.25rem 0 0;color:var(--danger,#c0392b)" hidden data-i18n="settings.bookorbit_needcreds">Za to možnost najprej shranite naslov BookOrbit strežnika (zgoraj) ter prijavne podatke računa spodaj.</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="bookorbit-account-username" data-i18n="settings.bookorbit_user_label">BookOrbit uporabniško ime (račun)</label>
+          <input type="text" id="bookorbit-account-username" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
+        </div>
+        <div class="form-group">
+          <label for="bookorbit-account-password" data-i18n="settings.bookorbit_pass_label">BookOrbit geslo (račun)</label>
+          <input type="password" id="bookorbit-account-password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
+        </div>
+        <div class="card-actions" style="margin-top:.5rem">
+          <button id="btn-save-bookorbit" class="btn btn-primary btn-sm" data-i18n="common.save">Shrani</button>
+        </div>
       </div>
 
       <!-- OPDS servers -->

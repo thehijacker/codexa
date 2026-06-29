@@ -2245,6 +2245,25 @@ async function deleteAnnotation(id) {
   toast.success(t('reader.annotation_deleted'));
 }
 
+// Book percentage for a CFI, using whichever reader engine is active. Returns
+// null when it can't be computed (e.g. locations not generated yet).
+function pctFromCfi(cfi) {
+  if (!cfi) return null;
+  try {
+    if (_cxReader?.pctForCfi) {
+      const p = _cxReader.pctForCfi(cfi);
+      if (p != null) return p;
+    }
+  } catch { /* ignore */ }
+  try {
+    if (typeof book !== 'undefined' && book?.locations?.percentageFromCfi) {
+      const p = book.locations.percentageFromCfi(cfi);
+      if (p != null && p >= 0) return p;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
 async function loadAnnotations(bookId) {
   try {
     annotationsCache = await apiFetch(`/annotations/${bookId}`);
@@ -2266,7 +2285,10 @@ function renderAnnotationList() {
     return;
   }
   listEl.innerHTML = '';
-  [...annotationsCache].sort((a, b) => a.pct - b.pct).forEach(a => {
+  // Annotations synced in from BookOrbit carry no percentage (pct=0); derive a
+  // chapter-level location from their CFI so the list sorts and labels correctly.
+  const withPct = annotationsCache.map(a => ({ a, pct: a.pct || pctFromCfi(a.cfi) || 0 }));
+  withPct.sort((x, y) => x.pct - y.pct).forEach(({ a, pct }) => {
     const item = document.createElement('div');
     item.className = 'annotation-item';
     const excerpt = a.text || '';
@@ -2279,7 +2301,7 @@ function renderAnnotationList() {
         <div class="annotation-item-text">
           <div class="annotation-item-excerpt">${escapeHtml(excerptShort)}</div>
           ${noteText ? `<div class="annotation-item-note">${escapeHtml(noteShort)}</div>` : ''}
-          <div class="annotation-item-pct">${Math.round((a.pct || 0) * 100)}%</div>
+          <div class="annotation-item-pct">${Math.round(pct * 100)}%</div>
         </div>
       </div>
       <button class="annotation-delete-btn btn-icon-sm" title="${t('reader.annotation_delete')}">🗑</button>`;
@@ -5508,8 +5530,13 @@ async function networkRestoreSync() {
   try {
     const localProgress = await apiFetch(`/progress/${currentBook.file_hash}`).catch(() => null);
     const syncTarget = await syncOnOpen(localProgress);
-    if (!syncTarget?.percentage != null && !syncTarget?.progress) return;
-    // Reuse the same navigation logic used at book-open time
+    if (syncTarget?.percentage == null && !syncTarget?.progress) return;
+    // CXReader path — must run before the epub.js block below
+    if (prefs.experimentalReader && _cxReader) {
+      if (syncTarget?.percentage != null) _cxReader.seekToPercent(syncTarget.percentage);
+      return;
+    }
+    // epub.js path — reuse the same navigation logic used at book-open time
     const dfMatch = syncTarget.progress?.match(/^\/body\/DocFragment\[(\d+)\]/);
     if (dfMatch) {
       const spineIdx  = parseInt(dfMatch[1]) - 1;

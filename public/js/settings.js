@@ -23,6 +23,11 @@ const kosyncInternalEnabled  = document.getElementById('kosync-internal-enabled'
 const kosyncInternalUrlBox   = document.getElementById('kosync-internal-url-box');
 const kosyncInternalUrlVal   = document.getElementById('kosync-internal-url-val');
 const btnSaveInternal        = document.getElementById('btn-save-internal');
+const bookorbitSyncEnabled   = document.getElementById('bookorbit-sync-enabled');
+const bookorbitNeedCreds     = document.getElementById('bookorbit-sync-needcreds');
+const btnSaveBookorbit       = document.getElementById('btn-save-bookorbit');
+const bookorbitAcctUsername  = document.getElementById('bookorbit-account-username');
+const bookorbitAcctPassword  = document.getElementById('bookorbit-account-password');
 
 // ── Load current settings ─────────────────────────────────────────────────────
 async function loadSettings() {
@@ -35,9 +40,21 @@ async function loadSettings() {
     updateStatusBadge(s.kosync_url ? null : 'not_configured');
     kosyncInternalEnabled.checked = s.kosync_internal_enabled || false;
     updateInternalUrlBox();
+    bookorbitSyncEnabled.checked = s.bookorbit_sync_enabled || false;
+    bookorbitAcctUsername.value = s.bookorbit_account_username || '';
+    bookorbitAcctPassword.placeholder = s.has_bookorbit_account_password
+      ? t('settings.kosync_pass_saved') : t('settings.kosync_pass_ph');
+    updateBookorbitGate(!!s.kosync_url && !!s.has_bookorbit_account_password);
   } catch (err) {
     toast.error(t('settings.err_load', { msg: err.message }));
   }
+}
+
+// Extended sync needs a BookOrbit server URL + saved account credentials.
+function updateBookorbitGate(hasCreds) {
+  bookorbitSyncEnabled.disabled = !hasCreds;
+  if (bookorbitNeedCreds) bookorbitNeedCreds.hidden = hasCreds;
+  if (!hasCreds) bookorbitSyncEnabled.checked = false;
 }
 
 function updateInternalUrlBox() {
@@ -150,6 +167,7 @@ btnClearKosync.addEventListener('click', () => {
         kosyncPassword.value       = '';
         kosyncPassword.placeholder = t('settings.kosync_pass_ph');
         updateStatusBadge('not_configured');
+        updateBookorbitGate(false);
         toast.success(t('settings.removed'));
       } catch (err) {
         toast.error(t('common.error_msg', { msg: err.message }));
@@ -177,6 +195,32 @@ btnSaveInternal.addEventListener('click', async () => {
     toast.error(t('common.error_msg', { msg: err.message }));
   } finally {
     setButtonLoading(btnSaveInternal, false, t('settings.btn_save'));
+  }
+});
+
+// ── Save BookOrbit extended-sync account + toggle ──────────────────────────────
+btnSaveBookorbit.addEventListener('click', async () => {
+  const username = bookorbitAcctUsername.value.trim();
+  const password = bookorbitAcctPassword.value; // empty = keep existing
+  setButtonLoading(btnSaveBookorbit, true, t('settings.btn_saving'));
+  try {
+    const body = {
+      bookorbit_account_username: username,
+      bookorbit_sync_enabled: bookorbitSyncEnabled.checked,
+    };
+    if (password) body.bookorbit_account_password = password;
+    await apiFetch('/settings', { method: 'PUT', body: JSON.stringify(body) });
+    bookorbitAcctPassword.value = '';
+    const hasCreds = !!kosyncUrl.value.trim() && (!!password || bookorbitAcctPassword.placeholder === t('settings.kosync_pass_saved'));
+    updateBookorbitGate(hasCreds);
+    if (password) bookorbitAcctPassword.placeholder = t('settings.kosync_pass_saved');
+    toast.success(bookorbitSyncEnabled.checked
+      ? t('settings.bookorbit_enabled')
+      : t('settings.bookorbit_disabled'));
+  } catch (err) {
+    toast.error(t('common.error_msg', { msg: err.message }));
+  } finally {
+    setButtonLoading(btnSaveBookorbit, false, t('settings.btn_save'));
   }
 });
 // ── Admin: registration toggle ───────────────────────────────────────────

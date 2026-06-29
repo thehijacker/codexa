@@ -1,6 +1,7 @@
 const express = require('express');
 const { getDb } = require('../db');
 const { authenticateToken } = require('../middleware/auth');
+const bookorbit = require('../services/bookorbitSync');
 
 const router = express.Router();
 
@@ -28,6 +29,9 @@ router.get('/', (req, res) => {
     kosync_username:         row.kosync_username,
     has_kosync_password:     row.kosync_password_enc !== '',
     kosync_internal_enabled: row.kosync_internal_enabled === 1,
+    bookorbit_sync_enabled:  row.bookorbit_sync_enabled === 1,
+    bookorbit_account_username: row.bookorbit_account_username || '',
+    has_bookorbit_account_password: (row.bookorbit_account_password_enc || '') !== '',
     reader_prefs:            JSON.parse(row.reader_prefs || '{}'),
   });
 });
@@ -39,7 +43,8 @@ router.put('/', (req, res) => {
 
   if (!row) return res.status(404).json({ error: 'Settings not found' });
 
-  const { opds_servers, kosync_url, kosync_username, kosync_password, kosync_internal_enabled, reader_prefs } = req.body;
+  const { opds_servers, kosync_url, kosync_username, kosync_password, kosync_internal_enabled,
+          bookorbit_sync_enabled, bookorbit_account_username, bookorbit_account_password, reader_prefs } = req.body;
 
   // Only update fields that were explicitly provided
   const next = {
@@ -49,6 +54,9 @@ router.put('/', (req, res) => {
     // Empty string means "clear password"; undefined means "keep existing"
     kosync_password_enc:     kosync_password !== undefined ? String(kosync_password)         : row.kosync_password_enc,
     kosync_internal_enabled: kosync_internal_enabled !== undefined ? (kosync_internal_enabled ? 1 : 0) : row.kosync_internal_enabled,
+    bookorbit_sync_enabled:  bookorbit_sync_enabled  !== undefined ? (bookorbit_sync_enabled  ? 1 : 0) : row.bookorbit_sync_enabled,
+    bookorbit_account_username:     bookorbit_account_username !== undefined ? String(bookorbit_account_username) : row.bookorbit_account_username,
+    bookorbit_account_password_enc: bookorbit_account_password !== undefined ? String(bookorbit_account_password) : row.bookorbit_account_password_enc,
     reader_prefs:            reader_prefs    !== undefined ? JSON.stringify(reader_prefs)    : row.reader_prefs,
   };
 
@@ -59,6 +67,9 @@ router.put('/', (req, res) => {
            kosync_username         = ?,
            kosync_password_enc     = ?,
            kosync_internal_enabled = ?,
+           bookorbit_sync_enabled  = ?,
+           bookorbit_account_username     = ?,
+           bookorbit_account_password_enc = ?,
            reader_prefs            = ?
      WHERE user_id = ?
   `).run(
@@ -67,9 +78,15 @@ router.put('/', (req, res) => {
     next.kosync_username,
     next.kosync_password_enc,
     next.kosync_internal_enabled,
+    next.bookorbit_sync_enabled,
+    next.bookorbit_account_username,
+    next.bookorbit_account_password_enc,
     next.reader_prefs,
     req.user.id
   );
+
+  // Kick an initial reconcile only when the toggle is newly turned on.
+  if (row.bookorbit_sync_enabled !== 1 && next.bookorbit_sync_enabled === 1) bookorbit.triggerSync(req.user.id);
 
   res.json({ success: true });
 });

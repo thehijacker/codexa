@@ -246,6 +246,18 @@ export class CXReader {
     return (this._spineIdx + fracWithin) / total;
   }
 
+  // Chapter-level book percentage for a spine-level CFI (epubcfi(/6/N!...)).
+  // Used to place externally-synced annotations (which carry no percentage) in
+  // the annotation list. Returns null when the CFI can't be parsed.
+  pctForCfi(cfi) {
+    const m = /epubcfi\(\/6\/(\d+)/.exec(String(cfi || ''));
+    if (!m || !this._book) return null;
+    const total = this._book.spine.length || 1;
+    const idx = Math.max(0, Math.min(total - 1, Math.floor(parseInt(m[1], 10) / 2) - 1));
+    if (this._totalWeight > 0) return (this._cumWts[idx] ?? 0) / this._totalWeight;
+    return idx / total;
+  }
+
   async next() {
     if (!this._paginator || !this._book) return;
     if (this._isCbz) {

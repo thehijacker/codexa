@@ -1,6 +1,7 @@
 const express = require('express');
 const { getDb } = require('../db');
 const { authenticateToken } = require('../middleware/auth');
+const bookorbit = require('../services/bookorbitSync');
 
 const router = express.Router();
 router.use(authenticateToken);
@@ -22,10 +23,11 @@ router.post('/session', (req, res) => {
 router.patch('/session/:id', (req, res) => {
   const { end_ts, pages_nav } = req.body || {};
   const db = getDb();
-  const sess = db.prepare('SELECT id FROM reading_sessions WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+  const sess = db.prepare('SELECT id, book_id FROM reading_sessions WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
   if (!sess) return res.status(404).json({ error: 'Session not found' });
   db.prepare('UPDATE reading_sessions SET end_ts = ?, pages_nav = ? WHERE id = ?')
     .run(end_ts || Math.floor(Date.now() / 1000), pages_nav || 0, sess.id);
+  bookorbit.triggerSync(req.user.id, sess.book_id); // upload the closed session to BookOrbit
   res.json({ success: true });
 });
 
