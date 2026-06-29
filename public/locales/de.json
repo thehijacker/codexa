@@ -625,6 +625,8 @@
   "reader.page_turn_paper": "Papier",
   "reader.page_turn_momentum": "Schwung",
   "reader.page_turn_zoom": "Zoom",
+  "reader.page_turn_drag": "Fingersteuerung",
+  "reader.page_turn_drag_hint": "Seiten mit dem Finger ziehen (Papier & Schwung)",
   "reader.font_preview_label": "Schriftvorschau",
   "reader.font_preview_text": "Falsches Üben von Xylophonmusik quält jeden größeren Zwerg. 0123456789",
   "sidebar.drag_to_reorder": "Ziehen zum Sortieren",

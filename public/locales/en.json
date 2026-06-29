@@ -627,6 +627,8 @@
   "reader.page_turn_paper": "Paper",
   "reader.page_turn_momentum": "Momentum",
   "reader.page_turn_zoom": "Zoom",
+  "reader.page_turn_drag": "Finger tracking",
+  "reader.page_turn_drag_hint": "Drag pages with your finger (Paper & Momentum)",
   "reader.font_preview_label": "Font preview",
   "reader.font_preview_text": "The quick brown fox jumps over the lazy dog. 0123456789",
   "sidebar.drag_to_reorder": "Drag to reorder",

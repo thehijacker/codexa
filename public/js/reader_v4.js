@@ -5,7 +5,7 @@ import ePub from './flow/index.js';
 import { isBookDownloaded, downloadBook, fetchOfflineBookFile, getBookMeta, saveBookMeta } from './offline.js';
 import { queueProgress, clearProgress, flushProgressOutbox } from './progress-outbox.js';
 
-const READER_BUILD = 'br-v85-anim';
+const READER_BUILD = 'br-v88-dragtoggle';
 const _i18nReady = initI18n();
 console.log('[codexa] reader build', READER_BUILD);
 
@@ -275,6 +275,7 @@ const DEFAULT_PREFS = {
   vertNavZonesReversed:  false, // true = top:next, bottom:prev
   statusBar:      null,         // deep-merged in loadPrefs()
   pageTurnAnim:   'fade',       // 'none' | 'fade' | 'slide' | 'paper' | 'momentum' | 'zoom'
+  pageTurnDrag:   true,         // finger-tracking drag for 'paper' / 'momentum'
 };
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -4148,6 +4149,9 @@ function syncSettingsUi() {
     b.classList.toggle('active', b.dataset.spread === prefs.spread));
   document.querySelectorAll('.page-anim-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.anim === prefs.pageTurnAnim));
+  // Finger-tracking toggle (always shown; the hint notes it applies to Paper & Momentum).
+  const dragEl = document.getElementById('page-turn-drag-toggle');
+  if (dragEl) dragEl.checked = prefs.pageTurnDrag;
   // Edge padding
   ['top','bottom','left','right'].forEach(side => {
     const el = document.getElementById('edge-pad-' + side);
@@ -4774,6 +4778,10 @@ function initSettingsUi() {
   document.getElementById('page-gap-shadow-toggle')?.addEventListener('change', (e) => {
     prefs.pageGapShadow = e.target.checked;
     applyPageShadow(); persistPrefs();
+  });
+  document.getElementById('page-turn-drag-toggle')?.addEventListener('change', (e) => {
+    prefs.pageTurnDrag = e.target.checked;
+    persistPrefs();
   });
 
   // Edge padding sliders
@@ -6146,6 +6154,107 @@ function _cxSlideTurn(dir) {
   }, dur + 80);
 }
 
+// ── Finger-tracking drag (cxReader 'paper' / 'momentum') ──────────────────────
+// Live 1:1 drag of the engine's translateX, committing on release by distance or
+// fling velocity. Active for both paper and momentum (paper also tracks its spine
+// shadow), and only when the pageTurnDrag toggle is on. Hooks into the iframe
+// touch forwarding below; no-ops otherwise.
+let _mom = null;
+
+function _momEnabled() {
+  return prefs.pageTurnDrag
+    && (prefs.pageTurnAnim === 'paper' || prefs.pageTurnAnim === 'momentum')
+    && prefs.experimentalReader && !!_cxReader
+    && !_cxReader._isCbz && !_cxReader._isFixedLayout
+    && _slideCapable() && isTouchReader() && !hasOpenPanel();
+}
+
+// Shadow element set up for manual (drag-driven) opacity control.
+function _dragShadowEl(dir) {
+  const v = document.getElementById('epub-viewer');
+  if (!v) return null;
+  let sh = document.getElementById('turn-shadow');
+  if (!sh) { sh = document.createElement('div'); sh.id = 'turn-shadow'; v.appendChild(sh); }
+  sh.className = dir === 'prev' ? 'dir-prev' : 'dir-next';
+  sh.style.animation = 'none';
+  sh.style.transition = 'none';
+  sh.style.opacity = '0';
+  return sh;
+}
+
+function _momStart(x, y) {
+  _mom = null;
+  if (!_momEnabled()) return;
+  const pag  = _cxReader?._paginator;
+  const body = _cxReader?.iframe?.contentDocument?.body;
+  if (!pag || !body) return;
+  let base = 0;
+  try { base = -(new DOMMatrixReadOnly(getComputedStyle(body).transform).m41) || 0; } catch {}
+  _mom = { x0: x, y0: y, dir: null, engaged: false, body, pag,
+           base, adv: pag._spreadAdvance || body.clientWidth || 1,
+           lastX: x, lastT: performance.now(), vx: 0 };
+}
+
+function _momMove(x, y, e) {
+  const m = _mom;
+  if (!m) return false;
+  const dx = x - m.x0, dy = y - m.y0;
+  if (!m.engaged) {
+    if (Math.abs(dx) < 12 || Math.abs(dx) <= Math.abs(dy)) {
+      if (Math.abs(dy) > 16) _mom = null;          // vertical gesture — release to others
+      return false;
+    }
+    const dir = dx < 0 ? 'next' : 'prev';
+    // At a chapter edge there's no adjacent page in this iframe — let the discrete
+    // swipe handle the chapter change instead of dragging into a void.
+    if (dir === 'next' ? m.pag.isAtEnd : m.pag.isAtStart) { _mom = null; return false; }
+    m.dir = dir;
+    m.engaged = true;
+    m.body.style.transition = 'none';
+    if (prefs.pageTurnAnim === 'paper') m.sh = _dragShadowEl(dir);   // spine shadow tracks the drag
+  }
+  if (e?.cancelable) e.preventDefault();
+  const now = performance.now();
+  const dt = now - m.lastT;
+  if (dt > 0) m.vx = (x - m.lastX) / dt;            // px/ms, signed
+  m.lastX = x; m.lastT = now;
+  let off = m.base - dx;                            // drag left (next) → larger offset
+  const min = m.base - m.adv, max = m.base + m.adv; // clamp to one page either way
+  if (off < min) off = min; else if (off > max) off = max;
+  if (off < 0) off = 0;
+  m.body.style.transform = off === 0 ? '' : `translateX(-${Math.round(off)}px)`;
+  if (m.sh) m.sh.style.opacity = (0.9 * Math.min(1, Math.abs(off - m.base) / m.adv)).toFixed(3);
+  return true;
+}
+
+// Returns true if a momentum drag consumed the gesture.
+function _momEnd(x) {
+  const m = _mom;
+  if (!m) return false;
+  _mom = null;
+  if (!m.engaged) return false;                    // never engaged → let swipe/tap handle it
+  const dx = x - m.x0;
+  const fling  = Math.abs(m.vx) > 0.5 && Math.sign(m.vx) === Math.sign(dx);
+  const commit = Math.abs(dx) > m.adv * 0.3 || fling;
+  const dur = 260;
+  const ease = prefs.pageTurnAnim === 'momentum' ? 'cubic-bezier(.16,1,.3,1)' : 'cubic-bezier(.33,0,.25,1)';
+  m.body.style.transition = `transform ${dur}ms ${ease}`;
+  if (commit) {
+    sessionPageCount++;
+    pendingNavDirection = null;                    // engine slide is the visual; no host _pageEnter
+    void _cxReader[m.dir]();                        // animate from the dragged position to the target
+  } else {
+    m.body.style.transform = m.base === 0 ? '' : `translateX(-${Math.round(m.base)}px)`;
+  }
+  if (m.sh) { m.sh.style.transition = 'opacity 220ms ease'; m.sh.style.opacity = '0'; }
+  clearTimeout(_slideClrTimer);
+  _slideClrTimer = setTimeout(() => {
+    const b = _cxReader?.iframe?.contentDocument?.body;
+    if (b) b.style.transition = '';
+  }, dur + 80);
+  return true;
+}
+
 // ── Navigation ────────────────────────────────────────────────────────────────
 // On Android (BOOX e-ink devices) hardware page-turn buttons can fire multiple
 // events per physical press. Throttle to one navigation per 400ms on Android.
@@ -6313,6 +6422,7 @@ function attachIframeTouchNav(view) {
     iframeOffY   = iframe ? iframe.getBoundingClientRect().top  : 0;
     touchStartX  = e.changedTouches[0].clientX + iframeOffX;
     touchStartY  = e.changedTouches[0].clientY + iframeOffY;
+    _momStart(touchStartX, touchStartY);
   }, { passive: false });
 
   win.addEventListener('touchmove', (e) => {
@@ -6320,6 +6430,9 @@ function attachIframeTouchNav(view) {
     // selection — preventDefault kills Android drag handles when a range is active.
     const sel = win.getSelection?.();
     if (_selectSuppressNav || (sel && !sel.isCollapsed)) return;
+    // Momentum finger-tracking drives the live page slide; if it engages it owns
+    // the gesture (it preventDefaults too).
+    if (_momMove(e.touches[0].clientX + iframeOffX, e.touches[0].clientY + iframeOffY, e)) return;
     const absDx = Math.abs(e.touches[0].clientX + iframeOffX - touchStartX);
     const absDy = Math.abs(e.touches[0].clientY + iframeOffY - touchStartY);
     if (absDx > 8 && absDx > absDy) e.preventDefault();
@@ -6363,6 +6476,8 @@ function attachIframeTouchNav(view) {
       // Do not preventDefault — that cancels Android selection handles / toolbar.
       return;
     }
+    // A live momentum drag owns the gesture — commit/snap and consume it here.
+    if (_momEnd(e.changedTouches[0].clientX + iframeOffX)) { if (e.cancelable) e.preventDefault(); return; }
     const cx     = e.changedTouches[0].clientX + iframeOffX;
     const cy     = e.changedTouches[0].clientY + iframeOffY;
     const dx     = cx - touchStartX;

@@ -625,6 +625,8 @@
   "reader.page_turn_paper": "Papier",
   "reader.page_turn_momentum": "Élan",
   "reader.page_turn_zoom": "Zoom",
+  "reader.page_turn_drag": "Suivi du doigt",
+  "reader.page_turn_drag_hint": "Faites glisser les pages avec le doigt (Papier et Élan)",
   "reader.font_preview_label": "Aperçu de police",
   "reader.font_preview_text": "Voix ambiguë d'un cœur qui au zéphyr préfère les jattes de kiwis. 0123456789",
   "sidebar.drag_to_reorder": "Glisser pour réorganiser",

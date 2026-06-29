@@ -624,6 +624,8 @@
   "reader.page_turn_paper": "Carta",
   "reader.page_turn_momentum": "Slancio",
   "reader.page_turn_zoom": "Zoom",
+  "reader.page_turn_drag": "Trascinamento col dito",
+  "reader.page_turn_drag_hint": "Trascina le pagine col dito (Carta e Slancio)",
   "reader.font_preview_label": "Anteprima carattere",
   "reader.font_preview_text": "Pranzo d'acqua fa volti sghembi. 0123456789",
   "sidebar.drag_to_reorder": "Trascina per riordinare",

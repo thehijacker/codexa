@@ -625,6 +625,8 @@
   "reader.page_turn_paper": "Papel",
   "reader.page_turn_momentum": "Inércia",
   "reader.page_turn_zoom": "Zoom",
+  "reader.page_turn_drag": "Arrastar com o dedo",
+  "reader.page_turn_drag_hint": "Arraste as páginas com o dedo (Papel e Inércia)",
   "reader.font_preview_label": "Pré-visualização de fonte",
   "reader.font_preview_text": "A rápida raposa marrom salta sobre o cão preguiçoso. 0123456789",
   "sidebar.drag_to_reorder": "Arraste para reordenar",

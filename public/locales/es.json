@@ -625,6 +625,8 @@
   "reader.page_turn_paper": "Papel",
   "reader.page_turn_momentum": "Inercia",
   "reader.page_turn_zoom": "Zoom",
+  "reader.page_turn_drag": "Seguimiento del dedo",
+  "reader.page_turn_drag_hint": "Arrastra las páginas con el dedo (Papel e Inercia)",
   "reader.font_preview_label": "Vista previa de fuente",
   "reader.font_preview_text": "El veloz murciélago hindú comía feliz cardillo y kiwi. 0123456789",
   "sidebar.drag_to_reorder": "Arrastrar para reordenar",
