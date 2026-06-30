@@ -1235,9 +1235,15 @@ async function releaseWakeLock() {
   try { await wakeLock.release(); } catch { /* ignore */ }
   wakeLock = null;
 }
-// Re-acquire after tab becomes visible again (wake lock is auto-released on hide)
+// Re-acquire after tab becomes visible again (wake lock is auto-released on hide).
+// Also re-check KOSync on wake: the device may have slept (e.g. e-reader cover closed,
+// Wi-Fi off) while another device advanced the reading position. The 'online' event is
+// unreliable after the WebView is frozen, so the wake/visibility path drives the pull.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') acquireWakeLock();
+  if (document.visibilityState === 'visible') {
+    acquireWakeLock();
+    scheduleWakeSync();
+  }
   if (document.visibilityState === 'hidden') writeInterruptedSession();
 });
 
@@ -4800,7 +4806,32 @@ async function networkRestoreSync() {
     if (_cxReader && syncTarget?.percentage != null) _cxReader.seekToPercent(syncTarget.percentage);
   } catch (e) { console.warn('[kosync] networkRestoreSync failed:', e.message); }
 }
-window.__codexaNetworkRestore = networkRestoreSync;
+window.__codexaNetworkRestore = () => triggerNetworkRestore('native');
+
+// Throttled entry point for the auto KOSync pull. Several triggers can fire close together
+// (the 'online' event, the wake/visibility path, the native Android hook), so coalesce them.
+let _lastNetRestore = 0;
+function triggerNetworkRestore(reason) {
+  if (!currentBook || !isReady || !navigator.onLine) return;
+  const now = Date.now();
+  if (now - _lastNetRestore < 3000) return; // coalesce near-simultaneous triggers
+  _lastNetRestore = now;
+  console.log('[kosync] networkRestore trigger:', reason);
+  networkRestoreSync().catch(() => {});
+}
+
+// Schedule a wake-sync after the page becomes visible again. The 'online' event is unreliable
+// in Android WebView once the page has been frozen during device sleep, and Wi-Fi may still be
+// reconnecting at wake time, so retry briefly until the network is back.
+function scheduleWakeSync() {
+  let tries = 0;
+  const attempt = () => {
+    if (document.visibilityState !== 'visible' || tries++ > 5) return;
+    if (navigator.onLine) triggerNetworkRestore('wake');
+    else setTimeout(attempt, 1500);
+  };
+  setTimeout(attempt, 800);
+}
 
 window.addEventListener('online', () => {
   // Flush any offline reading progress (this book or others) to server + KOSync.
@@ -4808,7 +4839,7 @@ window.addEventListener('online', () => {
   if (!currentBook) return;
   syncOfflineBookmarks(currentBook.id).catch(() => {});
   syncOfflineAnnotations(currentBook.id).catch(() => {});
-  networkRestoreSync().catch(() => {});
+  triggerNetworkRestore('online');
 });
 
 
@@ -5140,7 +5171,12 @@ async function startCXRendition(displayCfi = null) {
     _cxReader.onBeforePaginate = (iframe) => { _cxApplyIframeInset(iframe); _cxApplyHooks(iframe); };
 
     await _cxReader.open(_epubArrayBuffer);
-    if (_cxReader.toc?.length) { buildToc(_cxReader.toc); buildChapterMarkers(); }
+    if (_cxReader.toc?.length) {
+      buildToc(_cxReader.toc);
+      buildChapterMarkers();
+    } else {
+      tocListEl.innerHTML = '<div class="toc-empty">' + t('reader.toc_none') + '</div>';
+    }
 
     // Determine start spine index from saved CFI (e.g. epubcfi(/6/18!/...))
     let _cxStartIdx = 0;

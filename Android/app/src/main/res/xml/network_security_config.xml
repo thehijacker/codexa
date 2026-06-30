@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Allow plain-HTTP connections so users can point at a local server -->
+    <!-- Allow plain-HTTP connections so users can point at a local server, and trust
+         user-installed CA certificates so self-hosters with a private CA / self-signed
+         certificate can use HTTPS instead of cleartext. -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
+            <certificates src="user" />
         </trust-anchors>
     </base-config>
 </network-security-config>

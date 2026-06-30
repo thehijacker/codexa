@@ -23,6 +23,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -152,6 +153,8 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         webView = findViewById(R.id.webView)
 
+        onBackPressedDispatcher.addCallback(this, onBackCallback)
+
         configureWebView()
 
         val savedUrl = getSavedUrl()
@@ -164,6 +167,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        webView.onResume()
         registerNetworkCallback()
         // Trigger sync in case device was offline while sleeping and is now connected
         if (isOnReader()) triggerNetworkRestoreSync()
@@ -171,7 +175,17 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        // Pause the WebView so its JS timers (clock / battery refresh, etc.) stop while the
+        // app is backgrounded — saves power on e-ink devices when the cover is closed.
+        webView.onPause()
         unregisterNetworkCallback()
+    }
+
+    override fun onDestroy() {
+        // Detach and destroy the WebView to release its resources and avoid leaks.
+        (webView.parent as? android.view.ViewGroup)?.removeView(webView)
+        webView.destroy()
+        super.onDestroy()
     }
 
     // -------------------------------------------------------------------------
@@ -212,23 +226,25 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Physical back key behaviour:
+    // Physical back behaviour (via OnBackPressedDispatcher / predictive back):
     //   - Blocked entirely when the reader is open (use the in-reader UI to exit)
     //   - Double-press anywhere else: first press shows hint toast,
     //     second press within 2 s opens server select screen.
-    //   WebView history is intentionally never navigated via the hardware back key.
-    @Suppress("OVERRIDE_DEPRECATION")
-    override fun onBackPressed() {
-        val currentUrl = webView.url ?: ""
-        if (currentUrl.contains("/readerv4.html", ignoreCase = true)) {
-            return
-        }
-        val now = System.currentTimeMillis()
-        if (now - lastBackPressTime < 2000) {
-            openServerSelect(cancellable = true)
-        } else {
-            lastBackPressTime = now
-            Toast.makeText(this, getString(R.string.back_press_hint), Toast.LENGTH_SHORT).show()
+    //   WebView history is intentionally never navigated via the hardware back key,
+    //   so the callback stays enabled at all times to consume the gesture.
+    private val onBackCallback = object : OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+            val currentUrl = webView.url ?: ""
+            if (currentUrl.contains("/readerv4.html", ignoreCase = true)) {
+                return
+            }
+            val now = System.currentTimeMillis()
+            if (now - lastBackPressTime < 2000) {
+                openServerSelect(cancellable = true)
+            } else {
+                lastBackPressTime = now
+                Toast.makeText(this@MainActivity, getString(R.string.back_press_hint), Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -273,7 +289,7 @@ class MainActivity : AppCompatActivity() {
             builtInZoomControls = true
             displayZoomControls = false
             cacheMode = WebSettings.LOAD_DEFAULT
-            userAgentString = "$userAgentString CodexaApp/1.0"
+            userAgentString = "$userAgentString CodexaApp/${BuildConfig.VERSION_NAME}"
         }
 
         webView.addJavascriptInterface(JsBridge(), "AndroidCodexa")

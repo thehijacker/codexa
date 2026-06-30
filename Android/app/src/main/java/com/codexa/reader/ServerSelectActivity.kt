@@ -13,6 +13,7 @@ import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 
@@ -26,6 +27,12 @@ class ServerSelectActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_server_select)
+
+        // Back is disabled — use Connect to confirm or the Cancel button to dismiss.
+        // An always-enabled callback that does nothing consumes the back gesture.
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() { /* intentionally no-op */ }
+        })
 
         val etUrl      = findViewById<EditText>(R.id.et_url)
         val btnConnect = findViewById<Button>(R.id.btn_connect)
@@ -92,12 +99,6 @@ class ServerSelectActivity : AppCompatActivity() {
         } else {
             root.setLayerType(android.view.View.LAYER_TYPE_NONE, null)
         }
-    }
-
-    // Back key is always disabled — use Connect to confirm or Cancel button to dismiss.
-    @Suppress("OVERRIDE_DEPRECATION")
-    override fun onBackPressed() {
-        // intentionally do nothing
     }
 
     private fun extractOrigin(url: String): String? = try {
