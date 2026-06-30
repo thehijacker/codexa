@@ -385,7 +385,10 @@ async function syncBookState(userId, ctx, m, state) {
     // Local never set — adopt BookOrbit's value once.
     const res = await api(userId, ctx, 'GET', `/books/${m.boBookId}`);
     if (res.ok && res.data) {
-      const rs = res.data.readStatus;
+      // BookOrbit's GET /books/:id returns readStatus as an object
+      // ({ status, source, startedAt, ... }); older shapes may send a bare string.
+      const rsRaw = res.data.readStatus;
+      const rs = typeof rsRaw === 'string' ? rsRaw : rsRaw?.status;
       const rt = res.data.rating;
       if ((rs && VALID_STATUS.includes(rs)) || rt != null) {
         db.prepare('UPDATE books SET read_status = ?, rating = ?, status_modified = strftime(\'%s\',\'now\') WHERE id = ?')

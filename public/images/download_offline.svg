@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="cloudGradDownload" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5BA7D9"/>
+      <stop offset="100%" stop-color="#4FC1B0"/>
+    </linearGradient>
+  </defs>
+
+  <g fill="url(#cloudGradDownload)">
+    <rect x="14" y="120" width="172" height="58" rx="29"/>
+    <circle cx="50" cy="100" r="44"/>
+    <circle cx="150" cy="100" r="44"/>
+    <circle cx="100" cy="72" r="56"/>
+  </g>
+
+  <circle cx="75" cy="60" r="16" fill="#FFFFFF" opacity="0.25"/>
+  <circle cx="45" cy="90" r="12" fill="#FFFFFF" opacity="0.2"/>
+
+  <g stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <line x1="100" y1="50" x2="100" y2="145"/>
+    <polyline points="65,100 100,150 135,100"/>
+  </g>
+</svg>

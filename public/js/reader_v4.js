@@ -224,11 +224,11 @@ function sbEsc(s) {
 }
 
 const DEFAULT_PREFS = {
-  fontSize:       18,
+  fontSize:       20,
   fontFamily:     'Georgia, serif',
-  lineHeight:     1.6,
+  lineHeight:     1.4,
   letterSpacing:  0,            // extra letter spacing in tenths of px (0–100 → 0–10px)
-  margin:         40,
+  margin:         12,
   spread:         'auto',       // two-page default
   overrideStyles: true,
   theme:          'sepia',
@@ -238,7 +238,7 @@ const DEFAULT_PREFS = {
   keepScreenOn:   true,
   eink:           false,        // strip all colors for e-ink displays
   paraIndent:     true,         // paragraph text-indent (first line)
-  paraIndentSize: 15,           // indent size when paraIndent=true (em × 10, so 15 = 1.5em)
+  paraIndentSize: 10,           // indent size when paraIndent=true (em × 10, so 10 = 1.0em)
   paraSpacing:    0,            // extra bottom margin between paragraphs (em × 10, so 0–30)
   mouseWheelNav:  false,        // navigate pages with mouse wheel
   volumeKeysEnabled: false,    // navigate pages with hardware volume keys (Android app only)
@@ -2407,11 +2407,12 @@ function computeStatValue(id) {
     }
     case 'pagesLeftChap': {
       if (currentChapTotal <= 0) return '';
-      // In two-page mode the last spread can be a single left-only page (endPage===0).
-      // Add 1 so it shows "1 left" rather than 0 — consistent with full spreads where
-      // the visible right page is included in the count.
-      const _tpBonus = currentIsTwoPage && currentEndPage === 0 ? 1 : 0;
-      return String(Math.max(0, currentChapTotal - currentChapPage + _tpBonus));
+      // Single-page: count the current page itself, so the last page reads "1 left"
+      //   and earlier pages count down (page 1 of a 2-page chapter shows 2).
+      // Two-page: the left page is already read; count the visible right page and
+      //   beyond. A lone left-only last spread (endPage===0) still gets +1 to show 1.
+      const _bonus = currentIsTwoPage ? (currentEndPage === 0 ? 1 : 0) : 1;
+      return String(Math.max(1, currentChapTotal - currentChapPage + _bonus));
     }
     case 'pagesLeftBook': {
       const _tpBonus = currentIsTwoPage && currentEndPage === 0 ? 1 : 0;
@@ -2422,8 +2423,11 @@ function computeStatValue(id) {
     case 'pctBook':
       return Math.round(currentPct * 100) + '%';
     case 'timeLeftChap': {
-      const _tpBonus = currentIsTwoPage && currentEndPage === 0 ? 1 : 0;
-      return formatEta(Math.max(0, currentChapTotal - currentChapPage + _tpBonus));
+      if (currentChapTotal <= 0) return formatEta(0);
+      // Mirror pagesLeftChap: single-page counts the current page, two-page counts
+      // from the left page (with the lone last-spread +1).
+      const _bonus = currentIsTwoPage ? (currentEndPage === 0 ? 1 : 0) : 1;
+      return formatEta(Math.max(1, currentChapTotal - currentChapPage + _bonus));
     }
     case 'timeLeftBook': {
       const _tpBonus = currentIsTwoPage && currentEndPage === 0 ? 1 : 0;

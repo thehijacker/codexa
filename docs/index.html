@@ -119,6 +119,7 @@
         <li>
           <a href="#library" data-section="library">Library</a>
           <ul class="nav-sub">
+            <li><a href="#lib-keyboard" data-section="library" data-scroll="lib-keyboard">Keyboard Navigation</a></li>
             <li><a href="#lib-search" data-section="library" data-scroll="lib-search">Search</a></li>
             <li><a href="#lib-sort"   data-section="library" data-scroll="lib-sort">Sort Order</a></li>
             <li><a href="#lib-tabs"   data-section="library" data-scroll="lib-tabs">Shelf Tabs</a></li>
@@ -131,6 +132,7 @@
           <ul class="nav-sub">
             <li><a href="#shelf-create" data-section="shelves" data-scroll="shelf-create">Creating a Shelf</a></li>
             <li><a href="#shelf-add"    data-section="shelves" data-scroll="shelf-add">Adding Books</a></li>
+            <li><a href="#shelf-reorder" data-section="shelves" data-scroll="shelf-reorder">Reordering Shelves</a></li>
             <li><a href="#shelf-sync"        data-section="shelves" data-scroll="shelf-sync">OPDS Folder Sync</a></li>
             <li><a href="#shelf-linked-opds" data-section="shelves" data-scroll="shelf-linked-opds">Linked Shelves</a></li>
           </ul>
@@ -166,10 +168,12 @@
             <li><a href="#reader-progress"  data-section="reader" data-scroll="reader-progress">Reading Progress</a></li>
             <li><a href="#reader-jump"      data-section="reader" data-scroll="reader-jump">Jump to Position</a></li>
             <li><a href="#reader-fullscreen" data-section="reader" data-scroll="reader-fullscreen">Fullscreen</a></li>
+            <li><a href="#reader-sleep"     data-section="reader" data-scroll="reader-sleep">Sleep Timer</a></li>
             <li><a href="#reader-settings"  data-section="reader" data-scroll="reader-settings">Reading Settings</a></li>
             <li><a href="#reader-theme"     data-section="reader" data-scroll="reader-theme">&nbsp;&nbsp;Theme Tab</a></li>
             <li><a href="#reader-text"      data-section="reader" data-scroll="reader-text">&nbsp;&nbsp;Text Tab</a></li>
             <li><a href="#reader-page"      data-section="reader" data-scroll="reader-page">&nbsp;&nbsp;Page Tab</a></li>
+            <li><a href="#reader-page-anim" data-section="reader" data-scroll="reader-page-anim">&nbsp;&nbsp;&nbsp;&nbsp;Page-Turn Animation</a></li>
             <li><a href="#reader-device"    data-section="reader" data-scroll="reader-device">&nbsp;&nbsp;Device Tab</a></li>
             <li><a href="#reader-statusbar" data-section="reader" data-scroll="reader-statusbar">&nbsp;&nbsp;Status Bar Tab</a></li>
             <li><a href="#reader-dicts-tab" data-section="reader" data-scroll="reader-dicts-tab">&nbsp;&nbsp;Dictionaries Tab</a></li>
@@ -300,6 +304,8 @@
             <li><strong>Footnote and endnote popups</strong> — without leaving the page</li>
             <li><strong>Bionic reading</strong> — bolds word prefixes to guide the eye</li>
             <li><strong>Two-page spread</strong> — for wider screens</li>
+            <li><strong>Page-turn animations</strong> — none, fade, slide, paper, momentum, or zoom, with optional finger-tracking drag</li>
+            <li><strong>Sleep timer</strong> — dim, close the book, or release keep-screen-on after a set time</li>
             <li><strong>Fullscreen mode</strong></li>
             <li><strong>Auto-hiding toolbar</strong></li>
           </ul>
@@ -1493,10 +1499,26 @@ data/<br>
         reach.
       </p>
 
+      <h2 id="lib-keyboard">Keyboard Navigation</h2>
+      <p>
+        The book grid is fully keyboard-navigable. Focus a cover (Tab into the grid or click a card),
+        then move around with the arrow keys.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Key</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr><td><kbd>&larr;</kbd> / <kbd>&rarr;</kbd></td><td>Focus the previous / next book in the row</td></tr>
+            <tr><td><kbd>&uarr;</kbd> / <kbd>&darr;</kbd></td><td>Focus the book above / below</td></tr>
+            <tr><td><kbd>Enter</kbd></td><td>Open the focused book — or toggle its selection while in Edit mode</td></tr>
+          </tbody>
+        </table>
+      </div>
+
       <h2 id="lib-search">Search</h2>
       <p>
-        The search bar at the top of the library filters books in real time by title and author.
-        Results update as you type — no need to press Enter.
+        The search bar at the top of the library filters books in real time by title, author, and
+        genre. Results update as you type — no need to press Enter.
       </p>
 
       <h2 id="lib-sort">Sort Order</h2>
@@ -1600,6 +1622,14 @@ data/<br>
         Hover over a shelf name in the sidebar to reveal the <strong>edit (&#9998;)</strong> and
         <strong>delete (&#215;)</strong> buttons. Deleting a shelf removes the shelf but does
         not delete the books in it.
+      </p>
+
+      <h2 id="shelf-reorder">Reordering Shelves</h2>
+      <p>
+        Click the <strong>edit shelves (&#9998;)</strong> button next to the <strong>Shelves</strong>
+        heading to enter reorder mode. Each shelf gains a drag handle (&#10239;) — drag a shelf up or
+        down to change its position in the sidebar. The new order is saved and kept across devices.
+        Click the edit button again to leave reorder mode.
       </p>
 
       <h2 id="shelf-sync">OPDS Folder Sync</h2>
@@ -2021,6 +2051,29 @@ data/<br>
         in the corner.
       </p>
 
+      <h2 id="reader-sleep">Sleep Timer</h2>
+      <p>
+        Tap the sleep timer button in the header (it can be hidden via
+        <strong>Settings &rarr; Theme &rarr; Header buttons</strong>) to set a countdown. When the
+        timer reaches zero, Codexa performs the action you chose. A small badge on the button shows
+        the remaining time while a timer is running.
+      </p>
+      <ul>
+        <li><strong>Presets:</strong> 5, 10, 15, 30, 45, or 60 minutes — tap a preset to start the timer.</li>
+        <li><strong>Cancel:</strong> reopen the panel and tap <strong>Cancel timer</strong> to stop a running countdown.</li>
+      </ul>
+      <p>Choose what happens when the timer ends:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>End action</th><th>Effect</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Dim screen</strong></td><td>Fades a dark overlay over the page. Tap anywhere to dismiss it and keep reading. <em>(Default.)</em></td></tr>
+            <tr><td><strong>Close book</strong></td><td>Returns to the library, saving your reading position first.</td></tr>
+            <tr><td><strong>Turn off keep-screen-on</strong></td><td>Releases the screen Wake Lock so the device can sleep normally (use this alongside the <em>Keep screen on</em> device setting).</td></tr>
+          </tbody>
+        </table>
+      </div>
+
       <h2 id="reader-settings">Reading Settings</h2>
       <figure>
         <img src="../screenshots/reader/settings.png" alt="Reader settings panel with tabs">
@@ -2106,6 +2159,37 @@ data/<br>
         <li><strong>Auto-hide toolbar:</strong> hides the header while reading; reveal by moving the pointer to the top or tapping the top edge.</li>
         <li><strong>Screen edge padding:</strong> insets for each side to avoid curved edges and notches.</li>
       </ul>
+
+      <h4 id="reader-page-anim">Page-Turn Animation</h4>
+      <p>
+        Choose how pages transition when you move forward or back. The setting is in the Page tab
+        and applies to all books.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Animation</th><th>Effect</th></tr></thead>
+          <tbody>
+            <tr><td><strong>None</strong></td><td>Instant page change — no animation. Best for e-ink displays, where motion causes ghosting.</td></tr>
+            <tr><td><strong>Fade</strong></td><td>The new page cross-fades in. <em>(Default.)</em></td></tr>
+            <tr><td><strong>Slide</strong></td><td>The page slides in from the side in the direction of travel.</td></tr>
+            <tr><td><strong>Paper</strong></td><td>A paper-like sheet slides across, mimicking a physical page turn.</td></tr>
+            <tr><td><strong>Momentum</strong></td><td>The page moves with an eased, weighted motion that carries momentum.</td></tr>
+            <tr><td><strong>Zoom</strong></td><td>The new page scales in for a subtle depth effect.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        <strong>Finger tracking (drag):</strong> available for the <em>Paper</em> and
+        <em>Momentum</em> animations. When enabled, the page follows your finger (or pointer) as you
+        drag across the screen, then completes or snaps back on release — so the turn feels directly
+        connected to your gesture rather than a fixed animation. Toggle it on the row just below the
+        animation picker.
+      </p>
+      <div class="callout">
+        <strong>E-ink tip</strong>
+        Set the animation to <strong>None</strong> on e-ink devices. Animated transitions trigger
+        repeated full-screen refreshes and leave ghosting on e-ink panels.
+      </div>
 
       <h3 id="reader-device">Device Tab</h3>
       <figure>

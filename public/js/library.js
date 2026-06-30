@@ -31,7 +31,7 @@ let _autoOpenDone       = false; // fire auto-open-last only once per page load
 let sortBeforeSeriesFilter = null; // sort value saved before auto-switching to series_asc
 
 // ── Card context-menu state ───────────────────────────────────────────────────
-let _activeCardMenu = null; // { popup, onOutsideClick, onEsc }
+let _activeCardMenu = null; // { popup, btn, onOutsideClick, onEsc }
 
 // ── Offline state ─────────────────────────────────────────────────────────────
 let isOfflineMode    = false;
@@ -201,9 +201,9 @@ function _makeCard(book, globalIndex, isEink) {
     if (isDownloading) {
       offlineBtn = `<button class="btn-icon offline-btn downloading" disabled title="${t('library.downloading')}" data-id="${book.id}"><span class="spinner spinner-sm"></span></button>`;
     } else if (isDownloaded) {
-      offlineBtn = `<button class="btn-icon offline-btn offline-btn-delete" title="${t('library.btn_delete_offline')}" data-id="${book.id}"><img src="/images/delete.svg" class="nav-icon nav-icon-delete" alt=""></button>`;
+      offlineBtn = `<button class="btn-icon offline-btn offline-btn-delete" title="${t('library.btn_delete_offline')}" data-id="${book.id}"><img src="/images/delete_offline.svg" class="nav-icon nav-icon-delete-offline" alt=""></button>`;
     } else {
-      offlineBtn = `<button class="btn-icon offline-btn offline-btn-download" title="${t('library.btn_download_offline')}" data-id="${book.id}"><img src="/images/download.svg" class="nav-icon nav-icon-download" alt=""></button>`;
+      offlineBtn = `<button class="btn-icon offline-btn offline-btn-download" title="${t('library.btn_download_offline')}" data-id="${book.id}"><img src="/images/download_offline.svg" class="nav-icon nav-icon-download-offline" alt=""></button>`;
     }
   }
 
@@ -250,7 +250,12 @@ function _makeCard(book, globalIndex, isEink) {
 
   card.querySelector('.book-card-menu-btn').addEventListener('click', e => {
     e.stopPropagation();
-    openCardMenu(book, e.currentTarget);
+    // Toggle: a second tap on the same button closes the open menu instead of reopening it.
+    if (_activeCardMenu && _activeCardMenu.btn === e.currentTarget) {
+      closeCardMenu();
+    } else {
+      openCardMenu(book, e.currentTarget);
+    }
   });
 
   card.addEventListener('click', e => {
@@ -535,9 +540,9 @@ function openCardMenu(book, btn) {
     if (isDownloading) {
       offlineItem = `<button class="bcm-item" disabled><span class="spinner spinner-sm"></span>${t('library.downloading')}</button>`;
     } else if (isDownloaded) {
-      offlineItem = `<button class="bcm-item bcm-offline-delete"><img src="/images/delete.svg" class="nav-icon bcm-icon nav-icon-delete" alt="">${t('library.btn_delete_offline')}</button>`;
+      offlineItem = `<button class="bcm-item bcm-offline-delete"><img src="/images/delete_offline.svg" class="nav-icon bcm-icon nav-icon-delete-offline" alt="">${t('library.btn_delete_offline')}</button>`;
     } else {
-      offlineItem = `<button class="bcm-item bcm-offline-download"><img src="/images/download.svg" class="nav-icon bcm-icon nav-icon-download" alt="">${t('library.btn_download_offline')}</button>`;
+      offlineItem = `<button class="bcm-item bcm-offline-download"><img src="/images/download_offline.svg" class="nav-icon bcm-icon nav-icon-download-offline" alt="">${t('library.btn_download_offline')}</button>`;
     }
   }
 
@@ -569,13 +574,21 @@ function openCardMenu(book, btn) {
   `;
   document.body.appendChild(popup);
 
-  // Position: right-align popup to button, open upward by default
+  // Position: right-align popup to the button, open upward by default. Clamp the
+  // horizontal edge so a wide menu on a narrow (mobile) screen stays fully visible
+  // instead of overflowing off the left edge.
   const rect   = btn.getBoundingClientRect();
+  const popupW = popup.offsetWidth;
   const popupH = popup.offsetHeight;
-  const enoughRoomAbove = rect.top >= popupH + 6;
-  popup.style.right = (window.innerWidth - rect.right) + 'px';
+  const margin = 6;
+  let left = rect.right - popupW;                                   // right edge aligned to button
+  left = Math.min(left, window.innerWidth - popupW - margin);       // keep off the right edge
+  left = Math.max(margin, left);                                    // keep off the left edge
+  popup.style.left = left + 'px';
+  const enoughRoomAbove = rect.top >= popupH + margin;
   if (enoughRoomAbove) {
-    popup.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+    popup.style.top           = (rect.top - popupH - 4) + 'px';
+    popup.style.transformOrigin = 'bottom right';
   } else {
     popup.style.top           = (rect.bottom + 4) + 'px';
     popup.style.transformOrigin = 'top right';
@@ -641,7 +654,7 @@ function openCardMenu(book, btn) {
     if (!popup.contains(e.target) && e.target !== btn) closeCardMenu();
   };
   const onEsc = (e) => { if (e.key === 'Escape') closeCardMenu(); };
-  _activeCardMenu = { popup, onOutsideClick, onEsc };
+  _activeCardMenu = { popup, btn, onOutsideClick, onEsc };
   // Defer so this same click event doesn't immediately trigger the outside-click handler
   setTimeout(() => {
     document.addEventListener('click', onOutsideClick, true);
@@ -734,8 +747,8 @@ export async function openInfoModal(book, startTab = '') {
             <a class="imt-action-btn imt-btn-read" href="/readerv4.html?id=${fullBook.id}" title="${t('library.btn_read')}"><img src="/images/read.svg" class="nav-icon nav-icon-read" alt="${t('library.btn_read')}"></a>
             <a class="imt-action-btn" href="/readerv4.html?id=${fullBook.id}&peek=1" title="${t('library.btn_peek')}"><img src="/images/peek.svg" class="nav-icon nav-icon-peek" alt="${t('library.btn_peek')}"></a>
             ${isOfflineSupported && !isOfflineMode ? (downloadedIds.has(fullBook.id)
-              ? `<button class="imt-action-btn" id="info-modal-offline" title="${t('library.btn_delete_offline')}"><img src="/images/delete.svg" class="nav-icon nav-icon-delete" alt="${t('library.btn_delete_offline')}"></button>`
-              : `<button class="imt-action-btn" id="info-modal-offline" title="${t('library.btn_download_offline')}"><img src="/images/download.svg" class="nav-icon nav-icon-download" alt="${t('library.btn_download_offline')}"></button>`) : ''}
+              ? `<button class="imt-action-btn" id="info-modal-offline" title="${t('library.btn_delete_offline')}"><img src="/images/delete_offline.svg" class="nav-icon nav-icon-delete-offline" alt="${t('library.btn_delete_offline')}"></button>`
+              : `<button class="imt-action-btn" id="info-modal-offline" title="${t('library.btn_download_offline')}"><img src="/images/download_offline.svg" class="nav-icon nav-icon-download-offline" alt="${t('library.btn_download_offline')}"></button>`) : ''}
             ${isOfflineMode ? '' : `<a class="imt-action-btn" href="/api/books/${fullBook.id}/file?download=1&token=${token}" download title="${t('library.btn_download')}"><img src="/images/download.svg" class="nav-icon nav-icon-download" alt="${t('library.btn_download')}"></a>`}
             ${isOfflineMode ? '' : `<button class="imt-action-btn imt-delete-btn" id="info-modal-delete" title="${t('library.btn_del_book')}"><img src="/images/delete.svg" class="nav-icon nav-icon-delete" alt="${t('library.btn_del_book')}"></button>`}
           </div>
