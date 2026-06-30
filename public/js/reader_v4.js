@@ -1,11 +1,10 @@
 ﻿import { apiFetch, requireAuth, getToken } from './api.js';
 import { toast } from './ui.js';
 import { t, initI18n, applyTranslations, getCurrentLang } from './i18n.js';
-import ePub from './flow/index.js';
 import { isBookDownloaded, downloadBook, fetchOfflineBookFile, getBookMeta, saveBookMeta } from './offline.js';
 import { queueProgress, clearProgress, flushProgressOutbox } from './progress-outbox.js';
 
-const READER_BUILD = 'br-v88-dragtoggle';
+const READER_BUILD = 'br-v89-cxreader-only';
 const _i18nReady = initI18n();
 console.log('[codexa] reader build', READER_BUILD);
 
@@ -40,8 +39,6 @@ const SESSION_KEY = 'br_interrupted_session_v1';
 const RESUME_STATE_KEY = 'br_resume_state_v1';
 const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const BIONIC_RELOAD_MAX_AGE_MS = 5 * 60 * 1000;
-const BIONIC_PREFETCH_RADIUS = 3;
-const BIONIC_PREFETCH_CACHE_LIMIT = 7;
 
 // ── Themes ────────────────────────────────────────────────────────────────────
 const THEMES = {
@@ -252,8 +249,7 @@ const DEFAULT_PREFS = {
   hyphenation:    false,         // CSS hyphens: auto inside epub iframe
   hyphenLang:     '',           // empty = keep book's own lang attr; else override e.g. 'en'
   bionicReading:  false,        // emphasize word prefixes for easier scanning
-  experimentalReader: true,     // use CXReader (column paginator) — false falls back to epub.js
-  pageGapShadow:  false,        // show epub.js center-spine box-shadow in two-page mode
+  pageGapShadow:  false,        // show center-spine box-shadow in two-page mode
   dictionaries:   [],           // enabled dict IDs in priority order; null = all disabled; empty = use all
   dictionaryOrder: [],          // all dict IDs in user's display order (including disabled ones)
   edgePadding:    { top: 0, bottom: 0, left: 0, right: 0 },   // px inset for curved screens
@@ -279,8 +275,7 @@ const DEFAULT_PREFS = {
 };
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let book, rendition;
-let _cxReader       = null;  // CXReader instance (when experimentalReader is on)
+let _cxReader       = null;  // CXReader instance (the reader engine)
 let _epubArrayBuffer = null; // raw EPUB bytes, set before startRendition()
 let _cxKbdIframe    = null;  // iframe that currently has keyboard handlers attached
 let _cxDictIframe   = null;  // iframe that currently has dictionary handlers attached
@@ -319,9 +314,6 @@ let preSearchCfi = null;      // position before first result jump
 //   phase 'second' – navigated to exact CFI, waiting for relocated to mark highlights
 let searchNav = null; // null | { cfi, navCfi, query, href, phase }
 let bionicWordCache = new Map();      // per-word split cache
-let bionicPageCache = new Map();      // location index cache window
-let bionicPrefetchSeq = 0;
-const bionicPrefetchInFlight = new Set();
 let bookmarksCache = [];              // loaded bookmarks for current book
 let preBookmarkCfi = null;            // position before a bookmark jump (for back/accept)
 let preAnnotationCfi = null;          // position before an annotation jump (for back/accept)
@@ -373,18 +365,12 @@ let _kosyncPushFailures    = 0;        // consecutive remote push failures for c
 let _kosyncWarnedThisSession = false;  // only warn once per book load
 
 // ── Status bar state ──────────────────────────────────────────────────────────
-let currentHref      = '';    // current spine href (updated in updateProgress)
+let currentHref      = '';    // current spine href (updated from the cx-relocated event)
 let currentChapPage  = 0;     // current page within chapter (left page in two-page mode)
 let currentEndPage   = 0;     // right-page number in two-page mode (0 in single-page)
 let currentChapTotal = 0;     // total pages in current chapter
 let currentIsTwoPage = false; // true when two pages are visible simultaneously
 let chapPageCache    = {};    // { [spineIndex]: totalPages } accumulated as chapters are visited
-let chapOffsetCache  = {};    // { [spineIndex]: maxSkipOffset } loaded lazily from localStorage
-let currentLocsKey   = '';    // cache key for current column mode (reset on rendition restart)
-let _epubChapPage    = 0;    // epub.js raw displayed.page (before skip-offset correction)
-let _epubChapEndPage = 0;    // epub.js raw end displayed.page (before skip-offset correction)
-let _chapDisplayOffset = 0;  // columns skipped by epub.js that we hide: display = epub - offset
-let lastLocation     = null;  // last location object from updateProgress
 // Reading speed tracking: each entry is a { time } recorded on every page turn
 let speedSamples     = [];    // up to 25 recent samples
 
@@ -584,16 +570,8 @@ function clearBionicReloadState() {
 }
 
 function saveBionicReloadState() {
-  const loc = rendition?.currentLocation?.();
-  const cfi = currentCfi || loc?.start?.cfi || '';
-  const pct = (() => {
-    if (book?.locations?.length?.() > 0 && cfi) {
-      const p = book.locations.percentageFromCfi(cfi);
-      if (p != null) return p;
-    }
-    if (loc?.start?.percentage != null) return loc.start.percentage;
-    return currentPct || 0;
-  })();
+  const cfi = currentCfi || '';
+  const pct = (cfi ? pctFromCfi(cfi) : null) ?? currentPct ?? 0;
   try {
     sessionStorage.setItem(BIONIC_RELOAD_KEY, JSON.stringify({
       bookId,
@@ -605,16 +583,6 @@ function saveBionicReloadState() {
   } catch { /* ignore */ }
 }
 
-function getLocationIndexFromCfi(cfi) {
-  if (!cfi || !book?.locations?.length?.()) return null;
-  const len = book.locations.length();
-  if (!len) return null;
-  const pct = book.locations.percentageFromCfi(cfi);
-  if (pct == null) return null;
-  const idx = Math.round(pct * Math.max(0, len - 1));
-  return Math.min(len - 1, Math.max(0, idx));
-}
-
 function spineIndexFromCfi(cfi) {
   const m = String(cfi || '').match(/epubcfi\(\s*\/6\/(\d+)/);
   if (!m) return null;
@@ -622,24 +590,6 @@ function spineIndexFromCfi(cfi) {
   if (!Number.isFinite(n)) return null;
   const idx = Math.floor(n / 2) - 1;
   return idx >= 0 ? idx : null;
-}
-
-function pruneBionicCaches(windowIndexes = null) {
-  if (!prefs.bionicReading) {
-    bionicPageCache.clear();
-    bionicPrefetchInFlight.clear();
-    return;
-  }
-  if (windowIndexes) {
-    for (const k of Array.from(bionicPageCache.keys())) {
-      if (!windowIndexes.has(k)) bionicPageCache.delete(k);
-    }
-    return;
-  }
-  while (bionicPageCache.size > BIONIC_PREFETCH_CACHE_LIMIT) {
-    const firstKey = bionicPageCache.keys().next().value;
-    bionicPageCache.delete(firstKey);
-  }
 }
 
 function bionicFocusLength(len) {
@@ -759,17 +709,21 @@ function makeBionicSafeCfi(cfi) {
 
 // Find a spine item for a given href, using direct lookup first then filename fuzzy match.
 // Handles path-prefix mismatches (e.g. TOC has "OEBPS/Text/ch.xhtml" but spine stores "Text/ch.xhtml").
+// Returns a CXReader spine item ({ href, absPath, index, ... }) or null.
 function findSpineItemForHref(href) {
   if (!href) return null;
-  const base = href.split('#')[0];
-  const direct = book.spine.get(base);
-  if (direct) return direct;
-  // Fuzzy: match by filename — handles OEBPS/ prefix mismatches and split chapters
-  const fname = base.split('/').pop().toLowerCase();
-  return (book.spine.spineItems || []).find(s =>
-    (s.href || '').split('/').pop().toLowerCase() === fname ||
-    (s.canonical || '').split('/').pop().toLowerCase() === fname
-  ) || null;
+  const spine = _cxReader?.spine;
+  if (!spine?.length) return null;
+  const base   = href.split('#')[0].toLowerCase();
+  const fname  = base.split('/').pop();
+  // Direct match on resolved path or raw href, then filename fuzzy match.
+  return spine.find(s => {
+    const sh = (s.absPath || s.href || '').split('#')[0].toLowerCase();
+    return sh === base;
+  }) || spine.find(s => {
+    const sh = (s.absPath || s.href || '').split('#')[0].toLowerCase();
+    return sh.split('/').pop() === fname;
+  }) || null;
 }
 
 function applyBionicToDocument(doc) {
@@ -789,53 +743,6 @@ function applyBionicToDocument(doc) {
   console.log('[bionic] applyBionicToDocument: done');
 }
 
-function markBionicPageCached(location) {
-  const cfi = location?.start?.cfi || currentCfi;
-  const idx = getLocationIndexFromCfi(cfi);
-  if (idx == null) return;
-  bionicPageCache.delete(idx);
-  bionicPageCache.set(idx, { ts: Date.now() });
-}
-
-function scheduleBionicPrefetchAround(location = null) {
-  if (!prefs.bionicReading || !book?.locations?.length?.()) return;
-  const currentLoc = location || rendition?.currentLocation?.();
-  const idx = getLocationIndexFromCfi(currentLoc?.start?.cfi || currentCfi);
-  if (idx == null) return;
-  const len = book.locations.length();
-  const wanted = [];
-  for (let i = idx - BIONIC_PREFETCH_RADIUS; i <= idx + BIONIC_PREFETCH_RADIUS; i++) {
-    if (i >= 0 && i < len) wanted.push(i);
-  }
-  const wantedSet = new Set(wanted);
-  pruneBionicCaches(wantedSet);
-  const seq = ++bionicPrefetchSeq;
-  markBionicPageCached(currentLoc);
-  wanted.forEach(pageIdx => {
-    if (pageIdx === idx || bionicPageCache.has(pageIdx) || bionicPrefetchInFlight.has(pageIdx)) return;
-    bionicPrefetchInFlight.add(pageIdx);
-    queueMicrotask(async () => {
-      try {
-        if (seq !== bionicPrefetchSeq || !prefs.bionicReading || !book?.locations?.length?.()) return;
-        const pct = (book.locations.length() <= 1) ? 0 : (pageIdx / (book.locations.length() - 1));
-        const cfi = book.locations.cfiFromPercentage(Math.min(0.9999, Math.max(0, pct)));
-        const spineIdx = spineIndexFromCfi(cfi);
-        const item = (spineIdx != null) ? book.spine.get(spineIdx) : null;
-        if (!item) return;
-        await item.load(book.load.bind(book));
-        if (item.document) warmBionicWordCacheFromDocument(item.document);
-        item.unload();
-        bionicPageCache.delete(pageIdx);
-        bionicPageCache.set(pageIdx, { ts: Date.now(), href: item.href });
-        pruneBionicCaches();
-      } catch {
-        /* ignore prefetch failures */
-      } finally {
-        bionicPrefetchInFlight.delete(pageIdx);
-      }
-    });
-  });
-}
 
 // ── Custom font loading ───────────────────────────────────────────────────────
 function fontFamilyFromFilename(f) {
@@ -1188,7 +1095,6 @@ function injectIntoContents(contents) {
   fixDropCaps(doc);
   if (prefs.bionicReading) {
     applyBionicToDocument(doc);
-    markBionicPageCached(contents.location?.start ? { start: contents.location.start } : rendition?.currentLocation?.());
   }
   // No injected touch relay script needed. Touch handling is done by attachIframeDictionary and attachIframeTouchNav.
   collapseBlankParagraphs(doc);
@@ -1206,21 +1112,9 @@ function collapseBlankParagraphs(doc) {
 }
 
 function reapplyStyles() {
-  if (prefs.experimentalReader && _cxReader) {
-    _cxMeasureViewerInset(); // re-measure in case status bar height changed with new settings
-    _cxReader.reapplyCss(buildEpubCss());
-    return;
-  }
-  if (!rendition) return;
-  try {
-    const contents = rendition.getContents();
-    if (contents?.length) { contents.forEach(c => injectIntoContents(c)); return; }
-  } catch { /* fall through */ }
-  try {
-    rendition.manager?.views?.forEach?.(view => {
-      if (view?.contents) injectIntoContents(view.contents);
-    });
-  } catch { /* ignore */ }
+  if (!_cxReader) return;
+  _cxMeasureViewerInset(); // re-measure in case status bar height changed with new settings
+  _cxReader.reapplyCss(buildEpubCss());
 }
 
 // ── Sleep timer ───────────────────────────────────────────────────────────────
@@ -1760,7 +1654,7 @@ function _sanitizeFootnoteHtml(el) {
 
 async function showFootnotePopup(fragId, crossDocHref) {
   let targetEl = null;
-  if (prefs.experimentalReader && _cxReader) {
+  if (_cxReader) {
     if (!crossDocHref) {
       // Same-doc: element is already in the rendered iframe
       targetEl = _cxReader._renderer?.iframe?.contentDocument?.getElementById(fragId) ?? null;
@@ -1779,32 +1673,6 @@ async function showFootnotePopup(fragId, crossDocHref) {
           targetEl   = doc.getElementById(fragId) ?? null;
         } catch { targetEl = null; }
       }
-    }
-  } else if (!crossDocHref) {
-    const view = rendition?.manager?.views?.first?.();
-    targetEl = view?.document?.getElementById(fragId) ?? null;
-  } else {
-    // spine.get() breaks when href contains '#' (it switches to getById).
-    // Strip fragment, then resolve relative path against current section.
-    const crossPath = crossDocHref.split('#')[0];
-    let spineItem = book?.spine?.get(crossPath);
-    if (!spineItem) {
-      const curHref = rendition?.currentLocation()?.start?.href || '';
-      const base = curHref.substring(0, curHref.lastIndexOf('/') + 1);
-      spineItem = book?.spine?.get(base + crossPath);
-    }
-    if (!spineItem) {
-      const basename = crossPath.split('/').pop();
-      spineItem = book?.spine?.items?.find(item =>
-        item.href === basename || (item.href || '').endsWith('/' + basename)
-      ) ?? null;
-    }
-    if (spineItem) {
-      try {
-        await spineItem.load(book.load.bind(book));
-        targetEl = spineItem.document?.getElementById(fragId) ?? null;
-        spineItem.unload();
-      } catch { targetEl = null; }
     }
   }
   if (!targetEl) return;
@@ -1983,19 +1851,9 @@ function clearPressHighlight() {
     } catch { /* ignore */ }
     try { c.window?.getSelection?.()?.removeAllRanges?.(); } catch { /* ignore */ }
   };
-  if (prefs.experimentalReader && _cxReader?.iframe?.contentDocument) {
+  if (_cxReader?.iframe?.contentDocument) {
     clean({ document: _cxReader.iframe.contentDocument, window: _cxReader.iframe.contentWindow });
-    return;
   }
-  try {
-    const contents = rendition?.getContents?.();
-    if (contents?.length) { contents.forEach(clean); return; }
-  } catch { /* ignore */ }
-  // Fallback: walk views directly (getContents() can return [] before layout settles)
-  try {
-    const views = rendition?.manager?.views?.asArray?.() || rendition?.manager?.views || [];
-    (Array.isArray(views) ? views : [views?.get?.(0)]).forEach(v => { if (v?.contents) clean(v.contents); });
-  } catch { /* ignore */ }
 }
 
 function scheduleClearPressHighlight() {
@@ -2003,39 +1861,15 @@ function scheduleClearPressHighlight() {
   _clearHlTimer = setTimeout(clearPressHighlight, WORD_HIGHLIGHT_LINGER_MS);
 }
 
-// Navigate to a CFI with a graceful fallback chain when toRange() fails.
-// epub.js throws IndexSizeError when a CFI's element-child index doesn't match the
-// current DOM (bionic-reading transform, column-mode change, epub structural quirks).
-// When locations are ready, always prefer seekToPercentage — rendition.display(cfi)
-// silently fails to reach the correct page in spread/paginated mode (error stays inside
-// epub.js's rAF queue, so the catch block never fires).
+// Navigate to a CFI via CXReader, then scroll to the specific annotation mark.
 async function navigateToCfi(cfi, annotationId = null) {
-  if (prefs.experimentalReader && _cxReader) {
-    await _cxReader.goToCfi(cfi);
-    // Scroll to specific annotation mark. Prefer the explicit annotationId (avoids wrong-mark
-    // when multiple annotations in the same chapter share a spine-level CFI), fall back to
-    // CFI-match for epub.js annotations that have real range CFIs.
-    const targetId = annotationId ?? annotationsCache.find(a => a.cfi === cfi)?.id;
-    if (targetId != null) _cxReader.scrollToAnnotation(targetId);
-    return;
-  }
-  const startCfi = cfiRangeToStart(cfi);
-  if (book.locations?.length() > 0) {
-    const pct = book.locations.percentageFromCfi(startCfi) ?? book.locations.percentageFromCfi(cfi);
-    if (pct != null) { await seekToPercentage(pct); return; }
-  }
-  try {
-    await rendition.display(startCfi);
-  } catch {
-    const pct = book.locations?.percentageFromCfi?.(cfi) ?? 0;
-    if (pct > 0) { await seekToPercentage(pct); return; }
-    const m = String(cfi).match(/^epubcfi\(\/6\/(\d+)!/);
-    if (m) {
-      const spineIdx = Math.floor(parseInt(m[1], 10) / 2) - 1;
-      const item = spineIdx >= 0 ? book.spine?.get(spineIdx) : null;
-      if (item?.href) await rendition.display(item.href);
-    }
-  }
+  if (!_cxReader) return;
+  await _cxReader.goToCfi(cfi);
+  // Scroll to specific annotation mark. Prefer the explicit annotationId (avoids wrong-mark
+  // when multiple annotations in the same chapter share a spine-level CFI), fall back to
+  // CFI-match for annotations that have real range CFIs.
+  const targetId = annotationId ?? annotationsCache.find(a => a.cfi === cfi)?.id;
+  if (targetId != null) _cxReader.scrollToAnnotation(targetId);
 }
 
 function closeAnnotationUI() {
@@ -2117,44 +1951,23 @@ function injectAnnotationsIntoContents(contents) {
 
 // Re-apply annotation marks into all currently loaded views (e.g. after loadAnnotations)
 function reapplyAnnotations() {
-  if (prefs.experimentalReader && _cxReader) {
-    const iframe = _cxReader.iframe;
-    if (iframe?.contentDocument) {
-      const _raDoc = iframe.contentDocument;
-      injectAnnotationsIntoContents({
-        document: _raDoc,
-        sectionIndex: _cxReader.spineIdx,
-        range: (cfi) => _cxRangeFromCfi(cfi, _raDoc),
-      });
-    }
-    return;
-  }
-  try {
-    const contents = rendition?.getContents?.();
-    if (contents?.length) { contents.forEach(injectAnnotationsIntoContents); return; }
-  } catch { /* fall through */ }
-  try {
-    rendition?.manager?.views?.forEach?.(view => {
-      if (view?.contents) injectAnnotationsIntoContents(view.contents);
+  if (!_cxReader) return;
+  const iframe = _cxReader.iframe;
+  if (iframe?.contentDocument) {
+    const _raDoc = iframe.contentDocument;
+    injectAnnotationsIntoContents({
+      document: _raDoc,
+      sectionIndex: _cxReader.spineIdx,
+      range: (cfi) => _cxRangeFromCfi(cfi, _raDoc),
     });
-  } catch { /* ignore */ }
+  }
 }
 
-// Call callback(doc) for every currently-loaded iframe document across all reader modes.
+// Call callback(doc) for the currently-loaded CXReader iframe document.
 function forEachAnnotationDoc(callback) {
-  if (prefs.experimentalReader && _cxReader?.iframe?.contentDocument) {
+  if (_cxReader?.iframe?.contentDocument) {
     try { callback(_cxReader.iframe.contentDocument); } catch { /* ignore */ }
-    return;
   }
-  try {
-    const contents = rendition?.getContents?.();
-    if (contents?.length) { contents.forEach(c => { if (c.document) try { callback(c.document); } catch { /* ignore */ } }); return; }
-  } catch { /* fall through */ }
-  try {
-    rendition?.manager?.views?.forEach?.(view => {
-      if (view?.contents?.document) try { callback(view.contents.document); } catch { /* ignore */ }
-    });
-  } catch { /* ignore */ }
 }
 
 // Remove <mark> wrappers for a deleted annotation from all loaded views
@@ -2254,12 +2067,6 @@ function pctFromCfi(cfi) {
     if (_cxReader?.pctForCfi) {
       const p = _cxReader.pctForCfi(cfi);
       if (p != null) return p;
-    }
-  } catch { /* ignore */ }
-  try {
-    if (typeof book !== 'undefined' && book?.locations?.percentageFromCfi) {
-      const p = book.locations.percentageFromCfi(cfi);
-      if (p != null && p >= 0) return p;
     }
   } catch { /* ignore */ }
   return null;
@@ -2377,7 +2184,7 @@ function averageChapPages() {
 
 // Estimated book pages
 function estimateBookTotal() {
-  const len = book?.spine?.spineItems?.length || book?.spine?.length || _cxReader?.spine?.length || 1;
+  const len = _cxReader?.spine?.length || 1;
   let total = 0;
   for (let i = 0; i < len; i++) total += chapPageCache[i] || averageChapPages();
   return Math.max(1, total);
@@ -2447,7 +2254,7 @@ function computeStatValue(id) {
     case 'chapterTitle':
       return chapterLabelFromHref(currentHref);
     case 'chapterNum': {
-      const spineTotal = book?.spine?.spineItems?.length || book?.spine?.length || _cxReader?.spine?.length || 0;
+      const spineTotal = _cxReader?.spine?.length || 0;
       return spineTotal ? (currentSpineIndex + 1) + '/' + spineTotal : '';
     }
     case 'series': {
@@ -2481,99 +2288,11 @@ function computeSlot(ids) {
   }).filter(Boolean).join('  |  ');
 }
 
-// Update all overlay slots from current state
-function updateStatusBar(location) {
-  // CXReader owns the status bar via cx-relocated (it sets currentChapPage/EndPage/Total and
-  // currentIsTwoPage from exact pagination). updateStatusBar() derives those from an epub.js
-  // location; in CX mode that location is always null, so running it would clobber the correct
-  // CX values with zeros. Just re-render the already-correct CX state (clock/battery/etc.).
-  if (prefs.experimentalReader && _cxReader) { renderStatusSlots(); return; }
-  const epubStartPage = location?.start?.displayed?.page ?? 0;
-  const epubEndPage   = location?.end?.displayed?.page   ?? 0;
-  _epubChapPage    = epubStartPage; // always track epub.js raw page before offset correction
-  _epubChapEndPage = epubEndPage;   // raw end page — used for wasEnd and skip detection
-  // Apply cumulative skip offset so page display stays sequential after epub.js overshoots
-  const startPage  = epubStartPage > 0 ? epubStartPage - _chapDisplayOffset : 0;
-  const endPage    = epubEndPage   > 0 ? epubEndPage   - _chapDisplayOffset : 0;
-  const totalPages = location?.start?.displayed?.total ?? 0;
-  const isTwoPage  = startPage > 0 && endPage > 0 && endPage !== startPage;
-
-  // Update chapter page vars & cache.
-  // Use the maximum total ever seen for this chapter: epub.js grows displayed.total
-  // as it discovers more pages when navigating forward, so the first time you land
-  // on a chapter it may report a lower total than after you have navigated deeper.
-  // Keeping the max prevents the percentage from going *down* when navigating back.
-  const stableTotal = Math.max(totalPages, chapPageCache[currentSpineIndex] || 0);
-  currentChapPage  = startPage;
-  currentEndPage   = endPage;
-  currentChapTotal = stableTotal || totalPages;
-  currentIsTwoPage = isTwoPage;
-  if (stableTotal > 0) chapPageCache[currentSpineIndex] = stableTotal;
-
-  // Load per-chapter skip offset from localStorage on first access.
-  // This lets the total denominator show the correct value from page 1 on
-  // re-entry (once the offset is known from a prior navigation).
-  if (!(currentSpineIndex in chapOffsetCache) && currentBook?.file_hash) {
-    try {
-      const _lsKey = `br_chapoff_${currentBook.file_hash}_${currentSpineIndex}`;
-      const _lsVal = localStorage.getItem(_lsKey);
-      chapOffsetCache[currentSpineIndex] = _lsVal != null ? (parseInt(_lsVal, 10) || 0) : 0;
-      console.log(`[skip-cache] load spineIdx=${currentSpineIndex} ls="${_lsVal}" → cached=${chapOffsetCache[currentSpineIndex]}`);
-    } catch { chapOffsetCache[currentSpineIndex] = 0; }
-  }
-  const _offsetForTotal = Math.max(_chapDisplayOffset, chapOffsetCache[currentSpineIndex] || 0);
-  // Clamp to endPage (not startPage) so that in 2-column mode the right column never exceeds the total
-  const _displayTotal   = stableTotal > 0 ? Math.max(stableTotal - _offsetForTotal, endPage) : 0;
-  if (_offsetForTotal > 0 || _chapDisplayOffset > 0) {
-    console.log(`[skip-cache] total: raw=${stableTotal} dispOff=${_chapDisplayOffset} cached=${chapOffsetCache[currentSpineIndex]||0} → display=${_displayTotal}`);
-  }
-
-  const pos = prefs.statusBar.positions;
-  // In two-page mode, chapterPage is always placed at the outermost slots
-  // (tl/tr for top, bl/br for bottom), honouring only the row (top vs bottom)
-  // from the configured position and ignoring left/center/right.
-  const chapInTop    = isTwoPage && (pos.tl.includes('chapterPage') || pos.tc.includes('chapterPage') || pos.tr.includes('chapterPage'));
-  const chapInBottom = isTwoPage && (pos.bl.includes('chapterPage') || pos.bc.includes('chapterPage') || pos.br.includes('chapterPage'));
-
-  // Pre-build chapter page strings (used for both top & bottom if needed)
-  const cpIconSrc = STAT_ICON['chapterPage'];
-  const cpImg     = (cpIconSrc && prefs.statusBar.showIcons['chapterPage'] !== false)
-                    ? sbIconHtml(cpIconSrc) + '\u202F' : '';
-  const leftVal   = startPage > 0 ? cpImg + startPage + '/' + _displayTotal : '';
-  const rightVal  = endPage   > 0 ? cpImg + endPage   + '/' + _displayTotal : '';
-
-  // ── Top row ──────────────────────────────────────────────────────────────
-  if (chapInTop) {
-    const tlOther = computeSlot(pos.tl.filter(id => id !== 'chapterPage'));
-    const tcSlot  = computeSlot(pos.tc.filter(id => id !== 'chapterPage'));
-    const trOther = computeSlot(pos.tr.filter(id => id !== 'chapterPage'));
-    sbTl.innerHTML = [leftVal,  tlOther].filter(Boolean).join('  |  ');
-    sbTc.innerHTML = tcSlot;
-    sbTr.innerHTML = [trOther, rightVal].filter(Boolean).join('  |  ');
-  } else {
-    sbTl.innerHTML = computeSlot(pos.tl);
-    sbTc.innerHTML = computeSlot(pos.tc);
-    sbTr.innerHTML = computeSlot(pos.tr);
-  }
-
-  // ── Bottom row ───────────────────────────────────────────────────────────
-  if (chapInBottom) {
-    sbBottom.classList.add('two-page');
-    const blOther = computeSlot(pos.bl.filter(id => id !== 'chapterPage'));
-    const bcSlot  = computeSlot(pos.bc.filter(id => id !== 'chapterPage'));
-    const brOther = computeSlot(pos.br.filter(id => id !== 'chapterPage'));
-    sbBl.innerHTML = [leftVal,  blOther].filter(Boolean).join('  |  ');
-    sbBc.innerHTML = bcSlot;
-    sbBr.innerHTML = [brOther, rightVal].filter(Boolean).join('  |  ');
-  } else {
-    sbBottom.classList.remove('two-page');
-    sbBl.innerHTML = computeSlot(pos.bl);
-    sbBc.innerHTML = computeSlot(pos.bc);
-    sbBr.innerHTML = computeSlot(pos.br);
-  }
-
-  updateChapProgressBar();
-  updateBookProgressBar();
+// Update all overlay slots from current state. CXReader owns pagination state
+// (currentChapPage/EndPage/Total/currentIsTwoPage are set from the cx-relocated event),
+// so this just re-renders the slots from that already-correct state.
+function updateStatusBar() {
+  renderStatusSlots();
 }
 
 // Re-render only the slots that contain 'currentTime' (called by setInterval)
@@ -2745,12 +2464,6 @@ function applyEdgePadding() {
   root.style.setProperty('--edge-pad-right',  p.right  + 'px');
   root.style.setProperty('--edge-pad-bottom', p.bottom + 'px');
   root.style.setProperty('--edge-pad-left',   p.left   + 'px');
-  // Resize epub.js rendition so it fills the updated viewer area
-  if (rendition) {
-    setTimeout(() => {
-      rendition.resize(epubViewer.clientWidth, Math.max(200, epubViewer.clientHeight - RENDITION_BOTTOM_RESERVE));
-    }, 30);
-  }
   // For CXReader: re-measure how much the status bars overlap the viewer (their position
   // shifts when edge-pad vars change), then re-apply the iframe inset and repaginate.
   if (_cxReader) {
@@ -2859,42 +2572,24 @@ function buildChapterMarkers() {
   if (topLevel.length < 2) topLevel = [...tocFlatItems];
   if (topLevel.length < 2) return;
 
-  // CXReader spine for index-ratio fallback when epub.js locations aren't available
+  // CXReader spine for the marker index-ratio positions.
   const cxSpine    = _cxReader?._book?.spine;
-  const epubSpine  = book?.spine?.spineItems || [];
-  const spineTotal = (cxSpine?.length || epubSpine.length) || 1;
+  const spineTotal = cxSpine?.length || 1;
 
   topLevel.forEach(({ href }, i) => {
     if (i === 0) return; // first chapter starts at 0% — no marker needed
     const hrefBase = (href || '').split('#')[0];
     let pct = null;
 
-    // Prefer accurate percentage from epub.js locations table
-    if (book?.locations?.length() > 0) {
-      const spineItem = book.spine.get(hrefBase);
-      if (spineItem?.cfiBase) {
-        pct = book.locations.percentageFromCfi(`epubcfi(${spineItem.cfiBase}!/4/1:0)`);
-      }
-    }
-    // Fallback: spine-index ratio using whichever spine is available
-    if (pct == null) {
-      let idx = -1;
-      if (cxSpine?.length) {
-        const hrefLow  = hrefBase.toLowerCase();
-        const hrefFile = hrefLow.split('/').pop();
-        idx = cxSpine.findIndex(s => {
-          // Prefer absPath (fully resolved) for matching; fall back to raw href
-          const sh = (s.absPath || s.href || '').split('#')[0].toLowerCase();
-          return sh === hrefLow || sh.split('/').pop() === hrefFile;
-        });
-      }
-      if (idx < 0 && epubSpine.length) {
-        const hrefFile = hrefBase.split('/').pop();
-        idx = epubSpine.findIndex(s => {
-          const sh = (s.href || '').split('#')[0];
-          return sh === hrefBase || sh.endsWith('/' + hrefFile);
-        });
-      }
+    // Spine-index ratio from the CXReader spine.
+    if (cxSpine?.length) {
+      const hrefLow  = hrefBase.toLowerCase();
+      const hrefFile = hrefLow.split('/').pop();
+      const idx = cxSpine.findIndex(s => {
+        // Prefer absPath (fully resolved) for matching; fall back to raw href
+        const sh = (s.absPath || s.href || '').split('#')[0].toLowerCase();
+        return sh === hrefLow || sh.split('/').pop() === hrefFile;
+      });
       if (idx > 0) pct = idx / spineTotal;
     }
 
@@ -2955,12 +2650,6 @@ function applyAutoHide() {
   readerLayout.classList.toggle('autohide-header', prefs.autoHideHeader);
   if (!prefs.autoHideHeader) {
     forceHideAutoHeader();
-  }
-  // Resize rendition since available height changes
-  if (rendition) {
-    setTimeout(() => {
-      rendition.resize(epubViewer.clientWidth, Math.max(200, epubViewer.clientHeight - RENDITION_BOTTOM_RESERVE));
-    }, 50);
   }
 }
 
@@ -3038,26 +2727,7 @@ function buildTocRecursive(toc, depth, fragment) {
           ? (anchor && depth > 1 ? `${spineItem.href}#${anchor}` : spineItem.href)
           : item.href;
         console.log(`[nav] TOC | depth=${depth} anchor="${anchor||''}" target=${JSON.stringify(displayTarget)}`);
-        if (prefs.experimentalReader && _cxReader) {
-          await _cxReader.goToHref(displayTarget || item.href);
-          return;
-        }
-        try {
-          await rendition.display(displayTarget);
-          const loc = rendition?.currentLocation?.();
-          console.log(`[nav] TOC-landed | page=${loc?.start?.displayed?.page}/${loc?.start?.displayed?.total} href="${loc?.start?.href?.split('/').pop()}"`);
-          scheduleBionicPrefetchAround(loc);
-        } catch (e) {
-          // Last-resort: if primary href failed, try raw TOC href
-          if (item.href && displayTarget !== item.href) {
-            try {
-              await rendition.display(item.href);
-              const loc = rendition?.currentLocation?.();
-              console.log(`[nav] TOC-landed | page=${loc?.start?.displayed?.page}/${loc?.start?.displayed?.total} href="${loc?.start?.href?.split('/').pop()}"`);
-              scheduleBionicPrefetchAround(loc);
-            } catch (e2) {}
-          }
-        }
+        if (_cxReader) await _cxReader.goToHref(displayTarget || item.href);
       }, 80);
     });
 
@@ -3097,7 +2767,7 @@ function updateActiveTocItem(href) {
   });
   if (!anyActive) {
     // CXReader range fallback: activate the last TOC entry whose spine index ≤ currentSpineIndex
-    if (prefs?.experimentalReader && _cxReader) {
+    if (_cxReader) {
       const rangeItem = _cxRangeActiveToc();
       if (rangeItem) {
         tocFlatItems.forEach(({ href: ih, button }) => {
@@ -3138,7 +2808,7 @@ function chapterLabelFromHref(href) {
   if (match) return match.label;
   // 4. CXReader range-based: last TOC entry whose spine index ≤ currentSpineIndex.
   //    Handles EPUBs where TOC only marks chapter starts and many spine items have no entry.
-  if (prefs?.experimentalReader && _cxReader) {
+  if (_cxReader) {
     const rangeMatch = _cxRangeActiveToc();
     if (rangeMatch) return rangeMatch.label;
   }
@@ -3188,7 +2858,7 @@ function findCurrentTopLevelChapIdx() {
   const tops = tocFlatItems.filter(t => t.depth === 0);
   if (!tops.length) return { tops, idx: -1 };
 
-  const href = currentHref || rendition?.currentLocation?.()?.start?.href || '';
+  const href = currentHref || '';
   if (!href) return { tops, idx: -1 };
 
   const n = tocHrefNorm(href);
@@ -3211,8 +2881,8 @@ function findCurrentTopLevelChapIdx() {
     }
   }
 
-  const curSpine = rendition?.currentLocation?.()?.start?.index;
-  if (curSpine != null) {
+  const curSpine = currentSpineIndex;
+  if (curSpine != null && curSpine >= 0) {
     let bestIdx = -1;
     tops.forEach((t, ti) => {
       const spineItem = findSpineItemForHref((t.href || '').split('#')[0]);
@@ -3226,28 +2896,7 @@ function findCurrentTopLevelChapIdx() {
 
 async function navigateToTocChapter(target) {
   if (!target?.href) return;
-  if (prefs.experimentalReader && _cxReader) {
-    await _cxReader.goToHref(target.href);
-    return;
-  }
-  if (!rendition) return;
-  const [hrefBase, anchor] = (target.href || '').split('#');
-  const spineItem = findSpineItemForHref(hrefBase);
-  const displayTarget = spineItem?.index != null
-    ? (anchor && target.depth > 1 ? `${spineItem.href}#${anchor}` : spineItem.href)
-    : target.href;
-  console.log(`[nav] CHAP | depth=${target.depth} → ${JSON.stringify(displayTarget)}`);
-  try {
-    await rendition.display(displayTarget);
-    scheduleBionicPrefetchAround(rendition.currentLocation?.());
-  } catch {
-    if (target.href && displayTarget !== target.href) {
-      try {
-        await rendition.display(target.href);
-        scheduleBionicPrefetchAround(rendition.currentLocation?.());
-      } catch { /* ignore */ }
-    }
-  }
+  if (_cxReader) await _cxReader.goToHref(target.href);
 }
 
 // ── Panels ────────────────────────────────────────────────────────────────────
@@ -3427,69 +3076,11 @@ function openSearch() {
 
 function clearSearchHighlights() {
   searchNav = null;
-  // Remove DOM marks from all currently rendered sections
-  if (rendition) {
-    try {
-      const contents = rendition.getContents();
-      contents?.forEach(content => {
-        content.document?.querySelectorAll('mark.br-hl').forEach(m => {
-          m.replaceWith(content.document.createTextNode(m.textContent));
-        });
-      });
-    } catch { /* ignore */ }
-  }
-  // Also clear from the CXReader iframe (if a search highlight was applied there)
+  // Clear search marks from the CXReader iframe
   const cxDoc = _cxReader?._renderer?.iframe?.contentDocument;
   if (cxDoc) {
     cxDoc.querySelectorAll('mark.br-hl').forEach(m => m.replaceWith(cxDoc.createTextNode(m.textContent)));
   }
-}
-
-// Highlight the last searched query in the current rendered iframe by wrapping
-// matched text nodes in <mark class="br-hl"> elements.
-// Uses only background-color so inline dimensions are unchanged (no reflow).
-function applyDomSearchHighlight(query) {
-  if (!query || !rendition) return;
-  try {
-    const contents = rendition.getContents();
-    if (!contents?.length) return;
-    const reEsc = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re    = new RegExp(`(${reEsc})`, 'gi');
-    contents.forEach(content => {
-      const doc = content.document;
-      if (!doc?.body) return;
-      // Remove stale marks
-      doc.querySelectorAll('mark.br-hl').forEach(m => {
-        m.replaceWith(doc.createTextNode(m.textContent));
-      });
-      // Walk text nodes and wrap matches
-      const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
-        acceptNode: n => n.parentElement?.closest('script,style') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
-      });
-      const hits = [];
-      let node;
-      while ((node = walker.nextNode())) {
-        if (re.test(node.textContent)) { hits.push(node); re.lastIndex = 0; }
-      }
-      hits.forEach(textNode => {
-        if (!textNode.parentNode) return;
-        const parts = textNode.textContent.split(re);
-        if (parts.length <= 1) return;
-        const frag = doc.createDocumentFragment();
-        parts.forEach((part, i) => {
-          if (i % 2 === 0) {
-            if (part) frag.appendChild(doc.createTextNode(part));
-          } else {
-            const mark = doc.createElement('mark');
-            mark.className = 'br-hl';
-            mark.textContent = part;
-            frag.appendChild(mark);
-          }
-        });
-        textNode.replaceWith(frag);
-      });
-    });
-  } catch(e) { console.warn('[search] DOM highlight error:', e); }
 }
 
 function highlightExcerpt(excerpt, query) {
@@ -3507,39 +3098,6 @@ function cfiRangeToStart(cfi) {
   const m = String(cfi).match(/^epubcfi\((.+),(\/.+),(\/.+)\)$/);
   if (!m) return cfi; // not a range — already a location CFI
   return `epubcfi(${m[1]}${m[2]})`;
-}
-
-async function jumpToSearchResult(cfi, href, query) {
-  // Save position before first jump so user can return
-  if (!preSearchCfi && currentCfi) {
-    preSearchCfi = currentCfi;
-    searchBackBtn.style.display   = '';
-    searchAcceptBtn.style.display = '';
-  }
-  closePanels();
-  clearSearchHighlights();
-
-  const navCfi = cfiRangeToStart(cfi);
-
-  // Determine if the target is in the currently-loaded chapter.
-  // If so, styles are already injected — skip phase 'first' and go directly to the CFI.
-  const targetItem  = book.spine.get(href);
-  const sameChapter = targetItem && (targetItem.index === currentSpineIndex);
-
-  if (sameChapter) {
-    // Styles already applied — navigate straight to the exact position.
-    searchNav = { cfi, navCfi, query, href, phase: 'second' };
-    try { await rendition.display(navCfi); } catch { try { await rendition.display(cfi); } catch {} }
-  } else {
-    // Different chapter: navigate to its start first so epub.js loads + injects our styles,
-    // then phase 'first' relocated handler will re-navigate to the exact CFI.
-    searchNav = { cfi, navCfi, query, href, phase: 'first' };
-    try { await rendition.display(href); } catch {
-      // href failed — fall through to direct CFI navigation
-      searchNav.phase = 'second';
-      try { await rendition.display(navCfi); } catch {}
-    }
-  }
 }
 
 // Walk body text nodes to find the one that contains character offset `targetOffset`.
@@ -3560,8 +3118,8 @@ function _cxFindNodeAtOffset(body, targetOffset) {
 }
 
 // Highlight all occurrences of query in the CXReader iframe by wrapping matched text nodes in
-// <mark class="br-hl">. Same approach as applyDomSearchHighlight() for epub.js. Works perfectly
-// without bionic reading; with bionic ON some matches may miss (text nodes are split by word).
+// <mark class="br-hl">. Works perfectly without bionic reading; with bionic ON some matches may
+// miss (text nodes are split by word).
 function _cxApplySearchHighlight(body, query) {
   if (!body || !query) return;
   const doc   = body.ownerDocument;
@@ -3676,48 +3234,7 @@ async function runSearch(query) {
   searchAbort.aborted = true;   // abort any previous search
   searchAbort = abort;
 
-  if (prefs.experimentalReader && _cxReader) {
-    await runSearchCX(query);
-    return;
-  }
-
-  // Collect all spine sections
-  const sections = [];
-  book.spine.each(item => sections.push(item));
-
-  let total = 0;
-  for (let i = 0; i < sections.length; i++) {
-    if (abort.aborted) return;
-    const item = sections[i];
-    searchStatusEl.textContent = t('reader.search_progress', { n: i + 1, total: sections.length });
-    try {
-      await item.load(book.load.bind(book));
-      const matches = item.find(query);
-      item.unload();
-      if (abort.aborted) return;
-      if (matches.length) {
-        const chapterLabel = chapterLabelFromHref(item.href) || item.href.split('/').pop();
-        matches.forEach(({ cfi, excerpt }) => {
-          total++;
-          const div = document.createElement('div');
-          div.className = 'search-result';
-          div.innerHTML = `
-            <div class="search-result-chapter">${esc(chapterLabel)}</div>
-            <div class="search-result-excerpt">${highlightExcerpt(excerpt, query)}</div>
-          `;
-          div.addEventListener('click', () => jumpToSearchResult(cfi, item.href, query));
-          searchResultsEl.appendChild(div);
-        });
-      }
-    } catch { /* spine item unloadable — skip */ }
-  }
-
-  if (abort.aborted) return;
-  if (total === 0) {
-    searchStatusEl.textContent = t('reader.search_none');
-  } else {
-    searchStatusEl.textContent = total === 1 ? t('reader.search_count_1') : total < 5 ? t('reader.search_count_2_4', { n: total }) : t('reader.search_count', { n: total });
-  }
+  if (_cxReader) await runSearchCX(query);
 }
 
 // ── Dictionary ────────────────────────────────────────────────────────────────
@@ -4212,8 +3729,6 @@ function syncSettingsUi() {
   if (hypLangEl) { hypLangEl.value = prefs.hyphenLang; hypLangEl.closest('.setting-row').style.display = prefs.hyphenation ? '' : 'none'; }
   const bionicEl = document.getElementById('bionic-reading-toggle');
   if (bionicEl) bionicEl.checked = prefs.bionicReading;
-  const expReaderEl = document.getElementById('experimental-reader-toggle');
-  if (expReaderEl) expReaderEl.checked = !prefs.experimentalReader;
   const pgShadowEl = document.getElementById('page-gap-shadow-toggle');
   if (pgShadowEl) pgShadowEl.checked = prefs.pageGapShadow;
   const fnbEl = document.getElementById('float-nav-btn-toggle');
@@ -4261,16 +3776,8 @@ function renderStatusSlots() {
 
   const cpIconSrc = STAT_ICON['chapterPage'];
   const cpIcon    = (cpIconSrc && prefs.statusBar.showIcons['chapterPage'] !== false) ? sbIconHtml(cpIconSrc) + '\u202F' : '';
-  if (!(currentSpineIndex in chapOffsetCache) && currentBook?.file_hash) {
-    try {
-      const saved = localStorage.getItem(`br_chapoff_${currentBook.file_hash}_${currentSpineIndex}`);
-      chapOffsetCache[currentSpineIndex] = saved != null ? (parseInt(saved, 10) || 0) : 0;
-    } catch { chapOffsetCache[currentSpineIndex] = 0; }
-  }
-  // The skip-offset is an epub.js artifact (it hides columns epub.js silently skips). CXReader
-  // paginates exactly, so its chapter total must never be reduced by a (possibly stale) offset.
-  const _rsOffsetForTotal = prefs.experimentalReader ? 0 : Math.max(_chapDisplayOffset, chapOffsetCache[currentSpineIndex] || 0);
-  const _rsDisplayTotal   = currentChapTotal > 0 ? Math.max(currentChapTotal - _rsOffsetForTotal, currentEndPage) : 0;
+  // CXReader paginates exactly, so the chapter total is the exact page count.
+  const _rsDisplayTotal   = currentChapTotal > 0 ? Math.max(currentChapTotal, currentEndPage) : 0;
   const leftVal  = currentChapPage > 0 ? cpIcon + currentChapPage + '/' + _rsDisplayTotal : '';
   const rightVal = currentEndPage  > 0 ? cpIcon + currentEndPage  + '/' + _rsDisplayTotal : '';
 
@@ -4537,7 +4044,7 @@ function initStatusBarSettings() {
     document.getElementById(`sb-clock-${fmt}`)?.addEventListener('click', () => {
       prefs.statusBar.clockFormat = fmt;
       syncStatusBarSettings();
-      updateStatusBar(lastLocation);
+      updateStatusBar();
       persistPrefs();
     });
   });
@@ -4629,12 +4136,6 @@ function initSettingsUi() {
     // _initPaginator uses the new gap (it's set via setLayout, not derived from CSS).
     if (_cxReader) _cxReader.setLayout({ columnGap: prefs.margin * 2 });
     reapplyStyles();
-    // Margins in paginated mode are controlled via epub.js gap (not body padding).
-    // gap = margin * 2 → epub.js sets body padding-left/right = gap/2 = margin.
-    if (rendition?.manager) {
-      rendition.manager.settings.gap = prefs.margin * 2;
-      rendition.manager.updateLayout();
-    }
     persistPrefs();
   });
   document.getElementById('override-styles-toggle').addEventListener('change', (e) => {
@@ -4696,9 +4197,7 @@ function initSettingsUi() {
     // Debug: log computed text-align on first <p> in iframe after styles applied
     setTimeout(() => {
       try {
-        const views = rendition?.manager?.views?.asArray?.() || rendition?.manager?.views || [];
-        const view = Array.isArray(views) ? views[0] : views?.get?.(0);
-        const doc = view?.contents?.document || rendition?.getContents?.()[0]?.document;
+        const doc = _cxReader?._renderer?.iframe?.contentDocument;
         if (doc) {
           const p = doc.querySelector('p');
           const styleEl = doc.getElementById('br-custom-styles');
@@ -4772,11 +4271,6 @@ function initSettingsUi() {
     prefs.bionicReading = e.target.checked;
     persistPrefs();
     saveBionicReloadState();
-    location.reload();
-  });
-  document.getElementById('experimental-reader-toggle')?.addEventListener('change', (e) => {
-    prefs.experimentalReader = !e.target.checked;
-    persistPrefs();
     location.reload();
   });
   document.getElementById('page-gap-shadow-toggle')?.addEventListener('change', (e) => {
@@ -4885,13 +4379,7 @@ function initSettingsUi() {
     btn.addEventListener('click', async () => {
       prefs.spread = btn.dataset.spread;
       syncSettingsUi(); persistPrefs();
-      if (prefs.experimentalReader && _cxReader) {
-        _cxSyncLayout();            // re-paginate CXReader in place (no rendition to restart)
-      } else if (rendition) {
-        const savedCfi = currentCfi;
-        rendition.destroy();
-        await startRendition(savedCfi);
-      }
+      if (_cxReader) _cxSyncLayout();   // re-paginate CXReader in place
     });
   });
 
@@ -4916,215 +4404,7 @@ function initSettingsUi() {
 }
 
 // ── Progress ──────────────────────────────────────────────────────────────────
-function updateProgress(location) {
-  if (pendingNavDirection) _pageEnter(pendingNavDirection);
-  const wasAutoAdvance = _autoAdvancePending;
-  _autoAdvancePending = false;
-  const cfi = location?.start?.cfi;
-  let pct   = 0;
-  if (cfi && book.locations?.length() > 0) {
-    pct = book.locations.percentageFromCfi(cfi) || 0;
-  } else {
-    const idx   = location?.start?.index || 0;
-    const total = book.spine?.spineItems?.length || book.spine?.length || 1;
-    pct = idx / total;
-  }
-  // Only update save-state after init is done — during startup, relocated fires
-  // with page-start CFI which is earlier than the exact saved character offset.
-  const _prevSpineIndex = currentSpineIndex; // capture before update for chapter-end cache correction
-  if (isReady) {
-    currentCfi        = cfi || '';
-    currentPct        = pct;
-    if (pct > 0) lastKnownGoodPct = pct;
-    currentSpineIndex = location?.start?.index ?? currentSpineIndex;
-  } else {
-    // Still track spine index even during init for accurate xpointer on first save
-    currentSpineIndex = location?.start?.index ?? currentSpineIndex;
-  }
-  const d = Math.round(pct * 100);
-  progressFillEl.style.width = d + '%';
-  const href = location?.start?.href || '';
-  const oldChapterHref = lastChapterHref;
-  console.log(
-    `[nav] relocated | dir=${pendingNavDirection||'—'} ready=${isReady}` +
-    ` | ${href === oldChapterHref ? 'same-chap' : ('CHAP→' + (href||'?').split('/').pop())}` +
-    ` | p=${location?.start?.displayed?.page}/${location?.start?.displayed?.total}` +
-    ` end=${location?.end?.displayed?.page}` +
-    ` | cfi=…${(cfi||'').slice(-25)}`
-  );
-  chapterTitleEl.textContent = chapterLabelFromHref(href);
-  currentHref = href;
-  updateActiveTocItem(href);
-  // Save on chapter boundary (when spine item changes).
-  // Push remote for any chapter change regardless of direction (forward or TOC jump).
-  // Suppress remote push while a bookmark jump is pending (user hasn't accepted yet).
-  if (isReady && oldChapterHref !== null && href && href !== oldChapterHref) {
-    const alreadySent = href === lastSentChapterHref;
-    const bookmarkPending = !!preBookmarkCfi;
-    saveProgress({
-      forceRemote: !alreadySent && !bookmarkPending,
-      allowRemote: !alreadySent && !bookmarkPending,
-    });
-    cancelDebouncedSync();
-    writeInterruptedSession();
-    if (!alreadySent && !bookmarkPending) {
-      lastSentChapterHref = href;
-    }
-    // Log chapter visit for statistics (fire-and-forget)
-    if (currentBook) {
-      logChapterVisit(currentBook.id, href, chapterLabelFromHref(href));
-    }
-  }
-  if (href) lastChapterHref = href;
 
-  // Status bar overlays (replacing old page info overlays)
-  if (isReady) lastLocation = location;
-  if (isReady && currentBook && (cfi || pct > 0)) scheduleDebouncedSync();
-  trackReadingSpeed();
-  const _prevChapPage    = currentChapPage;   // display page before updateStatusBar mutates it
-  const _prevEpubPage    = _epubChapPage;     // epub.js raw start page before updateStatusBar mutates it
-  const _prevEpubEndPage = _epubChapEndPage;  // epub.js raw end page before updateStatusBar mutates it
-  // Reset skip offset whenever we cross into a new chapter (each chapter reindexes from 1).
-  // If we completed the chapter (NEXT from last page) with fewer skips than cached, the cached
-  // value is stale (written by old buggy code or from a different device layout). Correct it down.
-  if (isReady && href && oldChapterHref && href !== oldChapterHref) {
-    if (pendingNavDirection === 'next' && pendingWasChapterEnd &&
-        currentBook?.file_hash &&
-        _chapDisplayOffset < (chapOffsetCache[_prevSpineIndex] || 0)) {
-      chapOffsetCache[_prevSpineIndex] = _chapDisplayOffset;
-      try {
-        localStorage.setItem(`br_chapoff_${currentBook.file_hash}_${_prevSpineIndex}`, _chapDisplayOffset);
-        console.log(`[skip-cache] correct stale off spineIdx=${_prevSpineIndex} → ${_chapDisplayOffset}`);
-      } catch {}
-    }
-    _chapDisplayOffset = 0;
-    _epubChapPage      = 0;
-    _epubChapEndPage   = 0;
-  }
-  updateStatusBar(location);
-  scheduleBionicPrefetchAround(location);
-
-  const _wasNavDir = pendingNavDirection; // capture before the if/else clears it
-  if (
-    pendingNavDirection === 'next' &&
-    isReady &&
-    href &&
-    oldChapterHref &&
-    href !== oldChapterHref
-  ) {
-    pendingNavDirection = null;
-    const landedPage = location?.start?.displayed?.page ?? 1;
-    console.log(
-      `[nav] chap-advance | wasEnd=${pendingWasChapterEnd} landedPage=${landedPage}` +
-      ` | → ${!pendingWasChapterEnd ? 'FIX-GOBACK' : 'OK'}`
-    );
-    if (!pendingWasChapterEnd) {
-      console.log(`[nav] FIX-GOBACK | prev()`);
-      rendition?.prev();
-    }
-  } else {
-    pendingNavDirection = null;
-  }
-
-  // Use raw epub.js page for stuck/skip detection — _prevEpubPage is the epub page before
-  // this navigation, startPage is the epub page reported by the new location.
-  const startPage = location?.start?.displayed?.page ?? 0;
-
-  // Stuck-page auto-advance: same epub page returned after NEXT → fire another next().
-  // wasAutoAdvance prevents an infinite loop if the follow-up next() is also stuck.
-  if (
-    _wasNavDir === 'next' &&
-    href === oldChapterHref &&
-    isReady &&
-    startPage > 0 &&
-    startPage === _prevEpubPage &&
-    !wasAutoAdvance
-  ) {
-    _autoAdvancePending = true;
-    pendingNavDirection = 'next';
-    console.log(`[nav] auto-advance | stuck p=${startPage} → next()`);
-    rendition.next();
-  }
-
-  // Skip-fix (NEXT): epub.js jumped >1 column forward (image-induced overshoot).
-  // Accumulate the hidden columns in _chapDisplayOffset so the status bar stays
-  // sequential. updateStatusBar() reads _chapDisplayOffset on every call, so calling
-  // it again after updating the offset is enough to re-render the corrected number.
-  if (
-    _wasNavDir === 'next' &&
-    href === oldChapterHref &&
-    isReady &&
-    _prevEpubEndPage > 0 &&
-    startPage > _prevEpubEndPage + 1 &&
-    !wasAutoAdvance
-  ) {
-    _chapDisplayOffset += startPage - _prevEpubEndPage - 1;
-    // Persist max observed offset for this chapter so re-entry shows correct total
-    const _newMaxOff = Math.max(chapOffsetCache[currentSpineIndex] || 0, _chapDisplayOffset);
-    if (_newMaxOff > (chapOffsetCache[currentSpineIndex] || 0)) {
-      chapOffsetCache[currentSpineIndex] = _newMaxOff;
-      try {
-        localStorage.setItem(`br_chapoff_${currentBook?.file_hash}_${currentSpineIndex}`, _newMaxOff);
-        console.log(`[skip-cache] saved spineIdx=${currentSpineIndex} off=${_newMaxOff}`);
-      } catch {}
-    }
-    console.log(`[nav] skip-fix | epub endP=${_prevEpubEndPage}→startP=${startPage} off=${_chapDisplayOffset} → show p=${startPage - _chapDisplayOffset}`);
-    updateStatusBar(location);
-  }
-
-  // Skip-fix (PREV): epub.js jumped >1 spread backward (crossing a previously-skipped
-  // boundary). Shrink _chapDisplayOffset to mirror the forward correction in reverse.
-  // Use current spread size so 2-column mode (step=2) isn't falsely flagged.
-  const _rawEpubEndHere    = location?.end?.displayed?.page ?? 0;
-  const _currentSpreadSize = (_rawEpubEndHere > startPage) ? (_rawEpubEndHere - startPage + 1) : 1;
-  if (
-    _wasNavDir === 'prev' &&
-    href === oldChapterHref &&
-    isReady &&
-    _prevEpubPage > 0 &&
-    _prevEpubPage - startPage > _currentSpreadSize
-  ) {
-    _chapDisplayOffset = Math.max(0, _chapDisplayOffset - (_prevEpubPage - startPage - _currentSpreadSize));
-    console.log(`[nav] skip-fix-prev | epub ${_prevEpubPage}→${startPage} off=${_chapDisplayOffset} → show p=${startPage - _chapDisplayOffset}`);
-    updateStatusBar(location);
-  }
-}
-
-function initLocations() {
-  const key    = getLocsCacheKey();
-  const cached = localStorage.getItem(key);
-  if (cached) {
-    try {
-      book.locations.load(cached);
-      // Refresh percentage display only — do NOT navigate or overwrite currentCfi
-      if (currentCfi && book.locations.length() > 0) {
-        const pct = book.locations.percentageFromCfi(currentCfi);
-        if (pct != null && isReady) {
-          currentPct = pct;
-          progressFillEl.style.width  = Math.round(pct * 100) + '%';
-          updateStatusBar(lastLocation || rendition?.currentLocation());
-        }
-      }
-      buildChapterMarkers(); // refine markers now that accurate locations are available
-      return;
-    } catch { localStorage.removeItem(key); /* corrupt — regenerate */ }
-  }
-  setTimeout(() => {
-    book.locations.generate(1000).then(() => {
-      try { localStorage.setItem(key, book.locations.save()); } catch { /* quota */ }
-      // Refresh percentage display only — do NOT navigate
-      if (currentCfi && book.locations.length() > 0) {
-        const pct = book.locations.percentageFromCfi(currentCfi);
-        if (pct != null && isReady) {
-          currentPct = pct;
-          progressFillEl.style.width  = Math.round(pct * 100) + '%';
-          updateStatusBar(lastLocation || rendition?.currentLocation());
-        }
-      }
-      buildChapterMarkers(); // refine markers now that accurate locations are available
-    }).catch(() => {});
-  }, 1500);
-}
 
 function scheduleProgressSave() {
   // no-op — chapter-boundary + close saving replaces the debounce
@@ -5134,35 +4414,9 @@ function scheduleProgressSave() {
 // cfiFromPercentage returns range CFIs that display() mishandles, so we
 // jump close then advance with next() until percentage matches.
 async function seekToPercentage(targetPct) {
-  if (prefs.experimentalReader && _cxReader) {
-    await _cxReader.goToPct(targetPct);
-    _cxReader.seekToPercent(targetPct); // fine-tune to exact page within the chapter
-    return;
-  }
-  if (!book.locations?.length()) return;
-  if (!rendition) return;
-  const jumpCfi = book.locations.cfiFromPercentage(targetPct);
-  let safeCfi = jumpCfi;
-  if (prefs.bionicReading && jumpCfi) {
-    safeCfi = makeBionicSafeCfi(jumpCfi);
-  }
-  if (safeCfi) {
-    try {
-      await rendition.display(safeCfi);
-    } catch (e) { }
-  }
-  for (let step = 0; step < 20; step++) {
-    const loc    = rendition.currentLocation();
-    const locCfi = loc?.start?.cfi;
-    if (!locCfi) break;
-    const curPct = book.locations.percentageFromCfi(locCfi) || 0;
-    if (curPct >= targetPct - 0.005) break;
-    await rendition.next();
-  }
-  const finalLoc = rendition.currentLocation();
-  if (finalLoc?.start?.cfi) currentCfi = finalLoc.start.cfi;
-  if (finalLoc?.start?.percentage != null) currentPct = finalLoc.start.percentage;
-  scheduleBionicPrefetchAround(finalLoc || rendition?.currentLocation?.());
+  if (!_cxReader) return;
+  await _cxReader.goToPct(targetPct);
+  _cxReader.seekToPercent(targetPct); // fine-tune to exact page within the chapter
 }
 
 // ── Book language normalisation ───────────────────────────────────────────────
@@ -5281,7 +4535,7 @@ function stopPeriodicSync() {
 function initOnlineStatus() {
   const refresh = () => {
     _isOnline = navigator.onLine;
-    updateStatusBar(lastLocation ?? rendition?.currentLocation());
+    updateStatusBar();
   };
   window.addEventListener('online',  refresh);
   window.addEventListener('offline', refresh);
@@ -5293,7 +4547,7 @@ async function initBattery() {
   if (_batteryMgr || !navigator.getBattery) return;
   try {
     _batteryMgr = await navigator.getBattery();
-    const refresh = () => { updateStatusBar(lastLocation ?? rendition?.currentLocation()); };
+    const refresh = () => { updateStatusBar(); };
     _batteryMgr.addEventListener('levelchange',   refresh);
     _batteryMgr.addEventListener('chargingchange', refresh);
     refresh(); // apply immediately
@@ -5543,35 +4797,7 @@ async function networkRestoreSync() {
     const localProgress = await apiFetch(`/progress/${currentBook.file_hash}`).catch(() => null);
     const syncTarget = await syncOnOpen(localProgress);
     if (syncTarget?.percentage == null && !syncTarget?.progress) return;
-    // CXReader path — must run before the epub.js block below
-    if (prefs.experimentalReader && _cxReader) {
-      if (syncTarget?.percentage != null) _cxReader.seekToPercent(syncTarget.percentage);
-      return;
-    }
-    // epub.js path — reuse the same navigation logic used at book-open time
-    const dfMatch = syncTarget.progress?.match(/^\/body\/DocFragment\[(\d+)\]/);
-    if (dfMatch) {
-      const spineIdx  = parseInt(dfMatch[1]) - 1;
-      const spineItem = book.spine.get(spineIdx);
-      if (spineItem?.href) {
-        const paraMatch = !prefs.bionicReading && syncTarget.progress.match(/\/p\[(\d+)\]/);
-        let navigated = false;
-        if (paraMatch) {
-          const guessCfi = `epubcfi(/6/${(spineIdx + 1) * 2}!/4/${parseInt(paraMatch[1]) * 2})`;
-          try { await rendition.display(guessCfi); navigated = true; } catch { navigated = false; }
-        }
-        if (!navigated) {
-          await rendition.display(spineItem.href);
-          if (prefs.bionicReading && book.locations.length() > 0)
-            await seekToPercentage(syncTarget.percentage);
-        }
-      } else if (book.locations.length() > 0) {
-        await seekToPercentage(syncTarget.percentage);
-      }
-    } else if (syncTarget?.percentage != null) {
-      if (book.locations.length() > 0)
-        await seekToPercentage(syncTarget.percentage);
-    }
+    if (_cxReader && syncTarget?.percentage != null) _cxReader.seekToPercent(syncTarget.percentage);
   } catch (e) { console.warn('[kosync] networkRestoreSync failed:', e.message); }
 }
 window.__codexaNetworkRestore = networkRestoreSync;
@@ -5595,13 +4821,9 @@ function cxWantsTwoCol() {
   return prefs.spread === 'auto' && !isMobileScreen() && w >= 800;
 }
 
-function getLocsCacheKey() {
-  return `br_locs_${currentBook.file_hash}_${cxWantsTwoCol() ? '2' : '1'}col`;
-}
-
 // Push the current column-mode decision into the live CXReader (re-paginates if needed).
 function _cxSyncLayout() {
-  if (!prefs.experimentalReader || !_cxReader) return;
+  if (!_cxReader) return;
   _cxReader.setLayout({ twoColumn: cxWantsTwoCol(), columnGap: prefs.margin * 2 });
 }
 
@@ -5889,7 +5111,6 @@ function _cxApplyIframeInset(iframe) {
 }
 
 async function startCXRendition(displayCfi = null) {
-  rendition = null;
   _cxViewerPaddingSet = false;
   _cxViewerPadTop = 0;
   _cxViewerPadBot = 0;
@@ -5908,7 +5129,7 @@ async function startCXRendition(displayCfi = null) {
   // Intercept in-book <a> clicks posted from the iframe via postMessage
   if (_cxLinkHandler) window.removeEventListener('message', _cxLinkHandler);
   _cxLinkHandler = (e) => {
-    if (e.data?.type !== 'cx-link' || !prefs.experimentalReader || !_cxReader) return;
+    if (e.data?.type !== 'cx-link' || !_cxReader) return;
     void _cxReader.goToHref(e.data.href);
   };
   window.addEventListener('message', _cxLinkHandler);
@@ -5947,128 +5168,9 @@ async function startCXRendition(displayCfi = null) {
   isReady = true;
 }
 
+// CXReader is the only reader engine; this keeps the historical entry-point name.
 async function startRendition(displayCfi = null) {
-  if (prefs.experimentalReader) {
-    await startCXRendition(displayCfi);
-    return;
-  }
-  _cxViewerPadTop = _cxViewerPadBot = 0; // reset inset when switching to epub.js
-  // One-time migration: clear chapter skip-offset caches written by the old buggy
-  // 2-column detection code, which counted normal 2-column advances as skips, inflating
-  // the offset on desktop. Version '2' marks the corrected detection logic.
-  try {
-    const _SKIP_VER = '2';
-    if (localStorage.getItem('br_skipver') !== _SKIP_VER) {
-      const _toDel = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k?.startsWith('br_chapoff_')) _toDel.push(k);
-      }
-      _toDel.forEach(k => localStorage.removeItem(k));
-      localStorage.setItem('br_skipver', _SKIP_VER);
-      console.log(`[skip-cache] migration v${_SKIP_VER}: cleared ${_toDel.length} stale entries`);
-    }
-  } catch {}
-  chapPageCache      = {};
-  chapOffsetCache    = {};
-  _epubChapPage      = 0;
-  _epubChapEndPage   = 0;
-  _chapDisplayOffset = 0;
-  currentLocsKey = getLocsCacheKey();
-  // On small screens always force single-page, regardless of user preference.
-  // On Android, use a higher minSpreadWidth (1200px) because e-ink devices such as
-  // the BOOX Palma 2 report devicePixelRatio=1 even on high-DPI screens, making
-  // window.innerWidth equal to physical resolution (~824px) and falsely crossing
-  // the default 800px spread threshold.
-  const spreadMode    = (prefs.spread === 'auto' && !isMobileScreen()) ? 'auto' : 'none';
-  const minSpreadWidth = isAndroidApp() ? 1200 : 800;
-  // Reserve 38px at the bottom so epub content doesn't flow behind the
-  // status-bar / separator overlays. In CSS multi-column mode padding-bottom
-  // on the body only applies to the last column, so the only reliable way to
-  // leave space on every page is to shorten the column height here.
-  rendition = book.renderTo('epub-viewer', {
-    width:          epubViewer.clientWidth  || window.innerWidth,
-    height:         Math.max(200, (epubViewer.clientHeight || (window.innerHeight - 55)) - RENDITION_BOTTOM_RESERVE),
-    spread:         spreadMode,
-    minSpreadWidth: minSpreadWidth,
-    manager:        'default',
-    gap:            prefs.margin * 2,
-    allowScriptedContent: true,
-  });
-
-  // Attach keyboard forwarding via content hook (runs on every page load)
-  // Also inject our styles early here — before first paint — to avoid the
-  // flash of unstyled/wrong-size text when crossing chapter boundaries.
-  rendition.hooks.content.register((contents) => {
-    attachIframeKeyboard(contents);
-    attachIframeDictionary(contents);
-    attachIframeFootnotes(contents);
-    attachIframeAnnotation(contents);
-    injectIntoContents(contents);
-  });
-
-  // 'rendered' fires AFTER epub.js finishes its own content setup.
-  // Re-inject in the next tick to ensure our !important overrides win over
-  // any late epub.js style mutations (belt-and-suspenders; no visible reflow
-  // because hooks.content already applied the same CSS above).
-  rendition.on('rendered', (_section, view) => {
-    setTimeout(() => {
-      if (view?.contents) injectIntoContents(view.contents);
-    }, 0);
-    attachIframeTouchNav(view);
-    // epub.js can silently re-paginate after 'relocated' fires (e.g. discovering
-    // blank structural pages at the chapter start), updating currentLocation() without
-    // emitting another 'relocated'. Poll after a short settle window and sync the
-    // status bar if the internal page moved — prevents misleading page-number jumps
-    // on the next user-initiated NEXT press.
-    const _repaginateCheck = (label) => {
-      if (!isReady) return;
-      const loc = rendition?.currentLocation?.();
-      const p = loc?.start?.displayed?.page;
-      // Only apply FORWARD corrections: unloaded images produce a stale layout
-      // where displayed.page is lower than the true position.
-      // Compare against _epubChapPage (the raw epub page) so a skip-fix correction
-      // that reduced currentChapPage below p does NOT trigger a spurious re-update.
-      if (p && p > _epubChapPage) {
-        const prevDisplay = currentChapPage;
-        const prevEpub    = _epubChapPage;
-        updateStatusBar(loc); // sets _epubChapPage = p, currentChapPage = p - _chapDisplayOffset
-        console.log(
-          `[nav] repaginate@${label} | epub ${prevEpub}→${p} show ${prevDisplay}→${currentChapPage}/${currentChapTotal}` +
-          ` chap="${currentHref?.split('/').pop()}"`
-        );
-      }
-    };
-    setTimeout(() => _repaginateCheck('180ms'), 180);
-    // Slow WebViews (e-ink Android) can take >180ms for column layout to settle
-    // after navigation. A second poll at 600ms catches stale same-page relocations
-    // that the 180ms poll misses — only fires if page still hasn't advanced.
-    setTimeout(() => _repaginateCheck('600ms'), 600);
-  });
-
-  rendition.on('relocated', updateProgress);
-  rendition.on('relocated', () => {
-    if (!searchNav) return;
-    if (searchNav.phase === 'first') {
-      // Chapter is now loaded and our styles are being injected (setTimeout 0 in rendered).
-      // Wait 350ms for font/layout reflow, then navigate to the exact CFI position.
-      const { navCfi } = searchNav;
-      searchNav.phase = 'second';
-      setTimeout(() => { rendition.display(navCfi).catch(() => {}); }, 350);
-    } else if (searchNav.phase === 'second') {
-      // We are now on the correct page with correct styles applied.
-      const { query } = searchNav;
-      searchNav = null;
-      // Wait for the paginated column layout to fully settle, then mark the text.
-      setTimeout(() => applyDomSearchHighlight(query), 300);
-    }
-  });
-
-  try {
-    await rendition.display(displayCfi || undefined);
-  } catch {
-    await rendition.display();
-  }
+  await startCXRendition(displayCfi);
 }
 
 // ── Page turn animation ───────────────────────────────────────────────────────
@@ -6119,7 +5221,7 @@ function _slideCapable() { return !prefs.eink && !_isLegacyWv; }
 
 function _useEngineSlide() {
   return (prefs.pageTurnAnim === 'paper' || prefs.pageTurnAnim === 'momentum')
-    && prefs.experimentalReader && !!_cxReader
+    && !!_cxReader
     && !_cxReader._isCbz && !_cxReader._isFixedLayout
     && _slideCapable();
 }
@@ -6168,7 +5270,7 @@ let _mom = null;
 function _momEnabled() {
   return prefs.pageTurnDrag
     && (prefs.pageTurnAnim === 'paper' || prefs.pageTurnAnim === 'momentum')
-    && prefs.experimentalReader && !!_cxReader
+    && !!_cxReader
     && !_cxReader._isCbz && !_cxReader._isFixedLayout
     && _slideCapable() && isTouchReader() && !hasOpenPanel();
 }
@@ -6273,73 +5375,22 @@ function _navThrottle() {
 function goNext() {
   if (deferredNextPending) return;
   if (_navThrottle()) return;
-
-  if (prefs.experimentalReader && _cxReader) {
-    if (_useEngineSlide()) { _cxSlideTurn('next'); return; }
-    _pageExit('next');
-    pendingNavDirection = 'next';
-    sessionPageCount++;
-    void _cxReader.next();
-    return;
-  }
-
+  if (!_cxReader) return;
+  if (_useEngineSlide()) { _cxSlideTurn('next'); return; }
   _pageExit('next');
-  const _lL        = rendition?.currentLocation?.();
-  const _liveEnd   = _lL?.end?.displayed?.page;
-  const _liveTotal = _lL?.start?.displayed?.total;
-
-  // If tracked page (from last 'relocated') and live DOM page differ by more than
-  // 1, epub.js has rendered a chapter but its layout hasn't settled yet — the
-  // repaginate poll fires at 180ms to correct currentEndPage. Allowing the advance
-  // now lets the live check produce a false wasEnd=true (e.g. live=25 with total=26
-  // triggers 25>=25 even though tracked says page 23). Defer 200ms so repaginate
-  // can correct the tracked state first, then retry.
-  if (!!_liveEnd && !!_epubChapEndPage && Math.abs(_liveEnd - _epubChapEndPage) > 1) {
-    const hrefAtDefer = currentHref;
-    deferredNextPending = true;
-    console.log(`[nav] NEXT deferred | mid-repagination tracked=${currentEndPage} live=${_liveEnd}`);
-    setTimeout(() => {
-      deferredNextPending = false;
-      if (currentHref === hrefAtDefer) goNext();
-    }, 200);
-    return;
-  }
-
   pendingNavDirection = 'next';
   sessionPageCount++;
-  // Capture whether we are truly at the last page at call-time. The library can
-  // advance the chapter prematurely if a CSS expand shrinks scrollWidth between
-  // this call and when manager.next() actually runs (async via rAF queue).
-  // We use both tracked state and live DOM state; OR avoids false positives from
-  // stale tracked values and from missed repagination poll updates.
-  pendingWasChapterEnd =
-    _epubChapEndPage === 0 || currentChapTotal === 0 ||
-    _epubChapEndPage >= currentChapTotal - 1 ||
-    (!!_liveEnd && !!_liveTotal && _liveEnd >= _liveTotal - 1);
-  console.log(
-    `[nav] NEXT | tracked end=${currentEndPage}/${currentChapTotal}` +
-    ` live end=${_liveEnd}/${_liveTotal} wasEnd=${pendingWasChapterEnd}`
-  );
-  rendition?.next();
+  void _cxReader.next();
 }
 function goPrev() {
   if (_navThrottle()) return;
   deferredNextPending = false;
-
-  if (prefs.experimentalReader && _cxReader) {
-    if (_useEngineSlide()) { _cxSlideTurn('prev'); return; }
-    _pageExit('prev');
-    pendingNavDirection = 'prev';
-    sessionPageCount++;
-    void _cxReader.prev();
-    return;
-  }
-
+  if (!_cxReader) return;
+  if (_useEngineSlide()) { _cxSlideTurn('prev'); return; }
   _pageExit('prev');
-  console.log(`[nav] PREV | page=${currentChapPage}/${currentChapTotal}`);
   pendingNavDirection = 'prev';
   sessionPageCount++;
-  rendition?.prev();
+  void _cxReader.prev();
 }
 
 // ── Touch / swipe navigation ──────────────────────────────────────────────────
@@ -6658,47 +5709,6 @@ epubViewer.addEventListener('wheel', (e) => { handleWheel(e.deltaY); }, { passiv
 document.addEventListener('br-wheel', (e) => { handleWheel(e.detail.deltaY); });
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
-async function resizeRenditionToViewer() {
-  if (!rendition) return;
-  const newKey = getLocsCacheKey();
-  if (newKey !== currentLocsKey) {
-    // Column mode flipped (e.g. phone rotation crossing 640px or 800px threshold)
-    const savePct = currentPct;
-    chapPageCache = {};
-    rendition.destroy();
-    await startRendition(null);
-    if (savePct > 0 && book.locations?.length() > 0) await seekToPercentage(savePct);
-    return;
-  }
-  const pctBeforeResize = currentPct;
-  const cfiBeforeResize = currentCfi;
-  chapPageCache      = {};
-  chapOffsetCache    = {};
-  _epubChapPage      = 0;
-  _epubChapEndPage   = 0;
-  _chapDisplayOffset = 0;
-  currentChapTotal   = 0;
-  rendition.resize(epubViewer.clientWidth, Math.max(200, epubViewer.clientHeight - RENDITION_BOTTOM_RESERVE));
-  if (isReady && pctBeforeResize > 0 && book.locations?.length() > 0) {
-    await seekToPercentage(pctBeforeResize);
-  } else if (isReady && cfiBeforeResize) {
-    try { await rendition.display(cfiBeforeResize); } catch {}
-  }
-  // After layout settles, force a status-bar refresh from the live column count.
-  // The 'relocated' events fired during resize read pre-reflow layout values;
-  // this read (after both navigation and the browser reflow complete) gets the
-  // true page total and bypasses the Math.max stale-cache guard.
-  await new Promise(r => setTimeout(r, 250));
-  const loc = rendition.currentLocation();
-  if (loc) {
-    const freshTotal = loc.start?.displayed?.total ?? 0;
-    if (freshTotal > 0) {
-      currentChapTotal = freshTotal;
-      chapPageCache[currentSpineIndex] = freshTotal;
-    }
-    updateStatusBar(loc);
-  }
-}
 
 window.addEventListener('resize', debounce(() => {
   applyHeaderButtonSize();
@@ -6710,9 +5720,8 @@ window.addEventListener('resize', debounce(() => {
     r.style.setProperty('--sab', '0px');
     r.style.setProperty('--layout-h', window.innerHeight + 'px');
   }
-  // CXReader has no epub.js rendition — re-evaluate column mode and re-paginate directly.
-  if (prefs.experimentalReader && _cxReader) { _cxSyncLayout(); return; }
-  void resizeRenditionToViewer();
+  // CXReader re-evaluates column mode and re-paginates directly.
+  if (_cxReader) _cxSyncLayout();
 }, 300));
 
 // ── Reading statistics ────────────────────────────────────────────────────────
@@ -6934,8 +5943,8 @@ async function loadBookmarks(bookId) {
 }
 
 async function addBookmark() {
-  if (!currentBook || (!rendition && !_cxReader)) return;
-  const cfi   = rendition?.currentLocation()?.start?.cfi || currentCfi;
+  if (!currentBook || !_cxReader) return;
+  const cfi   = currentCfi;
   const pct   = currentPct;
   const chapter = chapterTitleEl.textContent || '';
   const label = `${chapter ? chapter + ' · ' : ''}${Math.round(pct * 100)}%`;
@@ -7192,32 +6201,9 @@ document.getElementById('kosync-zone-bl')?.addEventListener('click', async () =>
   const doSync = await showSyncDialog(best, currentPct, null);
   if (!doSync) return;
 
-  if (prefs.experimentalReader && _cxReader) {
-    if (best.percentage != null) {
-      await _cxReader.goToPct(best.percentage);
-      _cxReader.seekToPercent(best.percentage);
-    }
-  } else {
-    const dfMatch = best.progress.match(/^\/body\/DocFragment\[(\d+)\]/);
-    if (dfMatch) {
-      const spineIdx  = parseInt(dfMatch[1], 10) - 1;
-      const spineItem = book.spine.get(spineIdx);
-      if (spineItem?.href) {
-        const paraMatch = !prefs.bionicReading && best.progress.match(/\/p\[(\d+)\]/);
-        let navigated = false;
-        if (paraMatch) {
-          const guessCfi = `epubcfi(/6/${(spineIdx + 1) * 2}!/4/${parseInt(paraMatch[1]) * 2})`;
-          try { await rendition.display(guessCfi); navigated = true; } catch { navigated = false; }
-        }
-        if (!navigated) await rendition.display(spineItem.href);
-        if (prefs.bionicReading && book.locations.length() > 0)
-          await seekToPercentage(best.percentage);
-      } else if (book.locations.length() > 0 && best.percentage != null) {
-        await seekToPercentage(best.percentage);
-      }
-    } else if (best.percentage != null && book.locations.length() > 0) {
-      await seekToPercentage(best.percentage);
-    }
+  if (_cxReader && best.percentage != null) {
+    await _cxReader.goToPct(best.percentage);
+    _cxReader.seekToPercent(best.percentage);
   }
 });
 
@@ -7260,8 +6246,7 @@ document.getElementById('btn-search-back').addEventListener('click', async () =>
   searchBackBtn.style.display   = 'none';
   searchAcceptBtn.style.display = 'none';
   if (prefs.autoHideHeader) forceHideAutoHeader();
-  if (prefs.experimentalReader && _cxReader) { await _cxReader.goToCfi(cfi); return; }
-  await rendition.display(cfi);
+  if (_cxReader) await _cxReader.goToCfi(cfi);
 });
 document.getElementById('btn-search-accept').addEventListener('click', () => {
   clearSearchHighlights();
@@ -7278,8 +6263,7 @@ document.getElementById('btn-bookmark-back').addEventListener('click', async () 
   bookmarkBackBtn.style.display   = 'none';
   bookmarkAcceptBtn.style.display = 'none';
   if (prefs.autoHideHeader) forceHideAutoHeader();
-  if (prefs.experimentalReader && _cxReader) { await _cxReader.goToCfi(cfi); return; }
-  await rendition.display(cfi);
+  if (_cxReader) await _cxReader.goToCfi(cfi);
 });
 document.getElementById('btn-bookmark-accept').addEventListener('click', () => {
   preBookmarkCfi = null;
@@ -7296,8 +6280,7 @@ document.getElementById('btn-annotation-back').addEventListener('click', async (
   annotationBackBtn.style.display   = 'none';
   annotationAcceptBtn.style.display = 'none';
   if (prefs.autoHideHeader) forceHideAutoHeader();
-  if (prefs.experimentalReader && _cxReader) { await _cxReader.goToCfi(cfi); return; }
-  await rendition.display(cfi);
+  if (_cxReader) await _cxReader.goToCfi(cfi);
 });
 document.getElementById('btn-annotation-accept').addEventListener('click', () => {
   preAnnotationCfi = null;
@@ -7430,8 +6413,8 @@ function bindJumpChapNav(btnId, direction) {
       else if (idx === 0) target = tops[0];
       else target = tops[0];
     } else if (idx < 0) {
-      const curSpine = rendition?.currentLocation?.()?.start?.index;
-      target = curSpine != null
+      const curSpine = currentSpineIndex;
+      target = curSpine != null && curSpine >= 0
         ? tops.find(t => {
           const si = findSpineItemForHref((t.href || '').split('#')[0]);
           return si?.index != null && si.index > curSpine;
@@ -7469,9 +6452,9 @@ document.addEventListener('fullscreenchange', async () => {
   // Keep layout height in sync on desktop after fullscreen toggle.
   document.documentElement.style.setProperty('--layout-h', window.innerHeight + 'px');
 
-  // Wait two frames so flex layout + CSS vars settle before measuring epubViewer.
+  // Wait two frames so flex layout + CSS vars settle before re-paginating.
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  await resizeRenditionToViewer();
+  if (_cxReader) _cxSyncLayout();
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -7724,7 +6707,7 @@ async function init() {
     }
     // Re-apply styles to inject @font-face declarations into the active reader frame
     // (needed when fonts finish loading after the initial render)
-    if (_cxReader || rendition) reapplyStyles();
+    if (_cxReader) reapplyStyles();
     populateFontSelect();
   }).catch(err => {
     console.warn('[reader] fonts failed:', err?.message);
@@ -7739,7 +6722,7 @@ async function init() {
       r.style.setProperty('--sat', '0px');
       r.style.setProperty('--sab', '0px');
       r.style.setProperty('--layout-h', window.innerHeight + 'px');
-      if (rendition) resizeRenditionToViewer();
+      if (_cxReader) _cxSyncLayout();
     }, 600);
   }
 
@@ -7753,25 +6736,8 @@ async function init() {
   try {
     loadingMsg.textContent = t('reader.loading_open');
     _epubArrayBuffer = arrayBuffer;
-    console.log('[reader] creating ePub book object...');
-    book = ePub(arrayBuffer);
-    console.log('[reader] ePub book created');
-
-    book.loaded.navigation.then(nav => {
-      if (nav?.toc?.length) {
-        buildToc(nav.toc);
-        buildChapterMarkers(); // place markers using spine-index fallback; will be refined by initLocations
-        // TOC may load after first 'relocated' — refresh chapter overlays now
-        const href = lastChapterHref || '';
-        if (href) {
-          chapterTitleEl.textContent = chapterLabelFromHref(href);
-        }
-      } else {
-        tocListEl.innerHTML = '<div class="toc-empty">' + t('reader.toc_none') + '</div>';
-      }
-    }).catch(() => {
-      tocListEl.innerHTML = '<div class="toc-empty">' + t('reader.toc_none') + '</div>';
-    });
+    // CXReader parses the EPUB itself (JSZip) and builds the TOC + chapter markers from
+    // its own spine/navigation when rendering starts (see startCXRendition).
 
     let startCfi      = null;
     let localProgress = null;
@@ -7842,41 +6808,10 @@ async function init() {
         }).catch(() => {});
       }
       if (!startCfi && localProgress?.cfi_position) startCfi = localProgress.cfi_position;
-      // Pre-load locations from cache so seekToPercentage works immediately after startRendition
-      if (localProgress?.percentage != null) {
-        const locsKey    = getLocsCacheKey();
-        const cachedLocs = localStorage.getItem(locsKey);
-        if (cachedLocs) { try { book.locations.load(cachedLocs); } catch { localStorage.removeItem(locsKey); } }
-      }
     } catch { /* start from beginning */ }
-
-    // Bionic replaces text nodes with <span> trees. Any CFI that encodes a text-node
-    // step (e.g. epubcfi(/6/14!/4[id]/794/3:143)) is invalid on the transformed DOM —
-    // epub.js toRange() throws DOMException. For ALL bionic opens (cold start or reload)
-    // reduce the CFI to the chapter href so epub.js opens safely at the chapter start;
-    // seekToPercentage() below restores the exact position via the saved percentage.
-    if (prefs.bionicReading && startCfi) {
-      const m = String(startCfi).match(/^epubcfi\(\/6\/(\d+)!/);
-      if (m) {
-        const spineIdx = Math.floor(parseInt(m[1], 10) / 2) - 1;
-        const item = spineIdx >= 0 ? book.spine.get(spineIdx) : null;
-        if (item?.href) {
-          console.log('[bionic] reduced startCfi to chapter href:', item.href);
-          startCfi = item.href;
-        }
-      }
-    }
 
     console.log('[reader] startRendition:', startCfi?.slice(0, 60) ?? 'null');
     await startRendition(startCfi);
-    // Capture the page-start CFI epub.js actually rendered.
-    if (rendition) {
-      const loc = rendition.currentLocation();
-      if (loc?.start?.cfi) currentCfi = loc.start.cfi;
-      if (loc?.start?.percentage != null) currentPct = loc.start.percentage;
-      console.log('[pos] startRendition done, currentCfi:', currentCfi.slice(0, 60));
-    }
-    book.ready.then(() => initLocations()).catch(() => {});
     loadAvailableDicts().then(updateDictButtonVisibility).catch(() => {});
     _rafStop = true;
     loadingOverlay.classList.add('hidden');
@@ -7899,95 +6834,23 @@ async function init() {
     // and MutationObserver don't run while critical fetch() calls are in flight.
     if (_legacyWebView) initHeaderFit();
 
-    // Secondary percentage seek — only used when no full CFI was already applied by
-    // startRendition.  When startCfi IS a full epubcfi(…) the seek is skipped: it
-    // consistently overshoots because pct-to-location mapping has ±1–2 page granularity
-    // and triggers a drift (overshot position gets saved → next open overshoots further).
-    // Bionic reloads reduce startCfi to a chapter href so they still need the pct seek.
-    const startCfiIsEpubcfi = startCfi?.startsWith('epubcfi(');
-    if (reloadStartPct != null && book.locations.length() > 0) {
-      console.log('[pos] seeking to bionic-toggle pct:', (reloadStartPct * 100).toFixed(2) + '%');
-      await seekToPercentage(reloadStartPct);
-      console.log('[pos] after bionic seek currentCfi:', currentCfi.slice(0, 60));
-    } else if (resumeStartPct != null && !startCfiIsEpubcfi && book.locations.length() > 0) {
-      console.log('[pos] seeking to session-restore pct:', (resumeStartPct * 100).toFixed(2) + '%');
-      await seekToPercentage(resumeStartPct);
-      console.log('[pos] after session-restore seek currentCfi:', currentCfi.slice(0, 60));
-    } else if (localProgress?.percentage != null && !startCfiIsEpubcfi && book.locations.length() > 0) {
-      console.log('[pos] seeking to saved pct:', (localProgress.percentage*100).toFixed(2)+'%');
-      await seekToPercentage(localProgress.percentage);
-      console.log('[pos] after seek currentCfi:', currentCfi.slice(0,60));
-    }
+    // CXReader restores position from startCfi (chapter) + the saved exact page / percentage
+    // in the sync block below; no epub.js locations-based pct seek is needed here.
 
     // Check remote/internal sync AFTER book is visible.
     // syncOnOpen's network request also gives epub.js time to fully settle its layout,
     // which is why the CFI correction loop below runs after this call.
     const syncTarget = (prefs.skipOpenProgressCheck || skipOpenSync || isPeekMode) ? null : await syncOnOpen(localProgress);
     if (syncTarget?.percentage != null) {
-      if (prefs.experimentalReader && _cxReader) {
+      if (_cxReader) {
         // CXReader: navigate by percentage — most reliable since DocFragment data can be
         // stale/mismatched from earlier sessions. Percentage scales linearly over spine count.
         await _cxReader.goToPct(syncTarget.percentage);
-        // goToPct only resolves to chapter level (page 1); fine-tune to the exact page
-        // within the chapter using the percentage formula.
+        // goToPct only resolves to chapter level (page 1); fine-tune to the exact page.
         _cxReader.seekToPercent(syncTarget.percentage);
-      } else
-      try {
-        // Any DocFragment-based xpointer — navigate to the correct spine item directly.
-        // External reader percentages use a different scale than epub.js locations, so
-        // using seekToPercentage(externalPct) reliably lands in the wrong position.
-        // For paragraph-level xpointers we also try a best-effort inline CFI first.
-        const dfMatch = syncTarget.progress?.match(/^\/body\/DocFragment\[(\d+)\]/);
-        if (dfMatch) {
-          const spineIdx  = parseInt(dfMatch[1]) - 1; // DocFragment is 1-based
-          const spineItem = book.spine.get(spineIdx);
-          if (spineItem?.href) {
-            // Try best-effort CFI from paragraph index: /body/p[M] → epubcfi(/6/N*2!/4/M*2)
-            // Skip CFI display when bionic is on — bionic transforms the DOM so epub.js
-            // toRange() will crash on any element-path CFI that no longer matches.
-            const paraMatch = !prefs.bionicReading && syncTarget.progress.match(/\/p\[(\d+)\]/);
-            let navigated = false;
-            if (paraMatch) {
-              const guessCfi = `epubcfi(/6/${(spineIdx + 1) * 2}!/4/${parseInt(paraMatch[1]) * 2})`;
-              console.log('[kosync] trying best-effort CFI', guessCfi);
-              try { await rendition?.display(guessCfi); navigated = true; } catch { navigated = false; }
-            }
-            if (!navigated) {
-              console.log('[kosync] navigating to spine item', spineIdx, spineItem.href, '(chapter start — no position recovery yet)');
-              console.log('[kosync] NOTE: bionic is', prefs.bionicReading ? 'ON' : 'OFF', '— will seek by pct after display if bionic');
-              await rendition?.display(spineItem.href);
-              const locAfterNav = rendition?.currentLocation();
-              console.log('[kosync] after display(href) cfi:', locAfterNav?.start?.cfi?.slice(0,80), 'pct:', ((locAfterNav?.start?.percentage||0)*100).toFixed(2)+'%');
-              if (prefs.bionicReading && book.locations.length() > 0) {
-                console.log('[kosync] bionic ON — doing seekToPercentage(', (syncTarget.percentage*100).toFixed(2)+'%', ') after chapter nav');
-                await seekToPercentage(syncTarget.percentage);
-              }
-            }
-          } else {
-            console.warn('[kosync] spine item not found for index', spineIdx, '— falling back to pct');
-            const key    = getLocsCacheKey();
-            const cached = localStorage.getItem(key);
-            if (cached) { try { book.locations.load(cached); } catch { localStorage.removeItem(key); } }
-            if (!book.locations.length()) {
-              await book.locations.generate(1000);
-              try { localStorage.setItem(key, book.locations.save()); } catch { /* quota */ }
-            }
-            if (book.locations.length() > 0) await seekToPercentage(syncTarget.percentage);
-          }
-        } else {
-          // No DocFragment info (no xpointer or unknown format) — fall back to percentage
-          const key    = getLocsCacheKey();
-          const cached = localStorage.getItem(key);
-          if (cached) { try { book.locations.load(cached); } catch { localStorage.removeItem(key); } }
-          if (!book.locations.length()) {
-            await book.locations.generate(1000);
-            try { localStorage.setItem(key, book.locations.save()); } catch { /* quota */ }
-          }
-          if (book.locations.length() > 0) await seekToPercentage(syncTarget.percentage);
-        }
-      } catch (e) { console.warn('[kosync] navigate failed:', e.message); }
-    } else if (prefs.experimentalReader && _cxReader && localProgress?.percentage > 0 && !isPeekMode) {
-      // CXReader, no sync jump: restore exact page first; fall back to % if page is out of range.
+      }
+    } else if (_cxReader && localProgress?.percentage > 0 && !isPeekMode) {
+      // CXReader, no sync jump: restore exact page first; fall back to % if out of range.
       // Skip in peek mode: peek never saves position.
       let exactRestored = false;
       try {
@@ -8001,63 +6864,18 @@ async function init() {
         }
       } catch { /* ignore */ }
       if (!exactRestored) _cxReader.seekToPercent(localProgress.percentage);
-    } else if (startCfiIsEpubcfi && localProgress?.percentage != null && book.locations.length() > 0) {
-      // No sync navigation occurred.  The CFI display in startRendition snaps to the page
-      // containing the saved element but can land a few pages behind when the CFI has a
-      // character offset (the element starts on an earlier page).  epub.js also silently
-      // re-paginates during the syncOnOpen await above (which provides the settle time).
-      // Advance page-by-page to correct — no display(cfi) here, so there is no p=1
-      // chapter-reload artifact that caused the old seekToPercentage to overshoot.
-      const targetPct = localProgress.percentage;
-      for (let i = 0; i < 15; i++) {
-        const loc2 = rendition?.currentLocation();
-        const cur2 = book.locations.percentageFromCfi(loc2?.start?.cfi || '') || 0;
-        if (cur2 >= targetPct - 0.005) break;
-        console.log('[pos] CFI undershoot +1 page', (cur2*100).toFixed(2)+'% → target', (targetPct*100).toFixed(2)+'%');
-        await rendition?.next();
-      }
     }
 
     // Capture final position after all navigation (local seek + sync) is complete.
-    // The `relocated` event is suppressed while isReady=false, so any navigation
-    // that happened above (seekToPercentage / sync jump) may not have updated
-    // currentCfi/currentPct yet — read them directly from the rendition now.
-    {
-      if (prefs.experimentalReader && _cxReader) {
-        // CXReader tracks its own position in the live paginator — read it directly.
-        // Do NOT fall through to localProgress.percentage: that is the DB value from before
-        // init started, and any navigation above (goToPct / seekToPercent) may have already
-        // moved to a different page within the chapter.  Using the stale DB value here
-        // overwrites the corrected pct and causes the wrong page to be re-saved on close,
-        // creating a self-reinforcing loop that always reopens at the wrong page.
-        currentCfi = _cxReader.makeCfi();
-        const p = _cxReader.makePct();
-        if (p > 0) currentPct = p;
-      } else {
-        const loc = rendition?.currentLocation();
-        if (loc?.start?.cfi) currentCfi = loc.start.cfi;
-        if (book.locations?.length() > 0) {
-          // Locations already generated (cached) — most accurate
-          const pct = book.locations.percentageFromCfi(currentCfi);
-          if (pct != null) currentPct = pct;
-        } else if (localProgress?.percentage > 0) {
-          // No locations cache — use server-saved percentage immediately.
-          // This is the most reliable fallback: it's our own DB value and is
-          // always available. epub.js returns 0 (not null) when locations aren't
-          // loaded, so we check this BEFORE loc.start.percentage to avoid 0 winning.
-          currentPct = localProgress.percentage;
-        } else if (syncTarget?.percentage != null) {
-          // Sync jump target — positions differed so user chose to jump here.
-          currentPct = syncTarget.percentage;
-        } else if (loc?.start?.percentage > 0) {
-          // epub.js estimate — only trust it when > 0 (0 means locations not loaded)
-          currentPct = loc.start.percentage;
-        } else if (loc?.start?.index != null) {
-          // Last resort: rough spine-position estimate
-          const total = book.spine?.spineItems?.length || book.spine?.length || 1;
-          currentPct = (loc.start.index + 1) / total;
-        }
-      }
+    // CXReader tracks its own position in the live paginator — read it directly.
+    // Do NOT fall through to localProgress.percentage: that is the DB value from before
+    // init started, and any navigation above (goToPct / seekToPercent) may have already
+    // moved to a different page within the chapter, so the stale DB value would overwrite
+    // the corrected pct and cause the wrong page to be re-saved on close.
+    if (_cxReader) {
+      currentCfi = _cxReader.makeCfi();
+      const p = _cxReader.makePct();
+      if (p > 0) currentPct = p;
     }
     console.log('[pos] final position before isReady cfi:', currentCfi.slice(0,60), 'pct:', (currentPct*100).toFixed(2)+'%');
     isReady = true;
@@ -8083,7 +6901,7 @@ async function init() {
     // Without this, annotationsCache is empty at jump time → scrollToAnnotation is never called
     // → CXReader lands on page 1 of the chapter instead of the annotated page.
     let _annotationsPreloaded = false;
-    if (_jumpCfi && prefs.experimentalReader && _cxReader) {
+    if (_jumpCfi && _cxReader) {
       await loadAnnotations(currentBook.id);
       _annotationsPreloaded = true;
     }
@@ -8097,7 +6915,7 @@ async function init() {
     // The paginator ran at opacity:0; on some mobile WebViews this causes the last
     // line of the first page to be clipped on first open. setLayout({}) re-runs the
     // paginator preserving position via fractional page index (see cxreader/index.js).
-    if (prefs.experimentalReader && _cxReader) {
+    if (_cxReader) {
       requestAnimationFrame(() => _cxReader.setLayout({}));
     }
     // Peek mode: always notify user that progress is not saved
@@ -8117,7 +6935,7 @@ async function init() {
     }
     // Immediately render correct pctBook (and other stats) into the status bar.
     // Without this, pctBook stays 0% until the next relocated event or 30s clock tick.
-    updateStatusBar(rendition?.currentLocation());
+    updateStatusBar();
   } catch (err) {
     _rafStop = true;
     console.error('[reader]', err);

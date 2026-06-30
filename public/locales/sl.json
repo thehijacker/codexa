@@ -616,8 +616,6 @@
   "reader.sb_online": "Povezava",
   "reader.sb_online_yes": "Povezan",
   "reader.sb_offline_yes": "Brez povezave",
-  "reader.sb_flow_reader": "Klasični bralnik (epub.js)",
-  "reader.sb_flow_reader_hint": "Preklopi na originalni epub.js bralnik. Knjiga se ob spremembi znova naloži.",
   "reader.page_turn_anim": "Animacija obračanja strani",
   "reader.page_turn_none": "Brez",
   "reader.page_turn_fade": "Zaton",

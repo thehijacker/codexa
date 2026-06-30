@@ -616,8 +616,6 @@
   "reader.sb_online": "Connexion",
   "reader.sb_online_yes": "En ligne",
   "reader.sb_offline_yes": "Hors ligne",
-  "reader.sb_flow_reader": "Lecteur classique (epub.js)",
-  "reader.sb_flow_reader_hint": "Utilise le moteur epub.js original. Le livre se recharge lors du changement.",
   "reader.page_turn_anim": "Animation de tournage de page",
   "reader.page_turn_none": "Aucune",
   "reader.page_turn_fade": "Fondu",

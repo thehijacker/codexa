@@ -618,8 +618,6 @@
   "reader.sb_online": "Connection",
   "reader.sb_online_yes": "Online",
   "reader.sb_offline_yes": "Offline",
-  "reader.sb_flow_reader": "Classic reader (epub.js)",
-  "reader.sb_flow_reader_hint": "Switch to the original epub.js reader engine. The book reloads on toggle.",
   "reader.page_turn_anim": "Page turn animation",
   "reader.page_turn_none": "None",
   "reader.page_turn_fade": "Fade",
