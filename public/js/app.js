@@ -6,6 +6,7 @@ import { initSettings } from './settings.js';
 import { initOpds } from './opds.js';
 import { requireAuth } from './api.js';
 import { flushProgressOutbox } from './progress-outbox.js';
+import { log } from './logger.js';
 
 if (!requireAuth()) {
   window.location.href = '/login.html';
@@ -64,7 +65,7 @@ syncOfflineClass();
 // (library.js fires it only after the API is confirmed reachable); 'online' is a
 // backup for LAN/desktop. Idempotent — safe to call repeatedly.
 function flushOfflineProgress() {
-  flushProgressOutbox().then(n => { if (n) console.log('[app] synced', n, 'offline progress entr' + (n === 1 ? 'y' : 'ies')); }).catch(() => {});
+  flushProgressOutbox().then(n => { if (n) log('[app] synced', n, 'offline progress entr' + (n === 1 ? 'y' : 'ies')); }).catch(() => {});
 }
 window.addEventListener('online', flushOfflineProgress);
 document.addEventListener('app:network-restored', flushOfflineProgress);

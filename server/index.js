@@ -18,6 +18,10 @@ const bookmarksRoutes    = require('./routes/bookmarks');
 const annotationsRoutes  = require('./routes/annotations');
 const statsRoutes        = require('./routes/stats');
 const bookorbitSync      = require('./services/bookorbitSync');
+const { installConsolePrefix } = require('./utils/logger');
+
+// Prefix every log line with a local timestamp + the current user (when known).
+installConsolePrefix();
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -84,6 +88,28 @@ app.use((req, res, next) => {
     }
   }
 
+  next();
+});
+
+// ── Debug flag injection ──────────────────────────────────────────────────────
+// Injects the DEBUG flag into HTML files (window.__DEBUG) and sw.js (__DEBUG).
+// Set DEBUG=true in .env to enable verbose frontend console logging.
+const CLIENT_DEBUG = process.env.DEBUG === 'true';
+const _htmlSnippet = `<script>window.__DEBUG=${CLIENT_DEBUG};</script>`;
+const _swSnippet   = `const __DEBUG=${CLIENT_DEBUG};\n`;
+
+app.use((req, res, next) => {
+  const filePath = path.resolve(SERVE_DIR, '.' + req.path);
+  if (!filePath.startsWith(SERVE_DIR) || !fs.existsSync(filePath)) return next();
+
+  if (req.path.endsWith('.html')) {
+    const html = fs.readFileSync(filePath, 'utf8').replace('<head>', '<head>\n  ' + _htmlSnippet);
+    return res.type('html').send(html);
+  }
+  if (req.path === '/sw.js') {
+    const js = fs.readFileSync(filePath, 'utf8');
+    return res.type('js').send(_swSnippet + js);
+  }
   next();
 });
 

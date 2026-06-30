@@ -1,7 +1,7 @@
 // Codexa Service Worker
 // Caches app shell for offline use. EPUBs are cached on demand in BOOKS_CACHE.
 
-const CACHE_VERSION = 'br-v20260630009';
+const CACHE_VERSION = 'br-v202606300112';
 const BOOKS_CACHE   = 'codexa-books-v2';
 const APP_SHELL = [
   '/',
@@ -155,7 +155,7 @@ self.addEventListener('install', (e) => {
 
 // ── Activate: remove old app-shell caches (preserve books cache) ──────────────
 self.addEventListener('activate', (e) => {
-  console.log('[sw] activate version:', CACHE_VERSION);
+  if (__DEBUG) console.log('[sw] activate version:', CACHE_VERSION);
   e.waitUntil(
     caches.keys().then(keys =>
       Promise.all(
@@ -171,7 +171,7 @@ self.addEventListener('activate', (e) => {
 // ── Fetch: books cache → network, cache-first for app shell ──────────────────
 let _swVersionLogged = false;
 self.addEventListener('fetch', (e) => {
-  if (!_swVersionLogged) { _swVersionLogged = true; console.log('[sw] fetch version:', CACHE_VERSION); }
+  if (__DEBUG && !_swVersionLogged) { _swVersionLogged = true; console.log('[sw] fetch version:', CACHE_VERSION); }
   const url = new URL(e.request.url);
 
   // Intercept EPUB file requests — serve from books cache when available
@@ -278,7 +278,7 @@ async function handleCacheBook(e) {
   }
 
   try {
-    console.log('[sw] CACHE_BOOK start bookId:', bookId);
+    if (__DEBUG) console.log('[sw] CACHE_BOOK start bookId:', bookId);
     const res = await fetch(`/api/books/${bookId}/file`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -321,7 +321,7 @@ async function handleCacheBook(e) {
       } catch { /* cover caching is non-critical */ }
     }
 
-    console.log('[sw] CACHE_BOOK done bookId:', bookId);
+    if (__DEBUG) console.log('[sw] CACHE_BOOK done bookId:', bookId);
     notify('CACHE_BOOK_DONE');
   } catch (err) {
     console.error('[sw] CACHE_BOOK error bookId:', bookId, err.message);

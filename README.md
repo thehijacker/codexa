@@ -136,6 +136,7 @@ All configuration is via environment variables:
 | `PORT` | no | `3000` | TCP port the server listens on |
 | `DATA_DIR` | no | `./data` | Path to persistent data (books, covers, fonts, DB) |
 | `CORS_ORIGIN` | no | _(same-origin)_ | Allowed CORS origin, e.g. `https://books.example.com` |
+| `DEBUG` | no | `false` | Set to `true` to enable verbose browser console logging (all `[reader]`, `[api]`, `[kosync]`, etc. messages). Off by default — only warnings and errors are shown. |
 
 ---
 

@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { getDb } = require('../db');
+const { runWithUser } = require('../utils/logger');
 
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
@@ -20,7 +21,10 @@ function authenticateToken(req, res, next) {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
     req.user = payload;
-    next();
+    req.user.username = user.username; // expose for handlers + logging
+    // Run the rest of the request within the user's logging context so every
+    // console line emitted while handling it is tagged with this username.
+    return runWithUser(user.username, () => next());
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }

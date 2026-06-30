@@ -13,6 +13,7 @@
  * the server at flush time.
  */
 import { apiFetch } from './api.js';
+import { log, warn } from './logger.js';
 
 const OUTBOX_KEY = 'br_progress_outbox';
 const EPS = 0.005;
@@ -113,10 +114,10 @@ export async function flushProgressOutbox() {
 
         delete map[id];
         synced++;
-        console.log('[progress-outbox] flushed bookId', e.bookId, 'pct', Math.round(e.pct * 100) + '%');
+        log('[progress-outbox] flushed bookId', e.bookId, 'pct', Math.round(e.pct * 100) + '%');
       } catch (err) {
         // Still offline / server unreachable for this entry — keep it for next flush.
-        console.warn('[progress-outbox] flush deferred for bookId', e.bookId, err?.message || err);
+        warn('[progress-outbox] flush deferred for bookId', e.bookId, err?.message || err);
       }
     }
   } finally {

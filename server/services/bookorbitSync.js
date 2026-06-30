@@ -19,6 +19,7 @@
 
 const crypto = require('crypto');
 const { getDb } = require('../db');
+const { runWithUser } = require('../utils/logger');
 
 const TIMEOUT_MS = 15000;
 const PACE_MS = 150;        // min spacing between API calls (be gentle on the throttler)
@@ -408,35 +409,39 @@ async function runSync(userId, opts = {}) {
   const ctx = getContext(userId);
   if (!ctx) return;
   running.add(userId);
-  try {
-    const db = getDb();
-    const books = await resolveBooks(db, userId, ctx, opts);
-    if (books.length === 0) {
-      if (opts.bookId != null) console.log(`[bookorbit] book ${opts.bookId} is not in your BookOrbit library (skipping)`);
-      else console.log(`[bookorbit] user ${userId}: no books matched to this BookOrbit server`);
-      return;
-    }
-    // Verify auth up front so a bad password fails loudly once, not per book.
-    try { if (!tokens.has(userId)) await login(userId, ctx); }
-    catch (e) { console.warn(`[bookorbit] user ${userId}: ${e.message}`); return; }
-
-    for (const m of books) {
-      try {
-        const state = db.prepare('SELECT * FROM bookorbit_sync_state WHERE user_id = ? AND book_id = ?').get(userId, m.bookId) || {};
-        await syncAnnotations(userId, ctx, m, state);
-        await uploadSessions(userId, ctx, m, state);
-        await syncBookState(userId, ctx, m, state);
-      } catch (e) {
-        console.warn(`[bookorbit] book ${m.bookId}:`, e.message);
+  const username = getDb().prepare('SELECT username FROM users WHERE id = ?').get(userId)?.username || `user${userId}`;
+  // Tag every log line emitted by this background sweep with the user it runs for.
+  await runWithUser(username, async () => {
+    try {
+      const db = getDb();
+      const books = await resolveBooks(db, userId, ctx, opts);
+      if (books.length === 0) {
+        if (opts.bookId != null) console.log(`[bookorbit] book ${opts.bookId} is not in your BookOrbit library (skipping)`);
+        else console.log(`[bookorbit] user ${userId}: no books matched to this BookOrbit server`);
+        return;
       }
+      // Verify auth up front so a bad password fails loudly once, not per book.
+      try { if (!tokens.has(userId)) await login(userId, ctx); }
+      catch (e) { console.warn(`[bookorbit] user ${userId}: ${e.message}`); return; }
+
+      for (const m of books) {
+        try {
+          const state = db.prepare('SELECT * FROM bookorbit_sync_state WHERE user_id = ? AND book_id = ?').get(userId, m.bookId) || {};
+          await syncAnnotations(userId, ctx, m, state);
+          await uploadSessions(userId, ctx, m, state);
+          await syncBookState(userId, ctx, m, state);
+        } catch (e) {
+          console.warn(`[bookorbit] book ${m.bookId}:`, e.message);
+        }
+      }
+      if (opts.bookId == null) console.log(`[bookorbit] user ${userId}: full sync complete (${books.length} books)`);
+      else console.log(`[bookorbit] user ${userId}: synced book ${opts.bookId}`);
+    } catch (e) {
+      console.warn(`[bookorbit] user ${userId} sync error:`, e.message);
+    } finally {
+      running.delete(userId);
     }
-    if (opts.bookId == null) console.log(`[bookorbit] user ${userId}: full sync complete (${books.length} books)`);
-    else console.log(`[bookorbit] user ${userId}: synced book ${opts.bookId}`);
-  } catch (e) {
-    console.warn(`[bookorbit] user ${userId} sync error:`, e.message);
-  } finally {
-    running.delete(userId);
-  }
+  });
 }
 
 // bookId scopes the sync to one book; omit it for a full sweep.

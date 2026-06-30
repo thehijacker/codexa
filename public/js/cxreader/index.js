@@ -6,6 +6,7 @@ import { ChapterRenderer }   from './renderer.js';
 import { ColumnPaginator }   from './column-paginator.js';
 import { CbzParser }         from './cbz-parser.js';
 import { FixedPagePaginator } from './fixed-paginator.js';
+import { log } from '../logger.js';
 
 export class CXReader {
   constructor() {
@@ -121,11 +122,11 @@ export class CXReader {
   }
 
   async open(arrayBuffer) {
-    console.log('[CXReader] open() parsing...');
+    log('[CXReader] open() parsing...');
     const zip = await JSZip.loadAsync(arrayBuffer);
     this._isCbz = !zip.file('META-INF/container.xml');
     if (this._isCbz) {
-      console.log('[CXReader] open() detected CBZ');
+      log('[CXReader] open() detected CBZ');
       this._book = await new CbzParser().parse(zip);
       this._renderer = null;
     } else {
@@ -143,7 +144,7 @@ export class CXReader {
     let cum = 0;
     for (const w of this._weights) { this._cumWts.push(cum); cum += w; }
 
-    console.log('[CXReader] open() done:', this._book.metadata.title);
+    log('[CXReader] open() done:', this._book.metadata.title);
     return this._book;
   }
 
@@ -154,7 +155,7 @@ export class CXReader {
     this._readerCss   = readerCss;
     this._spineIdx    = Math.max(0, Math.min(spineIdx, this._book.spine.length - 1));
     const spineItem   = this._book.spine[this._spineIdx];
-    console.log(`[CXReader] renderChapter ${this._spineIdx}: ${spineItem.href}`);
+    log(`[CXReader] renderChapter ${this._spineIdx}: ${spineItem.href}`);
 
     if (this._isCbz) {
       this._renderCbzItem(this._spineIdx);
@@ -174,7 +175,7 @@ export class CXReader {
     if (!this._book || !this._containerEl) return;
     const idx = Math.max(0, Math.min(spineIdx, this._book.spine.length - 1));
     this._spineIdx = idx;
-    console.log(`[CXReader] goToSpineItem ${idx}`);
+    log(`[CXReader] goToSpineItem ${idx}`);
 
     if (this._isCbz) {
       this._renderCbzItem(idx);
@@ -273,7 +274,7 @@ export class CXReader {
     // At last page — advance to next chapter
     if (this._spineIdx + 1 < this._book.spine.length) {
       this._spineIdx++;
-      console.log(`[CXReader] chapter → ${this._spineIdx}`);
+      log(`[CXReader] chapter → ${this._spineIdx}`);
       const iframe = await this._renderer.render(
         this._book.spine[this._spineIdx], this._containerEl, this._readerCss, this._fixedLayoutOpts()
       );
@@ -298,7 +299,7 @@ export class CXReader {
     // At first page — go to previous chapter's last page
     if (this._spineIdx > 0) {
       this._spineIdx--;
-      console.log(`[CXReader] chapter ← ${this._spineIdx}`);
+      log(`[CXReader] chapter ← ${this._spineIdx}`);
       const iframe = await this._renderer.render(
         this._book.spine[this._spineIdx], this._containerEl, this._readerCss, this._fixedLayoutOpts()
       );
@@ -418,7 +419,7 @@ export class CXReader {
       this._book._blobUrls.clear();
     }
     this._paginator = null;
-    console.log('[CXReader] destroy()');
+    log('[CXReader] destroy()');
   }
 
   // ── Private ───────────────────────────────────────────────────────────────────

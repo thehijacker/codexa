@@ -3,6 +3,7 @@
  * Reads the JWT from localStorage and attaches it to every request.
  */
 import { t } from './i18n.js';
+import { log } from './logger.js';
 
 const API_BASE = '/api';
 
@@ -35,12 +36,12 @@ export async function apiFetch(path, options = {}) {
   // old Chromium-based WebViews (inkPalmPlus/zxh_wv_te Android 11).
   // Timeouts for critical calls are handled via withTimeout() (Promise.race +
   // setTimeout) in the caller, or via XHR with native xhr.timeout.
-  console.log('[api] fetch>', path);
+  log('[api] fetch>', path);
   const res = await fetch(`${API_BASE}${path}`, {
     ...fetchOptions,
     headers,
   });
-  console.log('[api] fetch<', path, res.status);
+  log('[api] fetch<', path, res.status);
 
   // If the server sends 401 AND we had a token, it means the session expired.
   // If there was no token (e.g. a login attempt with wrong credentials), fall

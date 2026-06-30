@@ -2,6 +2,8 @@
 // Parses an EPUB3/EPUB2 arrayBuffer using JSZip (global) and DOMParser.
 // Returns a parsed book object usable by the renderer and paginator.
 
+import { log } from '../logger.js';
+
 export class EpubParser {
   constructor() {
     this._zip       = null;
@@ -89,8 +91,8 @@ export class EpubParser {
       toc = await this._parseNcx(ncxItem.absPath);
     }
 
-    if (isFixedLayout) console.log(`[CXReader] fixed-layout: ${pageWidth}×${pageHeight}`);
-    console.log(`[CXReader] parsed: "${metadata.title}" by "${metadata.author}" | spine=${spine.length} toc=${toc.length}`);
+    if (isFixedLayout) log(`[CXReader] fixed-layout: ${pageWidth}×${pageHeight}`);
+    log(`[CXReader] parsed: "${metadata.title}" by "${metadata.author}" | spine=${spine.length} toc=${toc.length}`);
     return { spine, manifest, metadata, toc, opfBase: this._opfBase, spineWeights, isFixedLayout, pageWidth, pageHeight };
   }
 

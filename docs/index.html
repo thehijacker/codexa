@@ -497,6 +497,12 @@ volumes:
               <td>same-origin</td>
               <td>Allowed CORS origin, e.g. <code>https://books.example.com</code>. Only needed when the app is served from a different origin than the API.</td>
             </tr>
+            <tr>
+              <td><code>DEBUG</code></td>
+              <td>No</td>
+              <td><code>false</code></td>
+              <td>Set to <code>true</code> to enable verbose browser console logging. When enabled, all internal messages (<code>[reader]</code>, <code>[api]</code>, <code>[kosync]</code>, <code>[CXReader]</code>, etc.) appear in DevTools. Off by default — only warnings and errors are shown.</td>
+            </tr>
           </tbody>
         </table>
       </div>

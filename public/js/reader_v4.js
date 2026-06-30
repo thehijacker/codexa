@@ -3,10 +3,11 @@ import { toast } from './ui.js';
 import { t, initI18n, applyTranslations, getCurrentLang } from './i18n.js';
 import { isBookDownloaded, downloadBook, fetchOfflineBookFile, getBookMeta, saveBookMeta } from './offline.js';
 import { queueProgress, clearProgress, flushProgressOutbox } from './progress-outbox.js';
+import { log, warn } from './logger.js';
 
 const READER_BUILD = 'br-v89-cxreader-only';
 const _i18nReady = initI18n();
-console.log('[codexa] reader build', READER_BUILD);
+log('[codexa] reader build', READER_BUILD);
 
 // Module-level detection (mirrors init()'s _legacyWebView) so module-scope code can guard
 // features that break Chrome 83 Android WebView.
@@ -697,7 +698,7 @@ function makeBionicSafeCfi(cfi) {
       let   start = inner.slice(c1 + 1, c2);
       start = start.replace(/:(\d+)$/, '');                                           // strip :charOffset
       start = start.replace(/\/(\d+)$/, (m, n) => parseInt(n) % 2 === 1 ? '' : m);   // strip odd (text-node) step
-      console.log('[bionic] makeBionicSafeCfi: range CFI base:', base, 'start stripped to:', start);
+      log('[bionic] makeBionicSafeCfi: range CFI base:', base, 'start stripped to:', start);
       return `epubcfi(${base}${start})`;
     }
   }
@@ -729,18 +730,18 @@ function findSpineItemForHref(href) {
 function applyBionicToDocument(doc) {
   if (!prefs.bionicReading || !doc?.body) return;
   if (doc.documentElement?.dataset?.brBionicApplied === '1') {
-    console.log('[bionic] applyBionicToDocument: already applied, skipping');
+    log('[bionic] applyBionicToDocument: already applied, skipping');
     return;
   }
   const nodes = collectBionicTextNodes(doc);
-  console.log('[bionic] applyBionicToDocument: transforming', nodes.length, 'text nodes in', doc.location?.href || '(unknown)');
+  log('[bionic] applyBionicToDocument: transforming', nodes.length, 'text nodes in', doc.location?.href || '(unknown)');
   nodes.forEach(node => {
     const frag = doc.createDocumentFragment();
     appendBionicTextFragment(doc, frag, node.nodeValue || '');
     node.parentNode?.replaceChild(frag, node);
   });
   if (doc.documentElement?.dataset) doc.documentElement.dataset.brBionicApplied = '1';
-  console.log('[bionic] applyBionicToDocument: done');
+  log('[bionic] applyBionicToDocument: done');
 }
 
 
@@ -814,7 +815,7 @@ async function loadCustomFonts() {
     }
     hostStyle.textContent = fontFaceCSS;
   } catch (err) {
-    console.warn('[reader] Custom fonts not loaded:', err.message);
+    warn('[reader] Custom fonts not loaded:', err.message);
   }
 }
 
@@ -1220,14 +1221,14 @@ function _fireSleepTimer(action) {
 // ── Wake Lock (keep screen always on) ───────────────────────────────────────
 let wakeLock = null;
 async function acquireWakeLock() {
-  console.log('[reader] acquireWakeLock keepScreenOn:', prefs.keepScreenOn, 'hasAPI:', 'wakeLock' in navigator);
+  log('[reader] acquireWakeLock keepScreenOn:', prefs.keepScreenOn, 'hasAPI:', 'wakeLock' in navigator);
   if (!prefs.keepScreenOn || !('wakeLock' in navigator)) return;
-  console.log('[reader] wakeLock requesting screen...');
+  log('[reader] wakeLock requesting screen...');
   try {
     wakeLock = await navigator.wakeLock.request('screen');
-    console.log('[reader] wakeLock acquired');
+    log('[reader] wakeLock acquired');
   } catch (e) {
-    console.warn('[reader] wakeLock error:', e?.message);
+    warn('[reader] wakeLock error:', e?.message);
   }
 }
 async function releaseWakeLock() {
@@ -2732,7 +2733,7 @@ function buildTocRecursive(toc, depth, fragment) {
         const displayTarget = spineItem?.index != null
           ? (anchor && depth > 1 ? `${spineItem.href}#${anchor}` : spineItem.href)
           : item.href;
-        console.log(`[nav] TOC | depth=${depth} anchor="${anchor||''}" target=${JSON.stringify(displayTarget)}`);
+        log(`[nav] TOC | depth=${depth} anchor="${anchor||''}" target=${JSON.stringify(displayTarget)}`);
         if (_cxReader) await _cxReader.goToHref(displayTarget || item.href);
       }, 80);
     });
@@ -2782,7 +2783,7 @@ function updateActiveTocItem(href) {
         return;
       }
     }
-    console.warn('[toc-debug] NO MATCH for spine href:', href,
+    warn('[toc-debug] NO MATCH for spine href:', href,
       '| base:', base,
       '\nTOC hrefs:', tocFlatItems.map(t => t.href).join(' | '));
   }
@@ -4198,7 +4199,7 @@ function initSettingsUi() {
   });
   document.getElementById('disable-justify-toggle')?.addEventListener('change', (e) => {
     prefs.disableJustify = e.target.checked;
-    console.log('[justify] toggle changed → disableJustify:', prefs.disableJustify);
+    log('[justify] toggle changed → disableJustify:', prefs.disableJustify);
     reapplyStyles();
     // Debug: log computed text-align on first <p> in iframe after styles applied
     setTimeout(() => {
@@ -4207,24 +4208,24 @@ function initSettingsUi() {
         if (doc) {
           const p = doc.querySelector('p');
           const styleEl = doc.getElementById('br-custom-styles');
-          console.log('[justify] br-custom-styles in iframe:', styleEl ? styleEl.textContent.slice(0, 300) : '(not found)');
+          log('[justify] br-custom-styles in iframe:', styleEl ? styleEl.textContent.slice(0, 300) : '(not found)');
           if (p) {
             const computed = doc.defaultView?.getComputedStyle(p);
-            console.log('[justify] first <p> computed text-align:', computed?.textAlign);
-            console.log('[justify] first <p> inline style text-align:', p.style.textAlign);
+            log('[justify] first <p> computed text-align:', computed?.textAlign);
+            log('[justify] first <p> inline style text-align:', p.style.textAlign);
             // Log all stylesheets affecting the iframe
             const sheets = [...(doc.styleSheets || [])];
             sheets.forEach((sheet, i) => {
               try {
                 const rules = [...sheet.cssRules].map(r => r.cssText).join('\n');
                 if (rules.includes('text-align') || rules.includes('justify')) {
-                  console.log(`[justify] stylesheet[${i}] href:`, sheet.href || '(inline)', '\n', rules.slice(0, 500));
+                  log(`[justify] stylesheet[${i}] href:`, sheet.href || '(inline)', '\n', rules.slice(0, 500));
                 }
               } catch { /* cross-origin */ }
             });
           }
         }
-      } catch (e) { console.warn('[justify] debug error:', e.message); }
+      } catch (e) { warn('[justify] debug error:', e.message); }
     }, 200);
     persistPrefs();
   });
@@ -4564,7 +4565,7 @@ function startPeriodicSync() {
   stopPeriodicSync();
   syncIntervalTimer = setInterval(() => {
     if (!isReady || !currentBook) return;
-    console.log('[kosync] periodic local save (4 min)');
+    log('[kosync] periodic local save (4 min)');
     void saveProgress({ allowRemote: false });
   }, SYNC_INTERVAL_MS);
 }
@@ -4575,7 +4576,7 @@ function scheduleDebouncedSync() {
   syncDebounceTimer = setTimeout(() => {
     syncDebounceTimer = null;
     if (!isReady || !currentBook) return;
-    console.log('[kosync] debounced local save (60s inactivity)');
+    log('[kosync] debounced local save (60s inactivity)');
     void saveProgress({ allowRemote: false });
   }, SYNC_DEBOUNCE_MS);
 }
@@ -4586,7 +4587,7 @@ async function saveProgress({ forceRemote = false, allowRemote = true, inSession
   const cfi = currentCfi || '';
   const pct = currentPct > 0 ? currentPct : lastKnownGoodPct;
   if (!cfi && pct === 0) return;
-  console.log('[pos] SAVE cfi:', cfi.slice(0,60), 'pct:', (pct*100).toFixed(2)+'%');
+  log('[pos] SAVE cfi:', cfi.slice(0,60), 'pct:', (pct*100).toFixed(2)+'%');
   const docKey = externalDocKey();
   const posChanged = cfi !== openCfi;
   // Skip remote push when position hasn't moved since the last successful remote sync.
@@ -4599,9 +4600,9 @@ async function saveProgress({ forceRemote = false, allowRemote = true, inSession
   const wouldGoBackwards = !forced && pct < bestKnownRemotePct - 0.005;
   const shouldPushKosync = shouldPushRemote && !wouldGoBackwards;
   if (wouldGoBackwards && shouldPushRemote) {
-    console.log('[kosync] saveProgress: skipping kosync push — would go backwards:', Math.round(pct * 100) + '% < known best ' + Math.round(bestKnownRemotePct * 100) + '%');
+    log('[kosync] saveProgress: skipping kosync push — would go backwards:', Math.round(pct * 100) + '% < known best ' + Math.round(bestKnownRemotePct * 100) + '%');
   }
-  console.log('[kosync] saveProgress docKey:', docKey, 'cfi:', cfi.slice(0, 40), 'pct:', Math.round(pct * 100) + '%', shouldPushKosync ? '' : (alreadySynced ? '(already synced)' : wouldGoBackwards ? '(would go backwards)' : '(no remote push)'));
+  log('[kosync] saveProgress docKey:', docKey, 'cfi:', cfi.slice(0, 40), 'pct:', Math.round(pct * 100) + '%', shouldPushKosync ? '' : (alreadySynced ? '(already synced)' : wouldGoBackwards ? '(would go backwards)' : '(no remote push)'));
   // Local save: use force:true when the reader is closing (forceLocal) or the user is force-pushing
   // backwards (forced).  The server's high-water mark only makes sense for passive cross-device
   // updates — the active reader always knows the user's real current page.
@@ -4726,21 +4727,21 @@ function showSyncDialog(best, localPct, localTime) {
 // Called AFTER the rendition is visible so the user sees the book while deciding.
 async function syncOnOpen(localProgress) {
   const docKey = externalDocKey();
-  console.log('[kosync] syncOnOpen docKey:', docKey);
+  log('[kosync] syncOnOpen docKey:', docKey);
   const [extResult, intResult] = await Promise.allSettled([
     fetchRemoteProgress(docKey),
     fetchInternalProgress(docKey),
   ]);
   const ext = extResult.status === 'fulfilled' ? extResult.value : null;
   const int = intResult.status === 'fulfilled' ? intResult.value : null;
-  console.log('[kosync] remote:', ext, 'internal:', int);
+  log('[kosync] remote:', ext, 'internal:', int);
 
   // Pick the freshest remote source
   let best = null;
   if (ext?.progress) best = ext;
   if (int?.progress && (!best || (int.timestamp || 0) > (best.timestamp || 0))) best = int;
   if (!best?.progress) {
-    console.log('[kosync] no remote progress found');
+    log('[kosync] no remote progress found');
     return null;
   }
 
@@ -4754,13 +4755,13 @@ async function syncOnOpen(localProgress) {
   const localPct  = localProgress?.percentage  || 0;
   const localTime = localProgress?.updated_at  || 0;
   const bestTime  = best.timestamp             || 0;
-  console.log('[kosync] best:', best.device, Math.round((best.percentage||0)*100)+'%', 'ts:', bestTime, 'localTime:', localTime);
+  log('[kosync] best:', best.device, Math.round((best.percentage||0)*100)+'%', 'ts:', bestTime, 'localTime:', localTime);
 
   // Always advance the high-water mark; ensures we never push backwards later
   const remoteHighWater = Math.max(localPct, best.percentage || 0);
   if (remoteHighWater > bestKnownRemotePct) {
     bestKnownRemotePct = remoteHighWater;
-    console.log('[kosync] bestKnownRemotePct →', Math.round(bestKnownRemotePct * 100) + '%');
+    log('[kosync] bestKnownRemotePct →', Math.round(bestKnownRemotePct * 100) + '%');
   }
 
   // If the remote xpointer exactly matches our last-pushed xpointer, both readers
@@ -4773,7 +4774,7 @@ async function syncOnOpen(localProgress) {
   // In that case set localXPointer to null so we fall through to the pct check.
   const localXPointer = (best !== int) ? (int?.progress || null) : null;
   const xpointerMatch = !!(localXPointer && best.progress && localXPointer === best.progress);
-  console.log('[kosync] xpointerMatch:', xpointerMatch, 'local:', localXPointer, 'remote:', best.progress);
+  log('[kosync] xpointerMatch:', xpointerMatch, 'local:', localXPointer, 'remote:', best.progress);
 
   const pctDiffers = Math.abs((best.percentage || 0) - localPct) > 0.01;
   // Never silently jump backwards — only prompt when the remote is ahead.
@@ -4804,7 +4805,7 @@ async function networkRestoreSync() {
     const syncTarget = await syncOnOpen(localProgress);
     if (syncTarget?.percentage == null && !syncTarget?.progress) return;
     if (_cxReader && syncTarget?.percentage != null) _cxReader.seekToPercent(syncTarget.percentage);
-  } catch (e) { console.warn('[kosync] networkRestoreSync failed:', e.message); }
+  } catch (e) { warn('[kosync] networkRestoreSync failed:', e.message); }
 }
 window.__codexaNetworkRestore = () => triggerNetworkRestore('native');
 
@@ -4816,7 +4817,7 @@ function triggerNetworkRestore(reason) {
   const now = Date.now();
   if (now - _lastNetRestore < 3000) return; // coalesce near-simultaneous triggers
   _lastNetRestore = now;
-  console.log('[kosync] networkRestore trigger:', reason);
+  log('[kosync] networkRestore trigger:', reason);
   networkRestoreSync().catch(() => {});
 }
 
@@ -4880,7 +4881,7 @@ function _cxRelocatedHandler(e) {
   }
   // Feed the chapter page-count cache so bookPage / timeLeftBook estimates improve over time
   if (pageCount > 0) chapPageCache[spineIndex] = pageCount;
-  console.log(`[CXReader] relocated spine=${spineIndex} page=${page}/${pageCount} pct=${(currentPct*100).toFixed(1)}%`);
+  log(`[CXReader] relocated spine=${spineIndex} page=${page}/${pageCount} pct=${(currentPct*100).toFixed(1)}%`);
   trackReadingSpeed();
   renderStatusSlots();
   updateActiveTocItem(href);
@@ -5192,7 +5193,7 @@ async function startCXRendition(displayCfi = null) {
     await _cxReader.renderChapter(_cxStartIdx, viewer, readerCss);
     applyHeaderBtnVisibility();
 
-    console.log('[CXReader] chapter 0 rendered');
+    log('[CXReader] chapter 0 rendered');
   } catch (err) {
     console.error('[CXReader] startCXRendition failed:', err);
     const errEl = document.createElement('div');
@@ -5770,9 +5771,9 @@ async function startStatsSession(bookId) {
     });
     statsSessionId = res?.id || null;
     sessionPageCount = 0;
-    console.log('[stats] session started id:', statsSessionId);
+    log('[stats] session started id:', statsSessionId);
   } catch (e) {
-    console.warn('[stats] failed to start session:', e.message);
+    warn('[stats] failed to start session:', e.message);
   }
 }
 
@@ -5808,7 +5809,7 @@ async function endStatsSession() {
       body: JSON.stringify({ end_ts: Math.floor(Date.now() / 1000), pages_nav: pgs }),
     });
   } catch (e) {
-    console.warn('[stats] failed to end session:', e.message);
+    warn('[stats] failed to end session:', e.message);
   }
 }
 
@@ -6508,20 +6509,20 @@ async function init() {
     }).catch(() => {});
   }
 
-  console.log('[reader] UA:', navigator.userAgent.slice(0, 200));
-  console.log('[reader] bookId:', bookId, 'online:', navigator.onLine);
+  log('[reader] UA:', navigator.userAgent.slice(0, 200));
+  log('[reader] bookId:', bookId, 'online:', navigator.onLine);
 
   const _chromeMatch = /Chrome\/(\d+)/.exec(navigator.userAgent);
   const _chromeMajor = _chromeMatch ? parseInt(_chromeMatch[1]) : 999;
   const _legacyWebView = /\bwv\b/.test(navigator.userAgent) && _chromeMajor < 90;
-  if (_legacyWebView) console.log('[reader] legacyWebView Chrome/' + _chromeMajor);
+  if (_legacyWebView) log('[reader] legacyWebView Chrome/' + _chromeMajor);
 
   // Always inherit library e-ink setting so reader opens in e-ink when library is in e-ink mode
   if (localStorage.getItem('br_library_theme') === 'eink' ||
       (typeof window.AndroidCodexa?.isEinkMode === 'function' && window.AndroidCodexa.isEinkMode())) {
     prefs.eink = true;
   }
-  console.log('[reader] theme:', prefs.theme, 'eink:', prefs.eink);
+  log('[reader] theme:', prefs.theme, 'eink:', prefs.eink);
   applyUiTheme();
   applyPageShadow();
   applyAutoHide();
@@ -6535,11 +6536,11 @@ async function init() {
     await loadCustomFonts().catch(() => {});
   }
 
-  console.log('[reader] initSettingsUi...');
+  log('[reader] initSettingsUi...');
   initSettingsUi();
-  console.log('[reader] applyVolumeKeyMode...');
+  log('[reader] applyVolumeKeyMode...');
   applyVolumeKeyMode(prefs.volumeKeysEnabled);
-  console.log('[reader] isAndroidApp:', isAndroidApp(), 'setReaderMode:', !!window.AndroidCodexa?.setReaderMode);
+  log('[reader] isAndroidApp:', isAndroidApp(), 'setReaderMode:', !!window.AndroidCodexa?.setReaderMode);
   if (prefs.lockPortrait) void applyPortraitLock(true);
 
   // rAF heartbeat: on some e-ink WebViews Chromium throttles setTimeout when no
@@ -6566,28 +6567,28 @@ async function init() {
     return Promise.race([
       promise,
       new Promise((_, reject) => setTimeout(() => {
-        console.warn('[reader] withTimeout fired', ms, 'ms');
+        warn('[reader] withTimeout fired', ms, 'ms');
         reject(new Error('timeout ' + ms + 'ms'));
       }, ms)),
     ]);
   }
 
   // ── Book metadata ──────────────────────────────────────────────────────────
-  console.log('[reader] loading book metadata...');
+  log('[reader] loading book metadata...');
   try {
     loadingMsg.textContent = t('reader.loading_book');
     if (_legacyWebView) {
       // Legacy path (br-v51 pattern): network first → IDB only as offline fallback.
       // IDB-first hangs on old WebViews; apiFetch is reliable.
-      console.log('[reader] metadata: network-first (legacy)');
+      log('[reader] metadata: network-first (legacy)');
       try {
         currentBook = await apiFetch(`/books/${bookId}`);
-        console.log('[reader] book metadata from network:', currentBook.title);
+        log('[reader] book metadata from network:', currentBook.title);
       } catch {
         const _meta = await getBookMeta(Number(bookId));
         if (!_meta) throw new Error(t('reader.err_no_book'));
         currentBook = _meta;
-        console.log('[reader] book metadata from IDB (offline):', currentBook.title);
+        log('[reader] book metadata from IDB (offline):', currentBook.title);
       }
     } else {
       // Modern path: IDB first (fast offline start) → network fallback.
@@ -6598,29 +6599,29 @@ async function init() {
         );
         _localMeta = await Promise.race([getBookMeta(Number(bookId)), _idbTimeout]);
       } catch (e) {
-        console.warn('[reader] getBookMeta failed (' + (e?.message || e) + '), using network');
+        warn('[reader] getBookMeta failed (' + (e?.message || e) + '), using network');
       }
       // Prefer IDB when it has a usable KOSync hash (avoids stale-hash KOSync issue).
       // Otherwise fetch from network and use IDB as offline fallback if network fails.
       if (_localMeta && (_localMeta.file_hash_md5 || _localMeta.kosync_hash)) {
         currentBook = _localMeta;
-        console.log('[reader] book metadata from IndexedDB:', currentBook.title);
+        log('[reader] book metadata from IndexedDB:', currentBook.title);
       } else {
-        console.log('[reader] fetching book metadata from network...');
+        log('[reader] fetching book metadata from network...');
         const _tok = getToken();
         try {
           const _res = await fetch('/api/books/' + bookId, {
             headers: Object.assign({ Accept: 'application/json' }, _tok ? { Authorization: 'Bearer ' + _tok } : {}),
           });
-          console.log('[reader] fetch status:', _res.status);
+          log('[reader] fetch status:', _res.status);
           if (!_res.ok) throw new Error('HTTP ' + _res.status);
           currentBook = await _res.json();
-          console.log('[reader] book metadata from network:', currentBook.title);
+          log('[reader] book metadata from network:', currentBook.title);
           saveBookMeta(currentBook).catch(() => {});
         } catch (_netErr) {
           if (_localMeta) {
             currentBook = _localMeta;
-            console.log('[reader] network failed, using IDB fallback:', currentBook.title);
+            log('[reader] network failed, using IDB fallback:', currentBook.title);
           } else {
             throw _netErr;
           }
@@ -6641,24 +6642,24 @@ async function init() {
   }
 
   // ── EPUB file ──────────────────────────────────────────────────────────────
-  console.log('[reader] loading epub...');
+  log('[reader] loading epub...');
   let arrayBuffer;
   try {
     _rafStop = true; // stop dots — show progress % for network downloads
     loadingMsg.textContent = t('reader.loading_file');
     if (_legacyWebView) {
       // Legacy path (br-v51 pattern): network first → CacheStorage only as offline fallback.
-      console.log('[reader] epub: network-first (legacy)');
+      log('[reader] epub: network-first (legacy)');
       try {
         const _legRes = await fetch(`/api/books/${bookId}/file`, {
           headers: { Authorization: `Bearer ${getToken()}` },
         });
         if (!_legRes.ok) throw new Error(`HTTP ${_legRes.status}`);
         arrayBuffer = await _legRes.arrayBuffer();
-        console.log('[reader] epub from network (legacy), bytes:', arrayBuffer.byteLength);
+        log('[reader] epub from network (legacy), bytes:', arrayBuffer.byteLength);
       } catch {
         arrayBuffer = await fetchOfflineBookFile(bookId);
-        if (arrayBuffer) console.log('[reader] epub from CacheStorage (offline), bytes:', arrayBuffer.byteLength);
+        if (arrayBuffer) log('[reader] epub from CacheStorage (offline), bytes:', arrayBuffer.byteLength);
       }
     } else {
       // Modern path: CacheStorage first (instant offline) → network fallback.
@@ -6667,10 +6668,10 @@ async function init() {
       );
       arrayBuffer = await Promise.race([fetchOfflineBookFile(bookId), _cacheTimeout]).catch(() => null);
       if (arrayBuffer) {
-        console.log('[reader] epub from CacheStorage, bytes:', arrayBuffer.byteLength);
+        log('[reader] epub from CacheStorage, bytes:', arrayBuffer.byteLength);
       }
       if (!arrayBuffer) {
-        console.log('[reader] fetching epub from network...');
+        log('[reader] fetching epub from network...');
         const res = await withTimeout(
           fetch(`/api/books/${bookId}/file`, { headers: { Authorization: `Bearer ${getToken()}` } }),
           12000
@@ -6701,11 +6702,11 @@ async function init() {
         } else {
           arrayBuffer = await withTimeout(res.arrayBuffer(), 30000);
         }
-        console.log('[reader] epub from network, bytes:', arrayBuffer.byteLength);
+        log('[reader] epub from network, bytes:', arrayBuffer.byteLength);
       }
     }
   } catch (err) {
-    console.warn('[reader] epub load failed:', err?.message);
+    warn('[reader] epub load failed:', err?.message);
     if (!arrayBuffer) {
       const msg = !navigator.onLine
         ? t('reader.err_offline_not_cached')
@@ -6729,9 +6730,9 @@ async function init() {
       }).then(r => r.ok ? r.json() : null).then(b => { if (b) saveBookMeta(b).catch(() => {}); }).catch(() => {});
     }
   }
-  console.log('[reader] fonts loading (non-blocking)...');
+  log('[reader] fonts loading (non-blocking)...');
   loadCustomFonts().then(() => {
-    console.log('[reader] fonts loaded, count:', customFonts.length);
+    log('[reader] fonts loaded, count:', customFonts.length);
     // If user has never changed the font (still at factory default 'Georgia, serif') and
     // Bookerly is available, default to it. Only runs once — persistPrefs() saves the choice.
     if (customFonts.length && prefs.fontFamily === DEFAULT_PREFS.fontFamily) {
@@ -6746,11 +6747,11 @@ async function init() {
     if (_cxReader) reapplyStyles();
     populateFontSelect();
   }).catch(err => {
-    console.warn('[reader] fonts failed:', err?.message);
+    warn('[reader] fonts failed:', err?.message);
   });
 
   // Activate reader mode AFTER network calls — avoids blocking fetches on e-ink devices
-  console.log('[reader] setReaderMode(true)...');
+  log('[reader] setReaderMode(true)...');
   if (isAndroidApp() && window.AndroidCodexa?.setReaderMode) {
     window.AndroidCodexa.setReaderMode(true);
     setTimeout(() => {
@@ -6798,7 +6799,7 @@ async function init() {
           if (!startCfi) startCfi = rs.cfi;
           if (typeof rs.pct === 'number') resumeStartPct = rs.pct;
           skipOpenSync = true; // user explicitly chose this exact position — skip remote sync
-          console.log('[session-restore] using saved cfi:', rs.cfi.slice(0, 60), 'pct:', ((rs.pct||0)*100).toFixed(2)+'%');
+          log('[session-restore] using saved cfi:', rs.cfi.slice(0, 60), 'pct:', ((rs.pct||0)*100).toFixed(2)+'%');
         }
       }
     } catch { /* ignore */ }
@@ -6815,7 +6816,7 @@ async function init() {
         } catch { /* ignore */ }
         const _serverProgress = await apiFetch(`/progress/${currentBook.file_hash}`);
         if (_cachedLocal && (_cachedLocal.percentage || 0) > (_serverProgress?.percentage || 0) + 0.005) {
-          console.log('[reader] offline progress ahead of server ('
+          log('[reader] offline progress ahead of server ('
             + Math.round((_cachedLocal.percentage || 0) * 100) + '% > '
             + Math.round((_serverProgress?.percentage || 0) * 100) + '%) — resuming local, will push');
           localProgress = _cachedLocal;
@@ -6833,7 +6834,7 @@ async function init() {
           if (cached) localProgress = JSON.parse(cached);
         } catch { /* ignore */ }
       }
-      console.log('[reader] localProgress:', localProgress?.cfi_position?.slice(0, 60), 'pct:', localProgress?.percentage);
+      log('[reader] localProgress:', localProgress?.cfi_position?.slice(0, 60), 'pct:', localProgress?.percentage);
       if (localProgress?.percentage > 0) {
         lastKnownGoodPct = localProgress.percentage;
         // Seed the high-water mark so we never push below what the server already has
@@ -6846,7 +6847,7 @@ async function init() {
       if (!startCfi && localProgress?.cfi_position) startCfi = localProgress.cfi_position;
     } catch { /* start from beginning */ }
 
-    console.log('[reader] startRendition:', startCfi?.slice(0, 60) ?? 'null');
+    log('[reader] startRendition:', startCfi?.slice(0, 60) ?? 'null');
     await startRendition(startCfi);
     loadAvailableDicts().then(updateDictButtonVisibility).catch(() => {});
     _rafStop = true;
@@ -6913,16 +6914,16 @@ async function init() {
       const p = _cxReader.makePct();
       if (p > 0) currentPct = p;
     }
-    console.log('[pos] final position before isReady cfi:', currentCfi.slice(0,60), 'pct:', (currentPct*100).toFixed(2)+'%');
+    log('[pos] final position before isReady cfi:', currentCfi.slice(0,60), 'pct:', (currentPct*100).toFixed(2)+'%');
     isReady = true;
-    console.log('[pos] isReady=true, currentCfi:', currentCfi.slice(0,60));
+    log('[pos] isReady=true, currentCfi:', currentCfi.slice(0,60));
     openCfi = currentCfi;      // snapshot position-on-open for change detection
     openPct = currentPct;      // snapshot pct-on-open for within-chapter change detection (CXReader CFI is chapter-level only)
     if (_offlineProgressAhead && !isPeekMode) {
       // We resumed from a position read offline that the server/KOSync never received.
       // Force a remote + KOSync push now so reopening online actually syncs offline reading.
       lastSyncedCfi = '';
-      console.log('[kosync] pushing offline-read progress on open, pct:', (currentPct * 100).toFixed(2) + '%');
+      log('[kosync] pushing offline-read progress on open, pct:', (currentPct * 100).toFixed(2) + '%');
       void saveProgress({ forceRemote: true, forced: true, inSession: true });
     } else {
       lastSyncedCfi = currentCfi; // server already knows this position — no immediate remote push needed

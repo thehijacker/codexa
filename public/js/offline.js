@@ -3,6 +3,8 @@
  * Manages which books are available for offline reading.
  */
 
+import { log } from './logger.js';
+
 const DB_NAME  = 'codexa-offline';
 const DB_VER   = 1;
 const STORE    = 'books';
@@ -161,7 +163,7 @@ export async function setDownloadStatus(bookId, status) {
 if (isOfflineSupported) {
   navigator.serviceWorker.addEventListener('message', e => {
     const { type, bookId, message } = e.data || {};
-    console.log('[offline] SW message received:', type, bookId);
+    log('[offline] SW message received:', type, bookId);
     if (type === 'CACHE_BOOK_DONE' || type === 'CACHE_BOOK_ERROR') {
       const handlers = _pending.get(bookId);
       _pending.delete(bookId);
@@ -248,7 +250,7 @@ export async function pruneStaleDownloads(liveIds) {
   for (const entry of stale) {
     if (sw) sw.postMessage({ type: 'DELETE_BOOK', bookId: Number(entry.id) });
     await removeBook(entry.id);
-    console.log('[offline] pruned stale download bookId:', entry.id, entry.title || '');
+    log('[offline] pruned stale download bookId:', entry.id, entry.title || '');
   }
 }
 
