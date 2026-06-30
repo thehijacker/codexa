@@ -185,7 +185,7 @@
           <a href="#cxreader" data-section="cxreader">CXReader Engine</a>
           <ul class="nav-sub">
             <li><a href="#cxreader-why"      data-section="cxreader" data-scroll="cxreader-why">Why We Built It</a></li>
-            <li><a href="#cxreader-features" data-section="cxreader" data-scroll="cxreader-features">What's Improved</a></li>
+            <li><a href="#cxreader-features" data-section="cxreader" data-scroll="cxreader-features">Engine Highlights</a></li>
             <li><a href="#cxreader-position" data-section="cxreader" data-scroll="cxreader-position">Exact Position Restore</a></li>
             <li><a href="#cxreader-fixed"    data-section="cxreader" data-scroll="cxreader-fixed">Fixed-layout EPUBs</a></li>
           </ul>
@@ -272,7 +272,7 @@
         <li><strong>Single Node.js process</strong> — easy to deploy with Docker in minutes</li>
         <li><strong>Multi-user with JWT authentication</strong> — per-user libraries</li>
         <li><strong>Full offline reading</strong> — via a Service Worker cache</li>
-        <li><strong>CXReader</strong> — Codexa's own custom-built EPUB engine (replaces epub.js) for better reliability</li>
+        <li><strong>CXReader</strong> — Codexa's own custom-built EPUB engine for reliable rendering</li>
         <li><strong>Comic book support</strong> — read CBZ and CBR files alongside your EPUB library</li>
         <li><strong>Built-in KOSync-compatible server</strong> — connect KOReader devices without extra software</li>
         <li><strong>OPDS catalog browser</strong> — for Calibre-Web, Book Orbit, Booklore Komga, Kavita, and others; downloads books directly</li>
@@ -2120,15 +2120,6 @@ data/<br>
         <li><strong>Highlight count badge</strong> — shows a small number badge on the highlights button indicating how many highlights the current book has.</li>
       </ul>
 
-      <h4>Classic reader (epub.js)</h4>
-      <p>
-        By default Codexa uses <a href="#cxreader" data-section="cxreader">CXReader</a>, its own
-        purpose-built EPUB engine. Enabling <strong>Classic reader (epub.js)</strong> switches back
-        to the original epub.js library. The book reloads immediately when you toggle this setting.
-        Use this only if you encounter a rendering issue specific to CXReader; most features work
-        better with CXReader off.
-      </p>
-
       <h3 id="reader-text">Text Tab</h3>
       <figure>
         <img src="../screenshots/reader/settings-text.png" alt="Text settings tab">
@@ -2303,70 +2294,64 @@ data/<br>
       <p class="section-subtitle">Codexa's own custom-built EPUB and comic rendering library</p>
 
       <p>
-        CXReader is an EPUB reading engine developed entirely within Codexa. It replaces the
-        third-party <strong>epub.js</strong> library that Codexa originally used and is responsible
-        for parsing, rendering, and paginating all books — EPUBs, fixed-layout EPUBs, CBZ, and CBR
-        comics.
+        CXReader is the EPUB reading engine built entirely within Codexa. It is responsible for
+        parsing, rendering, and paginating every book — reflowable EPUBs, fixed-layout EPUBs, and
+        CBZ/CBR comics — with <strong>zero external dependencies</strong>.
       </p>
 
       <h2 id="cxreader-why">Why We Built It</h2>
       <p>
-        epub.js is a mature library, but it has known compatibility issues on older Android
-        WebView versions (notably <strong>Chrome 83</strong>, found on many older e-ink Android devices).
-        On those devices, epub.js's virtual pagination — which relies on <code>translateY</code>
-        transforms and clip-path masking — clips lines at page boundaries and causes
-        <code>fetch()</code> calls to silently hang after a <code>MutationObserver</code>
-        interaction. CXReader was designed from the ground up to avoid these problems.
+        Codexa is meant to run everywhere, including <strong>older e-ink Android devices</strong>
+        (notably the <strong>Chrome 83</strong> WebView found on many BOOX and similar readers).
+        Generic web reading engines tend to rely on virtual pagination — <code>translateY</code>
+        transforms with clip-path masking — which clips lines at page boundaries on those WebViews
+        and can make <code>fetch()</code> calls silently hang after a <code>MutationObserver</code>
+        interaction. CXReader was designed from the ground up to avoid these problems, using native
+        CSS multi-column layout so the browser fragments content correctly.
       </p>
       <p>
-        Additionally, epub.js does not support CBZ/CBR comic files at all. Codexa's CBZ and CBR
-        support is built directly into CXReader.
+        Building our own engine also let Codexa support things a generic EPUB renderer does not:
+        <strong>CBZ/CBR comic books</strong>, pixel-accurate <strong>fixed-layout EPUBs</strong>,
+        exact per-page position restore, and precise CFI annotations — all handled directly inside
+        CXReader.
       </p>
 
-      <h2 id="cxreader-features">What's Improved Over epub.js</h2>
+      <h2 id="cxreader-features">Engine Highlights</h2>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Area</th><th>epub.js</th><th>CXReader</th></tr></thead>
+          <thead><tr><th>Capability</th><th>How CXReader handles it</th></tr></thead>
           <tbody>
             <tr>
               <td><strong>Pagination engine</strong></td>
-              <td>Virtual pagination using <code>translateY</code> transforms and CSS clip-path — clips lines on some e-ink WebViews</td>
-              <td>Native CSS multi-column layout — the browser fragments content correctly, no clipping</td>
+              <td>Native CSS multi-column layout — the browser fragments content correctly, with no line clipping on e-ink WebViews</td>
             </tr>
             <tr>
               <td><strong>E-ink compatibility</strong></td>
-              <td>Chrome 83 WebView: <code>fetch()</code> hangs after MutationObserver interactions; requires workarounds</td>
-              <td>Built with legacy WebView quirks in mind; per-path workarounds baked in</td>
+              <td>Built with legacy WebView quirks (Chrome 83) in mind; per-path workarounds baked in</td>
             </tr>
             <tr>
               <td><strong>Position restore accuracy</strong></td>
-              <td>Restores to approximate percentage; exact page not saved</td>
-              <td>Saves exact page number per chapter; reopens on the precise page with % fallback if layout changes</td>
+              <td>Saves the exact page number per chapter; reopens on the precise page, with a percentage fallback if the layout changes</td>
             </tr>
             <tr>
               <td><strong>Fixed-layout EPUB</strong></td>
-              <td>Supported via epub.js's own fixed-layout renderer</td>
-              <td>Supported: detects <code>rendition:layout=pre-paginated</code>, scales each spine item to fit the viewport with CSS transform</td>
+              <td>Detects <code>rendition:layout=pre-paginated</code> and scales each spine item to fit the viewport with a CSS transform</td>
             </tr>
             <tr>
               <td><strong>Comic books (CBZ/CBR)</strong></td>
-              <td>Not supported</td>
-              <td>Full support: image-only ZIP/RAR archives rendered full-screen with two-page spread on desktop</td>
+              <td>Full support: image-only ZIP/RAR archives rendered full-screen, with a two-page spread on desktop</td>
             </tr>
             <tr>
               <td><strong>Annotation CFI precision</strong></td>
-              <td>Full DOM-range CFIs via epub.js's built-in generator</td>
-              <td>Full DOM-range CFIs via CXReader's own generator/resolver — highlights land on the exact word, not just a text search fallback</td>
+              <td>Full DOM-range CFIs via CXReader's own generator/resolver — highlights land on the exact word, not just a text-search fallback</td>
             </tr>
             <tr>
               <td><strong>Font reflow</strong></td>
-              <td>Requires full re-render on font swap</td>
-              <td>Detects layout shifts from late-loading fonts and re-measures only when content height changes</td>
+              <td>Detects layout shifts from late-loading fonts and re-measures only when the content height actually changes</td>
             </tr>
             <tr>
-              <td><strong>Dependency</strong></td>
-              <td>Third-party npm package</td>
-              <td>Zero external dependencies — all EPUB parsing done client-side with JSZip and the browser's DOMParser</td>
+              <td><strong>Dependencies</strong></td>
+              <td>Zero external rendering dependencies — all EPUB parsing is done client-side with JSZip and the browser's DOMParser</td>
             </tr>
           </tbody>
         </table>

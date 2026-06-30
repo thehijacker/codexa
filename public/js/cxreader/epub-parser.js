@@ -226,7 +226,10 @@ export class EpubParser {
 
   _parseNavList(olEl, base) {
     if (!olEl) return [];
-    return [...olEl.children].filter(li => li.tagName === 'LI').map(li => {
+    // The nav is parsed as application/xhtml+xml (an XML document), so tagName/localName
+    // preserve the source case — XHTML tag names are lowercase. Compare case-insensitively
+    // so the <li> filter works for both XHTML ('li') and HTML ('LI') documents.
+    return [...olEl.children].filter(li => (li.localName || li.tagName || '').toLowerCase() === 'li').map(li => {
       const aEl  = li.querySelector(':scope > a');
       const span = li.querySelector(':scope > span');
       const label = (aEl || span)?.textContent.trim() || '';
