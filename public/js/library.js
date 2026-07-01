@@ -495,13 +495,12 @@ function renderCardBadges(book) {
     read:         t('library.status_finished'),
     abandoned:    t('library.status_abandoned'),
   };
-  const colors = { want_to_read: '#6c7a89', reading: '#2196f3', read: '#4caf50', abandoned: '#b0653a' };
   const parts = [];
   if (status && labels[status]) {
-    parts.push(`<span style="display:inline-block;font-size:.66rem;font-weight:600;color:#fff;background:${colors[status]};padding:.05rem .4rem;border-radius:10px">${labels[status]}</span>`);
+    parts.push(`<span class="book-status-badge book-status-badge--${status}">${labels[status]}</span>`);
   }
   if (rating) {
-    parts.push(`<span title="${rating}/5" style="font-size:.75rem;letter-spacing:-1px;color:#f5c518">${'★'.repeat(rating)}<span style="color:#ccc">${'★'.repeat(5 - rating)}</span></span>`);
+    parts.push(`<span class="book-rating-badge" title="${rating}/5"><span class="book-rating-filled">${'★'.repeat(rating)}</span><span class="book-rating-empty">${'★'.repeat(5 - rating)}</span></span>`);
   }
   return parts.join('');
 }

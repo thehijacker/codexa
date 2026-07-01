@@ -226,6 +226,12 @@ html[data-lib-theme="eink"] .book-offline-badge,
 .sidebar-layout[data-lib-theme="eink"] .book-offline-badge { background: #111; }
 html[data-lib-theme="eink"] .book-format-badge,
 .sidebar-layout[data-lib-theme="eink"] .book-format-badge { background: #111; color: #fff; }
+html[data-lib-theme="eink"] .book-status-badge,
+.sidebar-layout[data-lib-theme="eink"] .book-status-badge { background: #111; color: #fff; }
+html[data-lib-theme="eink"] .book-rating-filled,
+.sidebar-layout[data-lib-theme="eink"] .book-rating-filled { color: #111; }
+html[data-lib-theme="eink"] .book-rating-empty,
+.sidebar-layout[data-lib-theme="eink"] .book-rating-empty  { color: #888; }
 html[data-lib-theme="eink"] .imt-action-btn,
 .sidebar-layout[data-lib-theme="eink"] .imt-action-btn {
   background: #fff;
@@ -1686,6 +1692,22 @@ html[data-lib-theme="eink"] .book-card-actions .cover-preview-btn .nav-icon,
   background: #e8650a;
   color: #fff;
 }
+/* ── Book card status / rating badges ───────────────────────────────────────── */
+.book-status-badge {
+  display: inline-block;
+  font-size: .66rem;
+  font-weight: 600;
+  color: #fff;
+  padding: .05rem .4rem;
+  border-radius: 10px;
+}
+.book-status-badge--want_to_read { background: #6c7a89; }
+.book-status-badge--reading      { background: #2196f3; }
+.book-status-badge--read         { background: #4caf50; }
+.book-status-badge--abandoned    { background: #b0653a; }
+.book-rating-badge  { font-size: .75rem; letter-spacing: -1px; }
+.book-rating-filled { color: #f5c518; }
+.book-rating-empty  { color: #ccc; }
 .info-modal-meta { flex: 1; min-width: 0; }
 .info-modal-title  { font-size: 1.05rem; font-weight: 700; margin-bottom: .4rem; line-height: 1.3; }
 .info-modal-author { font-size: .88rem; color: var(--color-text-muted); margin-bottom: .25rem; }

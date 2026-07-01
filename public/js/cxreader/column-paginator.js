@@ -37,6 +37,7 @@ export class ColumnPaginator {
   init(iframe, opts = {}) {
     this._iframe = iframe;
     const doc  = iframe.contentDocument;
+    if (!doc?.body) return { pageCount: 1, currentPage: 1 };
     const body = doc.body;
 
     // Reset any previous transform/clip AND column lock BEFORE measuring so geometry is fresh.

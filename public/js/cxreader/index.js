@@ -44,6 +44,7 @@ export class CXReader {
   // Init the paginator for the current layout. Use this everywhere instead of calling
   // this._paginator.init() directly.
   _initPaginator(iframe) {
+    if (!iframe?.contentDocument?.body) return null;
     if (!this._paginator) this._paginator = this._makePaginator();
     const res = this._paginator.init(iframe, this._paginatorOpts());
     this._scheduleFontReflow();

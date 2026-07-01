@@ -4,16 +4,23 @@
       <stop offset="0%" stop-color="#5BA7D9"/>
       <stop offset="100%" stop-color="#4FC1B0"/>
     </linearGradient>
+    <filter id="gooDownload">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur"/>
+      <feColorMatrix in="blur" mode="matrix"
+        values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -10" result="goo"/>
+    </filter>
   </defs>
 
-  <g fill="url(#cloudGradDownload)">
-    <rect x="14" y="120" width="172" height="58" rx="29"/>
-    <circle cx="50" cy="100" r="44"/>
-    <circle cx="150" cy="100" r="44"/>
-    <circle cx="100" cy="72" r="56"/>
+  <g filter="url(#gooDownload)" fill="url(#cloudGradDownload)">
+    <circle cx="60" cy="130" r="42"/>
+    <circle cx="100" cy="140" r="46"/>
+    <circle cx="140" cy="130" r="42"/>
+    <circle cx="55" cy="95" r="38"/>
+    <circle cx="100" cy="70" r="50"/>
+    <circle cx="145" cy="95" r="38"/>
   </g>
 
-  <circle cx="75" cy="60" r="16" fill="#FFFFFF" opacity="0.25"/>
+  <circle cx="75" cy="58" r="16" fill="#FFFFFF" opacity="0.25"/>
   <circle cx="45" cy="90" r="12" fill="#FFFFFF" opacity="0.2"/>
 
   <g stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" fill="none">

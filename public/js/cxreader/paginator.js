@@ -19,6 +19,7 @@ export class Paginator {
   init(iframe, _opts) {  // _opts accepted for interface parity with ColumnPaginator (unused)
     this._iframe    = iframe;
     const doc       = iframe.contentDocument;
+    if (!doc?.body) return { pageCount: 1, currentPage: 1 };
     const body      = doc.body;
 
     // Reset any previous transform/clip BEFORE measuring so positions are in natural coords
