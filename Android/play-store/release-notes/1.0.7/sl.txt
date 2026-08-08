@@ -1,0 +1,5 @@
+🎉 Codexa Reader je zdaj na Google Play!
+
+Samostojno gostovan bralnik za e-knjige in stripe: branje brez povezave, slovarji, označbe in dvosmerna sinhronizacija KOReader — vaše knjige ostanejo na vašem strežniku.
+
+Opomba: potreben je vaš lasten strežnik Codexa (aplikacija je le odjemalec, ne trgovina s knjigami).

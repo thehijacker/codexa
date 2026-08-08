@@ -1,0 +1,5 @@
+🎉 Codexa Reader ist jetzt bei Google Play!
+
+Ein selbst gehosteter EPUB- und Comic-Reader: Offline-Lesen, Wörterbücher, Markierungen und bidirektionaler KOReader-Sync — deine Bücher bleiben auf deinem eigenen Server.
+
+Hinweis: Erfordert einen eigenen Codexa-Server (die App ist ein Client, kein Buchladen).
