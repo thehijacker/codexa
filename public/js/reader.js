@@ -3982,9 +3982,24 @@ async function showDictPopup(word) {
   }
 
   try {
-    const data = await apiFetch(`/dictionary/lookup?word=${encodeURIComponent(word)}&dicts=${enabled.join(',')}`);
+    let data = await apiFetch(`/dictionary/lookup?word=${encodeURIComponent(word)}&dicts=${enabled.join(',')}`);
+    let displayWord = word;
+    // Multi-word selections are looked up as a single phrase first (some dictionaries do
+    // have idiom/compound-term entries, e.g. "rat snake") \u2014 only fall back to just the
+    // first word if the phrase itself has no entry in any enabled dictionary. The fallback
+    // is silent (no flash of "not found" in between); the header only switches to the
+    // fallback word once we know it actually found something.
+    const firstWord = word.trim().split(/\s+/)[0].replace(/^[''-]+|[''-]+$/g, '').trim();
+    if (!data.results.length && firstWord && firstWord !== word) {
+      const fallback = await apiFetch(`/dictionary/lookup?word=${encodeURIComponent(firstWord)}&dicts=${enabled.join(',')}`);
+      if (fallback.results.length) {
+        data = fallback;
+        displayWord = firstWord;
+        wordEl.textContent = displayWord;
+      }
+    }
     if (!data.results.length) {
-      resultsEl.innerHTML = `<div class="dict-empty">${t('reader.dict_not_found', { word: esc(word) })}</div>`;
+      resultsEl.innerHTML = `<div class="dict-empty">${t('reader.dict_not_found', { word: esc(displayWord) })}</div>`;
     } else {
       resultsEl.innerHTML = data.results.map((r, i) => {
         // HTML type: render as HTML but strip any <script>/<style> for safety.
@@ -4004,7 +4019,7 @@ async function showDictPopup(word) {
         return `${i > 0 ? '<hr class="dict-hr">' : ''}
           <div class="dict-result">
             <div class="dict-result-source">
-              ${esc(r.dictName)}${r.matchedForm && r.matchedForm !== word.toLowerCase() ? ` <span class="dict-matched-form">\u2192 ${esc(r.word)}</span>` : ''}
+              ${esc(r.dictName)}${r.matchedForm && r.matchedForm !== displayWord.toLowerCase() ? ` <span class="dict-matched-form">\u2192 ${esc(r.word)}</span>` : ''}
             </div>
             ${defHtml}
           </div>`;
@@ -6231,6 +6246,14 @@ function attachIframeTouchNav(view) {
   let iframeOffX = 0, iframeOffY = 0;
 
   win.addEventListener('touchstart', (e) => {
+    // suppressNextTap is set (in attachIframeDictionary's long-press timer, while the finger
+    // is still down) so THAT gesture's own touchend doesn't also trigger nav. It's normally
+    // consumed there — but if Android's native text-selection UI swallows that specific
+    // touchend once it takes over (it can), the flag is left stuck true and silently eats
+    // the NEXT, unrelated tap instead (e.g. the tap that deselects the word), before that
+    // tap's own nav-zone logic ever runs. A brand new touch starting is proof any previous
+    // gesture has fully ended, so clear it here too, not just on touchend.
+    suppressNextTap = false;
     const iframe = view.element?.querySelector('iframe') || view.element;
     iframeOffX   = iframe ? iframe.getBoundingClientRect().left : 0;
     iframeOffY   = iframe ? iframe.getBoundingClientRect().top  : 0;
@@ -6322,23 +6345,28 @@ function attachIframeTouchNav(view) {
         if (prefs.autoHideHeader && readerLayout.classList.contains('header-peek')) forceHideAutoHeader();
         return;
       }
-      // Vertical tap zones (one-handed navigation) — only when no overlay is open
-      if (prefs.vertNavZones) {
-        const anyOverlay = hasOpenPanel()
-          || document.getElementById('annot-toolbar')?.classList.contains('open')
-          || document.getElementById('sleep-timer-panel')?.classList.contains('open')
-          || document.getElementById('footnote-popup')?.classList.contains('open');
-        if (!anyOverlay && !e.changedTouches[0].target?.closest?.('a')) {
-          const sel = win.getSelection?.();
-          if (!sel || sel.isCollapsed) {
-            const isTop = cy < window.innerHeight / 2;
-            const goBack = prefs.vertNavZonesReversed ? !isTop : isTop;
-            if (e.cancelable) e.preventDefault();
-            if (goBack) goPrev(); else goNext();
-            if (prefs.autoHideHeader && readerLayout.classList.contains('header-peek')) forceHideAutoHeader();
-            return;
-          }
-        }
+      // Vertical tap zones (one-handed navigation). A *different* kind of overlay (settings/
+      // search/TOC/sleep-timer/footnote popup) should just close on this tap, not also
+      // navigate. A lingering text selection / annotation toolbar / dict popup left over from
+      // an earlier long-press, by contrast, is cleared right here — synchronously, ourselves —
+      // instead of waiting for Android to get around to collapsing the native Selection object
+      // on its own, which doesn't happen promptly enough to read reliably (a prior attempt at
+      // this used a 60ms re-check delay; still wasn't enough — clearPressHighlight's own
+      // linger is 500ms). Not depending on that timing at all is what lets this same tap both
+      // dismiss the leftover selection/popup and turn the page in one go.
+      const otherOverlayOpen = hasOpenPanel()
+        || document.getElementById('sleep-timer-panel')?.classList.contains('open')
+        || document.getElementById('footnote-popup')?.classList.contains('open');
+      if (prefs.vertNavZones && !otherOverlayOpen && !e.changedTouches[0].target?.closest?.('a')) {
+        if (e.cancelable) e.preventDefault();
+        if (document.getElementById('dict-popup')?.classList.contains('open')) closeDictPopup();
+        if (document.getElementById('annot-toolbar')?.classList.contains('open')) closeAnnotationToolbar(true);
+        clearPressHighlight();
+        const isTop = cy < window.innerHeight / 2;
+        const goBack = prefs.vertNavZonesReversed ? !isTop : isTop;
+        if (goBack) goPrev(); else goNext();
+        if (prefs.autoHideHeader && readerLayout.classList.contains('header-peek')) forceHideAutoHeader();
+        return;
       }
       if (prefs.autoHideHeader && readerLayout.classList.contains('header-peek')) {
         if (e.cancelable) e.preventDefault();
@@ -6934,12 +6962,14 @@ document.querySelectorAll('.annot-edit-color-btn').forEach(btn => {
   });
 });
 
-// Dictionary button inside annotation toolbar
+// Dictionary button inside annotation toolbar. Multi-word selections (e.g. "rat snake",
+// made via long-press-then-extend selection) are looked up as the full phrase first —
+// showDictPopup() itself falls back to just the first word if the phrase has no entry
+// in any enabled dictionary.
 document.getElementById('annot-btn-dict')?.addEventListener('click', () => {
-  const text = _pendingAnnotation?.text || '';
-  const word = text.split(/\s+/)[0].replace(/^[''-]+|[''-]+$/g, '').trim();
+  const text = (_pendingAnnotation?.text || '').trim().replace(/^[''-]+|[''-]+$/g, '').trim();
   closeAnnotationToolbar(true); // keep press highlight visible while dict popup is open
-  if (word) showDictPopup(word);
+  if (text) showDictPopup(text);
 });
 
 // Copy selection to clipboard

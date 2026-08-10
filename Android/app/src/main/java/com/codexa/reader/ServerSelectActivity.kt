@@ -22,6 +22,7 @@ class ServerSelectActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_INITIAL_URL = "initial_url"
         const val RESULT_URL        = "result_url"
+        const val PREF_HEADERS      = "custom_headers"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,16 +35,31 @@ class ServerSelectActivity : AppCompatActivity() {
             override fun handleOnBackPressed() { /* intentionally no-op */ }
         })
 
-        val etUrl      = findViewById<EditText>(R.id.et_url)
-        val btnConnect = findViewById<Button>(R.id.btn_connect)
-        val btnCancel  = findViewById<Button>(R.id.btn_cancel)
-        val tvError    = findViewById<TextView>(R.id.tv_error)
-        val swEink     = findViewById<SwitchCompat>(R.id.sw_eink)
+        val etUrl          = findViewById<EditText>(R.id.et_url)
+        val btnConnect     = findViewById<Button>(R.id.btn_connect)
+        val btnCancel      = findViewById<Button>(R.id.btn_cancel)
+        val tvError        = findViewById<TextView>(R.id.tv_error)
+        val swEink         = findViewById<SwitchCompat>(R.id.sw_eink)
+        val tvHeadersToggle = findViewById<TextView>(R.id.tv_headers_toggle)
+        val layoutHeaders   = findViewById<android.widget.LinearLayout>(R.id.layout_headers)
+        val etHeaders       = findViewById<EditText>(R.id.et_headers)
 
         val prefs = getSharedPreferences("codexa_prefs", Context.MODE_PRIVATE)
         swEink.isChecked = prefs.getBoolean("eink_mode", false)
         applyEinkFilter(swEink.isChecked)
         swEink.setOnCheckedChangeListener { _, isChecked -> applyEinkFilter(isChecked) }
+
+        // Custom headers: pre-filled from whatever was saved last time. Start expanded
+        // if a value already exists, so a returning user editing them isn't surprised
+        // by a collapsed, seemingly-empty section hiding what they configured before.
+        val savedHeaders = prefs.getString(PREF_HEADERS, "") ?: ""
+        etHeaders.setText(savedHeaders)
+        if (savedHeaders.isNotBlank()) layoutHeaders.visibility = android.view.View.VISIBLE
+        tvHeadersToggle.setOnClickListener {
+            layoutHeaders.visibility =
+                if (layoutHeaders.visibility == android.view.View.VISIBLE) android.view.View.GONE
+                else android.view.View.VISIBLE
+        }
 
         val cancellable = intent.getBooleanExtra("cancellable", false)
         if (cancellable) {
@@ -62,7 +78,10 @@ class ServerSelectActivity : AppCompatActivity() {
             val raw = etUrl.text.toString().trim()
             val url = extractOrigin(raw) ?: raw
             if (isValidUrl(url)) {
-                prefs.edit().putBoolean("eink_mode", swEink.isChecked).apply()
+                prefs.edit()
+                    .putBoolean("eink_mode", swEink.isChecked)
+                    .putString(PREF_HEADERS, etHeaders.text.toString())
+                    .apply()
                 tvError.visibility = android.view.View.GONE
                 val result = Intent().putExtra(RESULT_URL, url)
                 setResult(Activity.RESULT_OK, result)

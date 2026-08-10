@@ -9,4 +9,7 @@
     <string name="error_invalid_url">Inserisci un URL valido che inizi con http:// o https://</string>
     <string name="back_press_hint">Premi due volte indietro per modificare l\'URL del server.</string>
     <string name="file_chooser_unavailable">Nessuna app disponibile per scegliere i file</string>
+    <string name="custom_headers_toggle">Avanzate: intestazioni HTTP personalizzate</string>
+    <string name="custom_headers_desc">Inviate con ogni richiesta a questo server. Utile per l\'autenticazione headless dietro un reverse proxy (es. Cloudflare Access, Pangolin).</string>
+    <string name="custom_headers_hint">CF-Access-Client-Id: xxxx\nCF-Access-Client-Secret: yyyy</string>
 </resources>

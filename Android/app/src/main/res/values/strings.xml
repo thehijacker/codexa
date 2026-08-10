@@ -10,4 +10,7 @@
     <string name="back_press_hint">Press back again to change server URL</string>
     <string name="eink_mode_label">E-ink mode</string>
     <string name="file_chooser_unavailable">No app available to choose files</string>
+    <string name="custom_headers_toggle">Advanced: Custom HTTP headers</string>
+    <string name="custom_headers_desc">Sent with every request to this server. Useful for headless auth behind a reverse proxy (e.g. Cloudflare Access, Pangolin).</string>
+    <string name="custom_headers_hint">CF-Access-Client-Id: xxxx\nCF-Access-Client-Secret: yyyy</string>
 </resources>

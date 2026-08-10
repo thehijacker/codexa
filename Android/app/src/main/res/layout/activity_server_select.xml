@@ -134,6 +134,51 @@
                 android:visibility="gone"
                 android:layout_marginTop="10dp" />
 
+            <!-- Collapsed by default: only needed by self-hosted setups behind a
+                 zero-trust reverse proxy (Cloudflare Access, Pangolin, ...). -->
+            <TextView
+                android:id="@+id/tv_headers_toggle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/custom_headers_toggle"
+                android:textColor="@color/color_accent"
+                android:textSize="13sp"
+                android:padding="4dp"
+                android:layout_marginTop="14dp" />
+
+            <LinearLayout
+                android:id="@+id/layout_headers"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone"
+                android:layout_marginTop="4dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/custom_headers_desc"
+                    android:textColor="@color/color_text_muted"
+                    android:textSize="12sp"
+                    android:layout_marginBottom="6dp" />
+
+                <EditText
+                    android:id="@+id/et_headers"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/custom_headers_hint"
+                    android:inputType="textMultiLine"
+                    android:minLines="2"
+                    android:gravity="top|start"
+                    android:textColor="@color/color_text"
+                    android:textColorHint="@color/color_text_muted"
+                    android:textSize="13sp"
+                    android:fontFamily="monospace"
+                    android:background="@drawable/bg_input"
+                    android:padding="12dp" />
+
+            </LinearLayout>
+
         </LinearLayout>
 
     </LinearLayout>

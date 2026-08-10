@@ -59,7 +59,7 @@ jobs:
             > "$ANDROID_SDK_ROOT/licenses/android-sdk-preview-license"
 
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" \
-            "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+            "platform-tools" "platforms;android-36" "build-tools;36.0.0"
           echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
 

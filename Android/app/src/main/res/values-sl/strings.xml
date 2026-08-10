@@ -9,4 +9,7 @@
     <string name="error_invalid_url">Prosim vnesite veljaven URL naslov, ki se začne s http:// ali https://</string>
     <string name="back_press_hint">Dvakrat pritisnite nazaj za spremembo URL-ja strežnika.</string>
     <string name="file_chooser_unavailable">Na voljo ni nobene aplikacije za izbiro datotek</string>
+    <string name="custom_headers_toggle">Napredno: Poljubne HTTP glave</string>
+    <string name="custom_headers_desc">Poslane z vsako zahtevo na ta strežnik. Uporabno za headless prijavo za obratnim posrednikom (npr. Cloudflare Access, Pangolin).</string>
+    <string name="custom_headers_hint">CF-Access-Client-Id: xxxx\nCF-Access-Client-Secret: yyyy</string>
 </resources>

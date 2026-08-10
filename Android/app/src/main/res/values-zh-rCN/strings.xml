@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Codexa Reader</string>
+    <string name="server_select_subtitle">您的数字图书馆</string>
+    <string name="server_select_label">服务器地址</string>
+    <string name="dialog_hint">https://your-codexa-server.com</string>
+    <string name="dialog_ok">连接</string>
+    <string name="dialog_cancel">取消</string>
+    <string name="error_invalid_url">请输入以 http:// 或 https:// 开头的有效网址</string>
+    <string name="back_press_hint">再次按返回键以更改服务器地址</string>
+    <string name="eink_mode_label">墨水屏模式</string>
+    <string name="file_chooser_unavailable">没有可用于选择文件的应用</string>
+    <string name="custom_headers_toggle">高级：自定义 HTTP 请求头</string>
+    <string name="custom_headers_desc">随每次请求发送到此服务器，适用于反向代理（例如 Cloudflare Access、Pangolin）后的免交互身份验证。</string>
+    <string name="custom_headers_hint">CF-Access-Client-Id: xxxx\nCF-Access-Client-Secret: yyyy</string>
+</resources>

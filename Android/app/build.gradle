@@ -12,7 +12,7 @@ if (keystorePropsFile.exists()) {
 
 android {
     namespace 'com.codexa.reader'
-    compileSdk 35
+    compileSdk 36
 
     buildFeatures {
         buildConfig = true
@@ -21,9 +21,9 @@ android {
     defaultConfig {
         applicationId "com.codexa.reader"
         minSdk 26
-        targetSdk 35
-        versionCode 7
-        versionName "1.0.7"
+        targetSdk 36
+        versionCode 8
+        versionName "1.0.8"
     }
 
     signingConfigs {
@@ -82,4 +82,7 @@ dependencies {
     implementation 'androidx.core:core-ktx:1.13.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'androidx.activity:activity-ktx:1.9.0'
+    // WebViewCompat.addDocumentStartJavaScript() — used to inject the custom-headers
+    // fetch/XHR patch before any page script runs (see MainActivity.configureWebView()).
+    implementation 'androidx.webkit:webkit:1.12.1'
 }

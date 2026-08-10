@@ -30,6 +30,9 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.webkit.ScriptHandler
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 
 class MainActivity : AppCompatActivity() {
 
@@ -42,6 +45,12 @@ class MainActivity : AppCompatActivity() {
     // Track back-press timing: second back press within 2 s opens server select
     private var lastBackPressTime = 0L
 
+    // True while an SSO/OIDC login redirect chain is in flight (started by navigating to our
+    // own /api/auth/oidc/.../start endpoint) — see shouldOverrideUrlLoading below for why this
+    // exists: it's what keeps IdP-hosted redirect hops inside the WebView instead of bouncing
+    // to the system browser, where a resulting session would be stranded in different storage.
+    private var oidcFlowActive = false
+
     // Launcher for ServerSelectActivity — handles both first-run and change-server flows
     private val serverSelectLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -49,7 +58,14 @@ class MainActivity : AppCompatActivity() {
         if (result.resultCode == Activity.RESULT_OK) {
             val url = result.data?.getStringExtra(ServerSelectActivity.RESULT_URL) ?: return@registerForActivityResult
             saveUrl(url)
-            webView.loadUrl(url)
+            // Reset in case a previous SSO attempt never made it back to serverHost (e.g. the
+            // user backed out mid-flow instead) — a stale true here would wrongly let the next
+            // genuine external link stay in-WebView instead of opening the system browser.
+            oidcFlowActive = false
+            // Re-register the header-injection script in case the user just changed it
+            // (or the server itself) in ServerSelectActivity, before loading the new URL.
+            injectCustomHeadersScript()
+            webView.loadUrl(url, getCustomHeaders())
         } else if (getSavedUrl() == null) {
             // First run and user somehow cancelled — show it again (non-cancellable)
             openServerSelect(cancellable = false)
@@ -176,7 +192,7 @@ class MainActivity : AppCompatActivity() {
 
         val savedUrl = getSavedUrl()
         if (savedUrl != null) {
-            webView.loadUrl(savedUrl)
+            webView.loadUrl(savedUrl, getCustomHeaders())
         } else {
             openServerSelect(cancellable = false)
         }
@@ -322,6 +338,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.addJavascriptInterface(JsBridge(), "AndroidCodexa")
+        injectCustomHeadersScript()
         webView.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(
                 webView: WebView?,
@@ -376,16 +393,42 @@ class MainActivity : AppCompatActivity() {
                 }
                 // Any navigation to a host other than the configured Codexa server
                 // (e.g. a "View on BookOrbit" link) should open in the system browser
-                // instead of loading inside this app's WebView.
+                // instead of loading inside this app's WebView — UNLESS it's part of an
+                // SSO/OIDC login flow (see below), which legitimately hops through one or
+                // more external IdP domains before landing back on our own server.
                 val serverHost = getSavedUrl()?.let { Uri.parse(it).host }
                 val targetHost = request.url.host
                 if (serverHost != null && targetHost != null && !targetHost.equals(serverHost, ignoreCase = true)) {
+                    // Mid-flow: bouncing this to the system browser would let the login finish
+                    // there instead, stranding the resulting session in the system browser's
+                    // separate cookie/storage — the WebView never sees it, so login looks like
+                    // it silently does nothing. Stay in-WebView instead.
+                    if (oidcFlowActive) return false
                     try {
                         startActivity(Intent(Intent.ACTION_VIEW, request.url))
                     } catch (e: Exception) {
                         // No browser available — fall through and let the WebView try.
                         return false
                     }
+                    return true
+                }
+                // Same host (or server URL not yet known). Track whether we're in the middle
+                // of an SSO flow — any same-host page other than our own oidc start/callback
+                // endpoint means it has concluded, successfully or not (/oidc-callback.html
+                // and /login.html?error=... after a failed attempt both land here).
+                oidcFlowActive = url.contains("/api/auth/oidc/")
+                // Same-host navigation: loadUrl(url, headers) only ever applies to the
+                // exact call it was passed to — it does not carry over to navigations the
+                // page itself triggers afterwards (e.g. window.location.href after login).
+                // Under zero-trust proxies using static service-token headers (Cloudflare
+                // Access, Pangolin), there's no session-cookie fallback, so every
+                // navigation genuinely needs the header re-attached. Safe against
+                // recursion: this callback only fires for renderer-initiated navigations,
+                // never for loadUrl() calls the app makes itself — the same asymmetry the
+                // mailto/tel and cross-host branches above already rely on.
+                val headers = getCustomHeaders()
+                if (headers.isNotEmpty()) {
+                    view.loadUrl(url, headers)
                     return true
                 }
                 return false
@@ -397,6 +440,10 @@ class MainActivity : AppCompatActivity() {
                 // Exit immersive mode when navigating away from reader
                 val isReader = url.contains("/reader.html", ignoreCase = true)
                 runOnUiThread { setImmersiveMode(isReader) }
+                // Fallback for WebView builds that don't support addDocumentStartJavaScript
+                // (see injectCustomHeadersScript()'s doc comment for why this ordering is
+                // safe for this app specifically, unlike as a general-purpose mechanism).
+                pendingHeaderScript?.let { view.evaluateJavascript(it, null) }
             }
 
             override fun onPageFinished(view: WebView, url: String) {
@@ -447,17 +494,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     // -------------------------------------------------------------------------
-    // Immersive mode (hide system navigation bar in reader)
+    // Immersive mode (hide system navigation bar everywhere; status bar in reader only)
     // -------------------------------------------------------------------------
 
+    // `enable` = true on reader pages, false everywhere else (library, BookOrbit, settings...)
+    // — see every call site below (onPageStarted/onPageFinished/onWindowFocusChanged all pass
+    // isOnReader()/isReader, and the JS bridge's setReaderMode() passes the reader's own flag).
     private fun setImmersiveMode(enable: Boolean) {
         val controller = WindowInsetsControllerCompat(window, window.decorView)
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        // Navigation bar stays hidden everywhere in the app, not just the reader — on
+        // library/BookOrbit/etc. pages it would otherwise sit on top of bottom-anchored UI
+        // (e.g. pagination controls), blocking taps underneath it. A swipe up from the
+        // bottom edge reveals it transiently on demand (BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE,
+        // set above, applies to both bars).
+        controller.hide(WindowInsetsCompat.Type.navigationBars())
         if (enable) {
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.hide(WindowInsetsCompat.Type.statusBars())
         } else {
-            controller.show(WindowInsetsCompat.Type.systemBars())
+            controller.show(WindowInsetsCompat.Type.statusBars())
         }
     }
 
@@ -482,6 +538,98 @@ class MainActivity : AppCompatActivity() {
             .edit()
             .putString(PREF_URL, url)
             .apply()
+
+    // -------------------------------------------------------------------------
+    // Custom HTTP headers (Settings → Server select → Advanced) — for headless auth
+    // behind a zero-trust reverse proxy (Cloudflare Access, Pangolin, ...) in front of
+    // the configured Codexa server. See HeaderUtils for the parsing format.
+    // -------------------------------------------------------------------------
+
+    private fun getCustomHeaders(): Map<String, String> =
+        HeaderUtils.parse(
+            getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(ServerSelectActivity.PREF_HEADERS, "") ?: ""
+        )
+
+    // Handle to the currently-registered document-start script, so it can be replaced
+    // (not stacked) if the user edits the headers via ServerSelectActivity mid-session.
+    private var headerScriptHandler: ScriptHandler? = null
+
+    // Fallback injection path for WebView builds predating DOCUMENT_START_SCRIPT support,
+    // evaluated on every onPageStarted since each top-level navigation gets a fresh JS
+    // global context (the previous page's monkey-patched fetch/XHR don't carry over).
+    private var pendingHeaderScript: String? = null
+
+    private fun injectCustomHeadersScript() {
+        headerScriptHandler?.remove()
+        headerScriptHandler = null
+        pendingHeaderScript = null
+
+        val headers = getCustomHeaders()
+        if (headers.isEmpty()) return
+
+        val script = buildHeaderInjectionScript(headers)
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            // Runs before any page script, on every future navigation in this WebView —
+            // a hard guarantee, no race. This is what lets fetch()/XHR calls made by the
+            // very first script the page runs already carry the configured headers.
+            headerScriptHandler = WebViewCompat.addDocumentStartJavaScript(webView, script, setOf("*"))
+        } else {
+            // No formal ordering guarantee against the page's own scripts in general — but
+            // every one of this app's own scripts is <script type="module">, which the spec
+            // defers until after the document is parsed, well after onPageStarted (fired at
+            // navigation-commit, before body parsing even begins) already ran. So this
+            // fallback is race-free for this app's specific script-loading strategy, even
+            // though it would not be safe as a general-purpose mechanism.
+            pendingHeaderScript = script
+        }
+    }
+
+    /**
+     * Monkey-patches window.fetch and XMLHttpRequest to attach the configured headers to
+     * every same-origin request the page's own JS makes. Deliberately origin-gated so a
+     * configured header (e.g. a Cloudflare Access secret) is never sent to a third-party
+     * host the page might also fetch from.
+     *
+     * Doesn't cover declarative subresource loads (<link>, <img>, fonts) or the initial
+     * top-level navigation — those are handled separately via loadUrl(url, headers) and
+     * shouldOverrideUrlLoading() above.
+     */
+    private fun buildHeaderInjectionScript(headers: Map<String, String>): String {
+        val json = HeaderUtils.toJsonLiteral(headers)
+        return """
+            (function(){
+              var EXTRA = $json;
+              function sameOrigin(u){ try { return new URL(u, location.href).origin === location.origin; } catch(e){ return false; } }
+              var origFetch = window.fetch;
+              if (origFetch) {
+                window.fetch = function(input, init){
+                  var url = (typeof input === 'string') ? input : (input && input.url);
+                  if (url && sameOrigin(url)) {
+                    var h = new Headers((init && init.headers) || (input && input.headers) || {});
+                    for (var k in EXTRA) { if (Object.prototype.hasOwnProperty.call(EXTRA, k)) h.set(k, EXTRA[k]); }
+                    init = Object.assign({}, init, { headers: h });
+                  }
+                  return origFetch.call(this, input, init);
+                };
+              }
+              var origOpen = XMLHttpRequest.prototype.open;
+              var origSend = XMLHttpRequest.prototype.send;
+              XMLHttpRequest.prototype.open = function(method, url){
+                this.__codexaUrl = url;
+                return origOpen.apply(this, arguments);
+              };
+              XMLHttpRequest.prototype.send = function(){
+                if (this.__codexaUrl && sameOrigin(this.__codexaUrl)) {
+                  for (var k in EXTRA) { if (Object.prototype.hasOwnProperty.call(EXTRA, k)) {
+                    try { this.setRequestHeader(k, EXTRA[k]); } catch(e){}
+                  }}
+                }
+                return origSend.apply(this, arguments);
+              };
+            })();
+        """.trimIndent()
+    }
 
     companion object {
         private const val PREFS_NAME = "codexa_prefs"
