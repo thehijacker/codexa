@@ -86,6 +86,14 @@ function syncStatusBar() {
         </a>
       `).join('') + `<div class="oidc-divider"><span>${t('login.oidc_divider')}</span></div>`;
       wrap.style.display = 'flex';
+      // Tell the Android app (if running inside one) that an SSO redirect chain is about to
+      // start, BEFORE the click's own navigation happens — see MainActivity.kt's JS bridge
+      // oidcFlowStarting() for why: it's what keeps the redirect through the external IdP
+      // inside the WebView instead of bouncing out to the system browser. No-op everywhere
+      // else (plain browser/PWA), since window.AndroidCodexa only exists in the Android app.
+      wrap.querySelectorAll('.oidc-btn').forEach(a => {
+        a.addEventListener('click', () => { window.AndroidCodexa?.oidcFlowStarting?.(); });
+      });
     }
   } catch (_) { /* silently ignore — OIDC not configured or IdP unreachable */ }
 

@@ -19,6 +19,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -33,6 +34,8 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : AppCompatActivity() {
 
@@ -45,11 +48,27 @@ class MainActivity : AppCompatActivity() {
     // Track back-press timing: second back press within 2 s opens server select
     private var lastBackPressTime = 0L
 
-    // True while an SSO/OIDC login redirect chain is in flight (started by navigating to our
-    // own /api/auth/oidc/.../start endpoint) — see shouldOverrideUrlLoading below for why this
-    // exists: it's what keeps IdP-hosted redirect hops inside the WebView instead of bouncing
-    // to the system browser, where a resulting session would be stranded in different storage.
+    // True while an SSO/OIDC login redirect chain is in flight — set explicitly by the JS
+    // bridge's oidcFlowStarting() (called from login.js) and by shouldOverrideUrlLoading's own
+    // same-host /api/auth/oidc/ detection as a fallback. See shouldOverrideUrlLoading below for
+    // why this exists: it's what keeps IdP-hosted redirect hops inside the WebView instead of
+    // bouncing to the system browser, where a resulting session would be stranded in different
+    // storage. @Volatile because it's written from the JS bridge's own thread (JavascriptInterface
+    // methods don't run on the UI thread) and read from shouldOverrideUrlLoading.
+    @Volatile
     private var oidcFlowActive = false
+
+    // True once a same-host page has ever finished loading in this session. A reverse-proxy
+    // auth gate (Authelia, Pangolin, Cloudflare Access — anything sitting in front of the
+    // *entire* site, not just Codexa's own /api/auth/oidc/ feature) can redirect cross-host on
+    // the very first request, before Codexa's own login page (or any of its JS, including the
+    // oidcFlowStarting() bridge call) has ever loaded — neither of oidcFlowActive's detection
+    // mechanisms can see that coming, since nothing Codexa-specific has run yet. While this is
+    // false, ANY cross-host redirect is assumed to be part of such a gate and stays in-WebView;
+    // once true, cross-host navigation reverts to normal (system browser), since we've now
+    // proven we're actually past whatever gate exists.
+    @Volatile
+    private var hasLoadedOwnContent = false
 
     // Launcher for ServerSelectActivity — handles both first-run and change-server flows
     private val serverSelectLauncher = registerForActivityResult(
@@ -62,6 +81,8 @@ class MainActivity : AppCompatActivity() {
             // user backed out mid-flow instead) — a stale true here would wrongly let the next
             // genuine external link stay in-WebView instead of opening the system browser.
             oidcFlowActive = false
+            // New/changed server — haven't proven we're past its auth gate (if any) yet.
+            hasLoadedOwnContent = false
             // Re-register the header-injection script in case the user just changed it
             // (or the server itself) in ServerSelectActivity, before loading the new URL.
             injectCustomHeadersScript()
@@ -161,6 +182,21 @@ class MainActivity : AppCompatActivity() {
                 controller.isAppearanceLightStatusBars = light
                 controller.isAppearanceLightNavigationBars = light
             }
+        }
+
+        /**
+         * Called by login.js right before it navigates to /api/auth/oidc/.../start (an explicit
+         * signal from the one place that actually knows an SSO flow is beginning), so the
+         * cross-host IdP redirect that follows stays inside this WebView instead of bouncing to
+         * the system browser. Replaces an earlier attempt at inferring this purely from
+         * inspecting URLs inside shouldOverrideUrlLoading, which turned out not to be reliable
+         * enough on its own (a real-world report showed the external-browser bounce still
+         * happening) — an explicit signal from the page itself, at the exact moment intent is
+         * known, removes that guesswork entirely. See oidcFlowActive below.
+         */
+        @JavascriptInterface
+        fun oidcFlowStarting() {
+            oidcFlowActive = true
         }
     }
 
@@ -394,8 +430,11 @@ class MainActivity : AppCompatActivity() {
                 // Any navigation to a host other than the configured Codexa server
                 // (e.g. a "View on BookOrbit" link) should open in the system browser
                 // instead of loading inside this app's WebView — UNLESS it's part of an
-                // SSO/OIDC login flow (see below), which legitimately hops through one or
-                // more external IdP domains before landing back on our own server.
+                // auth flow, which legitimately hops through one or more external domains
+                // before landing back on our own server. Two different cases, see the two
+                // flags' own doc comments: oidcFlowActive (Codexa's own OIDC "Sign in" button)
+                // and hasLoadedOwnContent (a reverse-proxy auth gate — Authelia, Pangolin,
+                // Cloudflare Access — redirecting before Codexa itself ever loads at all).
                 val serverHost = getSavedUrl()?.let { Uri.parse(it).host }
                 val targetHost = request.url.host
                 if (serverHost != null && targetHost != null && !targetHost.equals(serverHost, ignoreCase = true)) {
@@ -403,7 +442,7 @@ class MainActivity : AppCompatActivity() {
                     // there instead, stranding the resulting session in the system browser's
                     // separate cookie/storage — the WebView never sees it, so login looks like
                     // it silently does nothing. Stay in-WebView instead.
-                    if (oidcFlowActive) return false
+                    if (oidcFlowActive || !hasLoadedOwnContent) return false
                     try {
                         startActivity(Intent(Intent.ACTION_VIEW, request.url))
                     } catch (e: Exception) {
@@ -412,10 +451,13 @@ class MainActivity : AppCompatActivity() {
                     }
                     return true
                 }
-                // Same host (or server URL not yet known). Track whether we're in the middle
-                // of an SSO flow — any same-host page other than our own oidc start/callback
-                // endpoint means it has concluded, successfully or not (/oidc-callback.html
-                // and /login.html?error=... after a failed attempt both land here).
+                // Same host (or server URL not yet known). oidcFlowStarting() (JS bridge, called
+                // from login.js right before it navigates to /start) is the primary signal that
+                // an SSO flow is beginning — this URL-pattern check is a fallback/safety net for
+                // the same thing, and also what detects the flow has concluded: any same-host
+                // page other than our own oidc start/callback endpoint means it's over,
+                // successfully or not (/oidc-callback.html and /login.html?error=... after a
+                // failed attempt both land here).
                 oidcFlowActive = url.contains("/api/auth/oidc/")
                 // Same-host navigation: loadUrl(url, headers) only ever applies to the
                 // exact call it was passed to — it does not carry over to navigations the
@@ -434,6 +476,30 @@ class MainActivity : AppCompatActivity() {
                 return false
             }
 
+            override fun shouldInterceptRequest(
+                view: WebView,
+                request: WebResourceRequest
+            ): WebResourceResponse? {
+                // loadUrl(url, headers) and shouldOverrideUrlLoading's own re-attachment above
+                // both only ever apply headers to one explicit request — WebView does not
+                // resurrect them on any 3xx redirect the server sends back, even a same-host
+                // one (a real-world report confirmed this: headers worked on the very first
+                // request, then went missing on the redirect that followed, leaving a blank
+                // screen). shouldInterceptRequest is the only WebViewClient callback that sees
+                // every individual network request/redirect hop, so it's the only place this
+                // can actually be fixed. Scoped narrowly on purpose: only the top-level document
+                // GET to our own configured server, only when custom headers are configured —
+                // everything else (sub-resources, POST/PUT — which can't safely be re-issued
+                // here anyway since WebResourceRequest exposes no body — third-party hosts) is
+                // left to the WebView exactly as before.
+                if (!request.isForMainFrame || request.method != "GET") return null
+                val headers = getCustomHeaders()
+                if (headers.isEmpty()) return null
+                val serverHost = getSavedUrl()?.let { Uri.parse(it).host }
+                if (serverHost == null || !request.url.host.equals(serverHost, ignoreCase = true)) return null
+                return fetchFollowingRedirects(request.url.toString(), headers, serverHost)
+            }
+
             override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                 super.onPageStarted(view, url, favicon)
                 volumeKeyModeEnabled = false
@@ -448,6 +514,13 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
+                // Any page that finishes loading on our own host is proof we're past whatever
+                // reverse-proxy auth gate (if any) sits in front of it — see hasLoadedOwnContent.
+                val finishedHost = Uri.parse(url).host
+                val serverHost = getSavedUrl()?.let { Uri.parse(it).host }
+                if (finishedHost != null && serverHost != null && finishedHost.equals(serverHost, ignoreCase = true)) {
+                    hasLoadedOwnContent = true
+                }
                 val isReader = url.contains("/reader.html", ignoreCase = true)
                 runOnUiThread {
                     setImmersiveMode(isReader)
@@ -550,6 +623,56 @@ class MainActivity : AppCompatActivity() {
             getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .getString(ServerSelectActivity.PREF_HEADERS, "") ?: ""
         )
+
+    /**
+     * Manually resolves a GET request with the given headers attached, following any 3xx
+     * redirect chain ourselves — re-attaching the same headers to each hop — instead of handing
+     * it back to WebView's own redirect handling, which drops them (see shouldInterceptRequest
+     * above). Runs on shouldInterceptRequest's own background thread, so blocking I/O here is
+     * fine/expected. Stops and returns null (falling back to normal WebView loading) if a
+     * redirect ever leaves our own server's host — these headers are only ever meant for our
+     * own server, never a third party — or on any error, rather than risk a permanently blank
+     * WebView with no way to retry.
+     */
+    private fun fetchFollowingRedirects(
+        startUrl: String,
+        headers: Map<String, String>,
+        serverHost: String,
+        maxHops: Int = 10
+    ): WebResourceResponse? {
+        var currentUrl = startUrl
+        try {
+            repeat(maxHops) {
+                val conn = URL(currentUrl).openConnection() as HttpURLConnection
+                conn.instanceFollowRedirects = false
+                conn.connectTimeout = 15000
+                conn.readTimeout = 15000
+                conn.requestMethod = "GET"
+                for ((k, v) in headers) conn.setRequestProperty(k, v)
+                val code = conn.responseCode
+                if (code in 300..399) {
+                    val location = conn.getHeaderField("Location")
+                    conn.disconnect()
+                    if (location.isNullOrEmpty()) return null
+                    val next = java.net.URI(currentUrl).resolve(location).toString()
+                    val nextHost = Uri.parse(next).host
+                    if (nextHost == null || !nextHost.equals(serverHost, ignoreCase = true)) return null
+                    currentUrl = next
+                    return@repeat
+                }
+                val contentType = conn.contentType ?: "text/html"
+                val mimeType = contentType.substringBefore(';').trim().ifEmpty { "text/html" }
+                val charset = if (contentType.contains("charset=", ignoreCase = true))
+                    contentType.substringAfter("charset=").trim() else "utf-8"
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                return WebResourceResponse(mimeType, charset, stream)
+            }
+        } catch (e: Exception) {
+            // Network error, malformed redirect, etc. — fall back to letting WebView try
+            // loading it normally rather than risk a permanently blank, unretriable WebView.
+        }
+        return null
+    }
 
     // Handle to the currently-registered document-start script, so it can be replaced
     // (not stacked) if the user edits the headers via ServerSelectActivity mid-session.
