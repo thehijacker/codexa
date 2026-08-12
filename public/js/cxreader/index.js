@@ -195,23 +195,27 @@ export class CXReader {
   }
 
   // Navigate to chapter containing href (path with optional #fragment — fragment ignored).
-  async goToHref(href) {
+  async goToHref(href, page = 1) {
     if (!this._book || !this._containerEl) return;
     const idx = this._spineIndexForHref((href || '').split('#')[0]);
-    if (idx >= 0) await this.goToSpineItem(idx);
+    if (idx >= 0) await this.goToSpineItem(idx, page);
   }
 
   // Navigate to spine item identified by an epubcfi string (spine component only).
-  async goToCfi(cfi) {
+  // `page` (1-based, within the target chapter) is optional — makeCfi() itself only ever
+  // encodes the chapter, not a page, so callers that captured a real in-chapter position
+  // separately (see currentChapPage in reader.js) should pass it through here rather than
+  // silently landing on page 1 of the chapter.
+  async goToCfi(cfi, page = 1) {
     if (!this._book || !this._containerEl) return;
     const m = String(cfi).match(/^epubcfi\(\/6\/(\d+)!/);
     if (m) {
       const idx = Math.max(0, Math.floor(parseInt(m[1], 10) / 2) - 1);
-      await this.goToSpineItem(idx);
+      await this.goToSpineItem(idx, page);
       return;
     }
     // Treat as href fallback (e.g. chapter.xhtml)
-    if (cfi && !cfi.startsWith('epubcfi(')) await this.goToHref(cfi);
+    if (cfi && !cfi.startsWith('epubcfi(')) await this.goToHref(cfi, page);
   }
 
   // Percentage → spine item using content-proportional weights (falls back to uniform).
@@ -339,6 +343,20 @@ export class CXReader {
     this._fireRelocated();
   }
 
+  // Cancel any settle-timers still pending from _scheduleFontReflow() (see there). Those
+  // timers compare the current layout size against a snapshot taken right after the chapter's
+  // initial pagination — but scrollToRange/scrollToAnnotation/seekToPercent/seekToPage all
+  // reposition WITHIN an already-rendered chapter, often followed by a DOM mutation (e.g.
+  // search-result highlight marks) that nudges scrollWidth/scrollHeight just enough for every
+  // remaining timer to think a real layout shift happened. Each one then redoes onBeforePaginate
+  // (a full-chapter <p> scan, plus a full bionic-reading re-wrap if that pref is on) and a full
+  // paginator re-measure — up to 4 times over the following second, entirely on the main thread.
+  // On a real device that's long enough for touch input to be dropped outright, so once we've
+  // deliberately repositioned, the stale checks are cancelled rather than left to keep firing.
+  _cancelPendingReflow() {
+    this._reflowToken = (this._reflowToken || 0) + 1;
+  }
+
   // Navigate to the page containing the annotation <mark> with the given id.
   // Call AFTER goToCfi() so the chapter and its marks are already rendered.
   scrollToAnnotation(annotId) {
@@ -347,6 +365,7 @@ export class CXReader {
     const sel  = `mark[data-annot-id="${CSS.escape(String(annotId))}"]`;
     const mark = iframe.contentDocument.querySelector(sel);
     if (!mark) return;
+    this._cancelPendingReflow();
     // Page/spread 0 has no transform, so the mark's client rect is in natural body coords.
     this._paginator.goToElement(mark);
     this._fireRelocated();
@@ -356,6 +375,7 @@ export class CXReader {
   // Call AFTER goToSpineItem() so the chapter is rendered and the paginator is at spread 0.
   scrollToRange(range) {
     if (!range || !this._paginator) return;
+    this._cancelPendingReflow();
     this._paginator.goToRange(range);
     this._fireRelocated();
   }
@@ -378,6 +398,7 @@ export class CXReader {
     }
     const target = Math.max(1, Math.min(pageCount, Math.round(page0) + 1));
     if (target === this._paginator.currentPage) return;
+    this._cancelPendingReflow();
     this._paginator.goToPage(target);
     this._fireRelocated();
   }
@@ -386,6 +407,7 @@ export class CXReader {
   // Used to restore an exact saved page (more precise than seekToPercent when pageCount matches).
   seekToPage(n) {
     if (!this._paginator) return;
+    this._cancelPendingReflow();
     this._paginator.goToPage(n);
     this._fireRelocated();
   }

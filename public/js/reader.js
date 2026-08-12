@@ -341,6 +341,10 @@ let fontFaceCSS  = '';
 // Search state
 let searchAbort = { aborted: false };
 let preSearchCfi = null;      // position before first result jump
+// makeCfi() only ever encodes the chapter (spine index), never a page within it — so the
+// "back" restore also needs the exact in-chapter page captured separately, or it always
+// lands back on page 1 of the chapter instead of where the user actually was.
+let preSearchPage = null;
 // Two-phase search navigation state:
 //   phase 'first'  – navigated to chapter href, waiting for relocated to re-nav to exact CFI
 //   phase 'second' – navigated to exact CFI, waiting for relocated to mark highlights
@@ -349,6 +353,8 @@ let bionicWordCache = new Map();      // per-word split cache
 let bookmarksCache = [];              // loaded bookmarks for current book
 let preBookmarkCfi = null;            // position before a bookmark jump (for back/accept)
 let preAnnotationCfi = null;          // position before an annotation jump (for back/accept)
+let preBookmarkPage = null;           // in-chapter page companion to preBookmarkCfi (see preSearchPage)
+let preAnnotationPage = null;         // in-chapter page companion to preAnnotationCfi (see preSearchPage)
 
 // Clear both bookmark and annotation pre-jump states + hide their buttons.
 // Called before starting a new bookmark/annotation jump so at most one pair of
@@ -356,6 +362,8 @@ let preAnnotationCfi = null;          // position before an annotation jump (for
 function _clearNavPreJumps() {
   preBookmarkCfi  = null;
   preAnnotationCfi = null;
+  preBookmarkPage  = null;
+  preAnnotationPage = null;
   if (bookmarkBackBtn)    { bookmarkBackBtn.style.display    = 'none'; }
   if (bookmarkAcceptBtn)  { bookmarkAcceptBtn.style.display  = 'none'; }
   if (annotationBackBtn)  { annotationBackBtn.style.display  = 'none'; }
@@ -2587,6 +2595,7 @@ function renderAnnotationList() {
       _clearNavPreJumps();
       if (currentCfi) {
         preAnnotationCfi = currentCfi;
+        preAnnotationPage = currentChapPage;
         annotationBackBtn.style.display   = '';
         annotationAcceptBtn.style.display = '';
       }
@@ -3495,11 +3504,20 @@ function closePanels() {
     // delays, since keyboard-dismiss timing varies a lot across devices/browsers (same
     // multi-probe strategy presetNamePrompt() uses for the same reason). Covers the settle
     // window right after the live guard above stops.
+    // Only call reapplyStyles() (full CSS rebuild + full CXReader re-paginate) when a var
+    // actually needed correcting — same "did it really change" guard _reassertSearchSafeArea
+    // already uses for its own 150ms ticks. Without it, all 4 of these fire unconditionally on
+    // EVERY search-result jump (jumpToSearchResultCX calls closePanels() first thing), each
+    // one doing a full-chapter onBeforePaginate + re-measure + a fresh _scheduleFontReflow
+    // round — a burst of main-thread work landing right as the reader shows the result page,
+    // long enough in practice to make touch input get dropped.
     const root = document.documentElement;
     const restore = () => {
-      if (_searchSat) root.style.setProperty('--sat', _searchSat);
-      if (_searchSab) root.style.setProperty('--sab', _searchSab);
-      reapplyStyles();
+      const satChanged = !!_searchSat && root.style.getPropertyValue('--sat') !== _searchSat;
+      const sabChanged = !!_searchSab && root.style.getPropertyValue('--sab') !== _searchSab;
+      if (satChanged) root.style.setProperty('--sat', _searchSat);
+      if (sabChanged) root.style.setProperty('--sab', _searchSab);
+      if (satChanged || sabChanged) reapplyStyles();
     };
     [50, 300, 700, 1200].forEach(ms => setTimeout(restore, ms));
   }
@@ -3691,6 +3709,7 @@ async function jumpToSearchResultCX(spineIdx, textOffset, query) {
   if (!_cxReader) return;
   if (!preSearchCfi && currentCfi) {
     preSearchCfi = currentCfi;
+    preSearchPage = currentChapPage;
     searchBackBtn.style.display   = '';
     searchAcceptBtn.style.display = '';
   }
@@ -5896,7 +5915,11 @@ async function startCXRendition(displayCfi = null) {
   window.addEventListener('message', _cxLinkHandler);
 
   try {
-    const { CXReader } = await import('./cxreader/index.js');
+    // Cache-busted like reader.js's own <script> tag (see reader.html) — this dynamic import
+    // has no query string of its own otherwise, so it can go stale independently of reader.js
+    // (browser/SW cache keys purely on URL) even when reader.js itself is freshly fetched.
+    // Bump this alongside reader.html's ?v= whenever cxreader/index.js changes.
+    const { CXReader } = await import('./cxreader/index.js?v=br-v109');
     _cxReader = new CXReader();
     _cxReader.onBeforePaginate = (iframe) => { _cxApplyIframeInset(iframe); _cxApplyHooks(iframe); };
 
@@ -6442,6 +6465,27 @@ function isTextInputFocused() {
   return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable === true;
 }
 
+// Timestamp of the last time a text-editable element lost focus. The resize listener's
+// isTextInputFocused() guard only catches the keyboard OPENING (input still focused when the
+// resize fires) — but code like closePanels() (e.g. tapping a search result) blurs the input
+// PROGRAMMATICALLY and SYNCHRONOUSLY, before the keyboard's own close animation has even
+// started, so by the time the keyboard-close resize event(s) actually arrive (each one
+// separately, ~300ms+ apart, matching this app's own debounce), the input is already blurred
+// and the guard sees nothing to skip. That let every one of those spurious resizes trigger a
+// full _cxSyncLayout() re-paginate right as the reader lands on a fresh page — exactly the
+// kind of main-thread churn that can make touch input get dropped (see _cancelPendingReflow
+// in cxreader/index.js for the sibling fix to the same class of problem). Extend the guard to
+// also cover a short window after a text input blurs, long enough for the keyboard's close
+// animation (and its resize events) to finish.
+let _lastTextInputBlurTs = 0;
+document.addEventListener('focusout', (e) => {
+  const tag = e.target?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable === true) {
+    _lastTextInputBlurTs = Date.now();
+  }
+}, true);
+const TEXT_INPUT_BLUR_GUARD_MS = 500; // covers the keyboard close animation + its resize event(s)
+
 // Running inside a Capacitor-wrapped WKWebView (iOS native app).
 // window.Capacitor is injected by the Capacitor bridge into every page the WKWebView loads.
 function isIOSApp() {
@@ -6517,7 +6561,10 @@ window.addEventListener('resize', debounce(() => {
   // camera-cutout inset and true full-screen height don't actually change just because a
   // keyboard opened, so there's nothing here that legitimately needs to react to it; skipping
   // avoids both the visible resize/jerk and CXReader drifting to the wrong page in the process.
-  if (isTextInputFocused()) return;
+  // Also skip shortly after a text input blurs (see _lastTextInputBlurTs) — that's the keyboard
+  // CLOSING, which fires this same spurious resize but with the input already unfocused, so
+  // isTextInputFocused() alone can't catch it.
+  if (isTextInputFocused() || Date.now() - _lastTextInputBlurTs < TEXT_INPUT_BLUR_GUARD_MS) return;
   // When running inside the Android app, system bars are hidden in reader, but that doesn't
   // mean the top/bottom inset is zero — a camera cutout (or gesture-nav pill) still reserves
   // real space that env(safe-area-inset-*) reports independently of bar visibility. This used
@@ -6756,6 +6803,7 @@ function renderBookmarkList() {
       _clearNavPreJumps();
       if (currentCfi) {
         preBookmarkCfi = currentCfi;
+        preBookmarkPage = currentChapPage;
         bookmarkBackBtn.style.display   = '';
         bookmarkAcceptBtn.style.display = '';
       }
@@ -7143,16 +7191,18 @@ document.getElementById('btn-search').addEventListener('click', () =>
 document.getElementById('btn-search-back').addEventListener('click', async () => {
   if (!preSearchCfi) return;
   clearSearchHighlights();
-  const cfi = preSearchCfi;
+  const cfi = preSearchCfi, page = preSearchPage || 1;
   preSearchCfi = null;
+  preSearchPage = null;
   searchBackBtn.style.display   = 'none';
   searchAcceptBtn.style.display = 'none';
   if (prefs.autoHideHeader) forceHideAutoHeader();
-  if (_cxReader) await _cxReader.goToCfi(cfi);
+  if (_cxReader) await _cxReader.goToCfi(cfi, page);
 });
 document.getElementById('btn-search-accept').addEventListener('click', () => {
   clearSearchHighlights();
   preSearchCfi = null;
+  preSearchPage = null;
   searchBackBtn.style.display   = 'none';
   searchAcceptBtn.style.display = 'none';
   if (prefs.autoHideHeader) forceHideAutoHeader();
@@ -7160,15 +7210,17 @@ document.getElementById('btn-search-accept').addEventListener('click', () => {
 // Bookmark navigation back/accept — same pattern as search
 document.getElementById('btn-bookmark-back').addEventListener('click', async () => {
   if (!preBookmarkCfi) return;
-  const cfi = preBookmarkCfi;
+  const cfi = preBookmarkCfi, page = preBookmarkPage || 1;
   preBookmarkCfi = null;
+  preBookmarkPage = null;
   bookmarkBackBtn.style.display   = 'none';
   bookmarkAcceptBtn.style.display = 'none';
   if (prefs.autoHideHeader) forceHideAutoHeader();
-  if (_cxReader) await _cxReader.goToCfi(cfi);
+  if (_cxReader) await _cxReader.goToCfi(cfi, page);
 });
 document.getElementById('btn-bookmark-accept').addEventListener('click', () => {
   preBookmarkCfi = null;
+  preBookmarkPage = null;
   bookmarkBackBtn.style.display   = 'none';
   bookmarkAcceptBtn.style.display = 'none';
   if (prefs.autoHideHeader) forceHideAutoHeader();
@@ -7177,15 +7229,17 @@ document.getElementById('btn-bookmark-accept').addEventListener('click', () => {
 });
 document.getElementById('btn-annotation-back').addEventListener('click', async () => {
   if (!preAnnotationCfi) return;
-  const cfi = preAnnotationCfi;
+  const cfi = preAnnotationCfi, page = preAnnotationPage || 1;
   preAnnotationCfi = null;
+  preAnnotationPage = null;
   annotationBackBtn.style.display   = 'none';
   annotationAcceptBtn.style.display = 'none';
   if (prefs.autoHideHeader) forceHideAutoHeader();
-  if (_cxReader) await _cxReader.goToCfi(cfi);
+  if (_cxReader) await _cxReader.goToCfi(cfi, page);
 });
 document.getElementById('btn-annotation-accept').addEventListener('click', () => {
   preAnnotationCfi = null;
+  preAnnotationPage = null;
   annotationBackBtn.style.display   = 'none';
   annotationAcceptBtn.style.display = 'none';
   if (prefs.autoHideHeader) forceHideAutoHeader();
