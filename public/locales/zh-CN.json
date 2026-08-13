@@ -241,6 +241,7 @@
  "library.confirm_remove_from_shelf": "将 {n} 本书从书架移除？",
  "library.toast_assigned": "已分配：{books} 本书到 {shelves} 个书架。",
  "library.toast_shelf_created": "书架“{name}”已创建。",
+ "library.upload_modal_title": "正在上传书籍…",
  "library.upload_progress": "正在上传 {name}… ({cur}/{total})",
  "library.upload_result": "已上传：{uploaded}, 失败：{failed}",
  "reader.loading_book": "正在加载书籍…",

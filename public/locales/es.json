@@ -241,6 +241,7 @@
   "library.confirm_remove_from_shelf": "¿Quitar {n} libros de la estantería?",
   "library.toast_assigned": "Asignados: {books} libros a {shelves} estanterías.",
   "library.toast_shelf_created": "Estantería \"{name}\" creada.",
+  "library.upload_modal_title": "Subiendo libros…",
   "library.upload_progress": "Subiendo {name}… ({cur}/{total})",
   "library.upload_result": "Subidos: {uploaded}, Fallidos: {failed}",
   "reader.loading_book": "Cargando libro…",

@@ -241,6 +241,7 @@
   "library.confirm_remove_from_shelf": "Remove {n} books from shelf?",
   "library.toast_assigned": "Assigned: {books} books to {shelves} shelves.",
   "library.toast_shelf_created": "Shelf \"{name}\" created.",
+  "library.upload_modal_title": "Uploading books…",
   "library.upload_progress": "Uploading {name}… ({cur}/{total})",
   "library.upload_result": "Uploaded: {uploaded}, Failed: {failed}",
   "reader.loading_book": "Loading book…",

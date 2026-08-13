@@ -241,6 +241,7 @@
   "library.confirm_remove_from_shelf": "Retirer {n} livres de l'étagère ?",
   "library.toast_assigned": "{books} livres assignés à {shelves} étagères.",
   "library.toast_shelf_created": "L'étagère \"{name}\" a été créée.",
+  "library.upload_modal_title": "Téléversement des livres…",
   "library.upload_progress": "Téléversement de {name}… ({cur}/{total})",
   "library.upload_result": "Téléversés : {uploaded}, Échecs : {failed}",
   "reader.loading_book": "Chargement du livre…",

@@ -241,6 +241,7 @@
   "library.confirm_remove_from_shelf": "Remover {n} livros da estante?",
   "library.toast_assigned": "{books} livros atribuídos a {shelves} estantes.",
   "library.toast_shelf_created": "A estante \"{name}\" foi criada.",
+  "library.upload_modal_title": "A carregar livros…",
   "library.upload_progress": "A carregar {name}… ({cur}/{total})",
   "library.upload_result": "Carregados: {uploaded}, Falhados: {failed}",
   "reader.loading_book": "A carregar livro…",

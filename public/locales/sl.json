@@ -241,6 +241,7 @@
   "library.confirm_remove_from_shelf": "Odstranjujete {n} knjig iz police?",
   "library.toast_assigned": "Dodeljeno: {books} knjig v {shelves} polic.",
   "library.toast_shelf_created": "Polica \"{name}\" ustvarjena.",
+  "library.upload_modal_title": "Nalaganje knjig…",
   "library.upload_progress": "Nalagam {name}… ({cur}/{total})",
   "library.upload_result": "Naloženo: {uploaded}, Napaka: {failed}",
   "reader.loading_book": "Nalagam knjigo…",

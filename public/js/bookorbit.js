@@ -97,6 +97,7 @@ async function selectSection(section) {
     searchRow.hidden = false;
     searchInput.value = '';
     searchInput.placeholder = t('bookorbit.search_books_ph');
+    closeDrawer();
     searchInput.focus();
     return;
   }

@@ -241,6 +241,7 @@
   "library.confirm_remove_from_shelf": "{n} Bücher aus dem Regal entfernen?",
   "library.toast_assigned": "{books} Bücher zu {shelves} Regalen zugewiesen.",
   "library.toast_shelf_created": "Regal \"{name}\" wurde erstellt.",
+  "library.upload_modal_title": "Bücher werden hochgeladen…",
   "library.upload_progress": "Lade {name} hoch… ({cur}/{total})",
   "library.upload_result": "Hochgeladen: {uploaded}, Fehlgeschlagen: {failed}",
   "reader.loading_book": "Buch wird geladen…",

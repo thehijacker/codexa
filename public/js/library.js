@@ -2083,25 +2083,83 @@ async function deleteBook(id) {
 }
 
 // ── Upload ────────────────────────────────────────────────────────────────────
-let dropZone, fileInput, uploadBtn, uploadMenu, uploadStatus;
+let dropZone, fileInput, uploadBtn, uploadMenu;
 
 function showDropZone() {
   dropZone.classList.toggle('hidden');
   if (!dropZone.classList.contains('hidden')) dropZone.scrollIntoView({ behavior: 'smooth' });
 }
 
+// Modal shown the instant files are picked/dropped, listing one row per file.
+// Rows start as a spinner and are updated live via setRow() as each upload
+// settles — success gets a green check + a link into that book's info modal,
+// failure gets a red cross + the translated error message. Closing early
+// doesn't cancel in-flight uploads; setRow() on a detached dialog is a no-op.
+function openUploadStatusModal(fileNames) {
+  document.getElementById('upload-status-modal')?.remove();
+  const backdrop = document.createElement('div');
+  backdrop.id        = 'upload-status-modal';
+  backdrop.className = 'modal-backdrop';
+  backdrop.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true" style="max-width:460px">
+      <button class="modal-close" id="upload-modal-close" aria-label="${t('common.close')}">&times;</button>
+      <h2 id="upload-modal-title">${t('library.upload_modal_title')}</h2>
+      <div class="upload-status-list">
+        ${fileNames.map((name, i) => `
+          <div class="upload-status-row" id="upload-status-row-${i}">
+            <span class="upload-status-icon"><span class="spinner"></span></span>
+            <span class="upload-status-name">${escHtml(name)}</span>
+          </div>`).join('')}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="upload-modal-done">${t('common.close')}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(backdrop);
+  const close = () => backdrop.remove();
+  backdrop.querySelector('#upload-modal-close').addEventListener('click', close);
+  backdrop.querySelector('#upload-modal-done').addEventListener('click', close);
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+
+  return {
+    setRow(i, status, extra) {
+      const row = backdrop.querySelector(`#upload-status-row-${i}`);
+      if (!row) return; // dialog was closed
+      if (status === 'ok') {
+        row.querySelector('.upload-status-icon').innerHTML = '<span class="upload-status-ok">✓</span>';
+        const link = document.createElement('button');
+        link.type = 'button';
+        link.className = 'upload-status-link';
+        link.textContent = t('library.btn_cover_info');
+        link.addEventListener('click', () => openInfoModal({ id: extra }));
+        row.appendChild(link);
+      } else {
+        row.classList.add('upload-status-row-fail');
+        row.querySelector('.upload-status-icon').innerHTML = '<span class="upload-status-fail">✗</span>';
+        const msg = document.createElement('span');
+        msg.className = 'upload-status-error';
+        msg.textContent = extra;
+        row.appendChild(msg);
+      }
+    },
+    finish(uploaded, failed) {
+      const h2 = backdrop.querySelector('#upload-modal-title');
+      if (h2) h2.textContent = t('library.upload_result', { uploaded, failed });
+    },
+  };
+}
+
 async function handleFiles(fileList) {
   const epubs = [...fileList].filter(f => f.name.endsWith('.epub') || f.name.endsWith('.cbz') || f.name.endsWith('.cbr'));
   if (!epubs.length) { toast.error(t('library.err_not_epub')); return; }
 
-  setButtonLoading(uploadBtn, true, '+ Dodaj knjigo ▾');
-  uploadStatus.classList.remove('hidden');
+  setButtonLoading(uploadBtn, true);
   dropZone.classList.add('hidden');
+  const modal = openUploadStatusModal(epubs.map(f => f.name));
 
   let uploaded = 0, failed = 0;
-  for (const file of epubs) {
-    uploadStatus.innerHTML = `<div class="alert alert-info" style="background:var(--color-surface2)">
-      ${t('library.upload_progress', { name: escHtml(file.name), n: uploaded + failed + 1, total: epubs.length })}</div>`;
+  for (let i = 0; i < epubs.length; i++) {
+    const file = epubs[i];
     const formData = new FormData();
     formData.append('epub', file);
     try {
@@ -2116,14 +2174,18 @@ async function handleFiles(fileList) {
         const translated = t(code);
         throw new Error((translated !== code && code) ? translated : (code || t('error.http_error', { status: r.status })));
       }
+      const book = await r.json();
       uploaded++;
-    } catch (err) { failed++; console.error('Upload failed:', file.name, err.message); }
+      modal.setRow(i, 'ok', book.id);
+    } catch (err) {
+      failed++;
+      console.error('Upload failed:', file.name, err.message);
+      modal.setRow(i, 'fail', err.message);
+    }
   }
 
-  uploadStatus.innerHTML = `<div class="alert alert-${failed ? 'error' : 'success'}">
-    ${t('library.upload_result', { uploaded, failed })}</div>`;
-  setTimeout(() => { uploadStatus.classList.add('hidden'); uploadStatus.innerHTML = ''; }, 4000);
-  setButtonLoading(uploadBtn, false, '+ Dodaj knjigo ▾');
+  modal.finish(uploaded, failed);
+  setButtonLoading(uploadBtn, false);
   fileInput.value = '';
   await loadBooks();
   await reloadShelves();
@@ -2361,7 +2423,6 @@ export async function initLibrary() {
   fileInput    = document.getElementById('file-input');
   uploadBtn    = document.getElementById('upload-btn');
   uploadMenu   = document.getElementById('upload-menu');
-  uploadStatus = document.getElementById('upload-status');
 
   // Sort
   const savedSort = localStorage.getItem('library-sort');

@@ -241,6 +241,7 @@
   "library.confirm_remove_from_shelf": "Rimuovere {n} libri dallo scaffale?",
   "library.toast_assigned": "Assegnati {books} libri a {shelves} scaffali.",
   "library.toast_shelf_created": "Scaffale \"{name}\" creato.",
+  "library.upload_modal_title": "Caricamento libri…",
   "library.upload_progress": "Caricamento {name}… ({cur}/{total})",
   "library.upload_result": "Caricati: {uploaded}, Falliti: {failed}",
   "reader.loading_book": "Caricamento libro…",

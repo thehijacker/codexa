@@ -905,6 +905,42 @@ html[data-lib-theme="eink"] .book-card-actions .cover-preview-btn .nav-icon,
 }
 .admin-upload-btn { position: relative; cursor: pointer; }
 
+/* ── Upload status dialog ───────────────────────────────────────────────────── */
+.upload-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  max-height: 320px;
+  overflow-y: auto;
+  margin-bottom: 1rem;
+}
+.upload-status-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem;
+  padding: .4rem .6rem;
+  border-radius: var(--radius);
+  background: var(--color-surface2);
+  font-size: .88rem;
+}
+.upload-status-row-fail { background: rgba(233,69,96,.08); }
+.upload-status-icon { flex-shrink: 0; width: 1.1em; text-align: center; }
+.upload-status-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.upload-status-ok   { color: #81c784; font-weight: bold; }
+.upload-status-fail { color: #ff6b8a; font-weight: bold; }
+.upload-status-error { flex-basis: 100%; font-size: .78rem; color: var(--color-text-muted); }
+.upload-status-link {
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  cursor: pointer;
+  font-size: .82rem;
+  text-decoration: underline;
+  padding: 0;
+  margin-left: auto;
+}
+
 /* ── Scrollbar ──────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
