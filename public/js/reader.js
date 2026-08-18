@@ -1464,6 +1464,128 @@ function fixDropCaps(doc) {
   });
 }
 
+// ── Theme-friendly image backgrounds ────────────────────────────────────────
+// Many EPUBs use small JPEG "ornament"/scene-break images (ink line-art on a flat
+// white background) or whole-page black-and-white illustrations exported the same
+// way. A JPEG has no alpha channel, so on any theme except near-white ones the
+// image's square shows as a stark white box against the page. CSS
+// `mix-blend-mode: multiply` (in buildEpubCss, below) already targets this in
+// principle — multiply(white, pageBg) mathematically equals pageBg — but that
+// relies on GPU blend compositing, which is known to be unreliable inside CSS
+// multi-column layouts across engines (Chrome, WebKit and old Android WebViews
+// alike) — and pagination here is built entirely on multi-column. So instead of
+// depending on compositing, this bakes real transparency into the image: sample
+// it, and if it looks like flat line-art on a white background, redraw it onto a
+// canvas with those near-white pixels turned genuinely transparent and swap the
+// <img> to that PNG.
+//
+// Detection is two signals over the WHOLE image (downscaled for speed), not just
+// its border: the fraction of near-white pixels must be high, AND the remaining
+// "ink" pixels must be low-saturation (grayscale-ish, as real line art always is).
+// An earlier version only sampled a border ring, on the theory that a real photo
+// rarely has a uniform near-white edge — but many real-world scene-break/ornament
+// images are cropped tight with almost no padding (e.g. a 75×9px "* * *" strip
+// where the asterisks already touch the top/bottom edges), so squashing them into
+// a square sample smeared the ink across the ring and made a genuinely
+// white-background image fail a border-only check. Requiring low ink saturation
+// (rather than border position) is what keeps real color photos from being
+// falsely knocked out even though some of those can also have large bright areas.
+const IMG_BG_WHITE_THRESHOLD = 238;    // 0-255 per channel — how close to pure white counts as "background"
+const IMG_BG_SAMPLE          = 40;     // downscale size used for the cheap pass/fail check
+const IMG_BG_WHITE_FRAC_MIN  = 0.5;    // require at least this fraction of the image to be near-white
+const IMG_BG_INK_SAT_MAX     = 40;     // and the non-white "ink" pixels to average under this saturation (0-255)
+const IMG_BG_MAX_PIXELS      = 1400 * 1400; // skip full processing above this — too slow on weak/e-ink CPUs
+
+function _looksLikeWhiteBgLineArt(img) {
+  try {
+    const c = document.createElement('canvas');
+    c.width = c.height = IMG_BG_SAMPLE;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, IMG_BG_SAMPLE, IMG_BG_SAMPLE);
+    const { data } = ctx.getImageData(0, 0, IMG_BG_SAMPLE, IMG_BG_SAMPLE);
+    let white = 0, inkSatSum = 0, inkCount = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i], g = data[i+1], b = data[i+2];
+      if (r >= IMG_BG_WHITE_THRESHOLD && g >= IMG_BG_WHITE_THRESHOLD && b >= IMG_BG_WHITE_THRESHOLD) {
+        white++;
+      } else {
+        inkCount++;
+        inkSatSum += Math.max(r, g, b) - Math.min(r, g, b);
+      }
+    }
+    const whiteFrac = white / (IMG_BG_SAMPLE * IMG_BG_SAMPLE);
+    const avgInkSat = inkCount ? inkSatSum / inkCount : 0;
+    return whiteFrac >= IMG_BG_WHITE_FRAC_MIN && avgInkSat <= IMG_BG_INK_SAT_MAX;
+  } catch { return false; }
+}
+
+// Returns a transparent-background PNG data URL for a loaded, white-bg-line-art
+// image, or null if it's not a match (or too big / failed to process). Works on
+// any loaded image-like element (an <img>, or a detached probe Image used for a
+// CSS background-image — see stripImageWhiteBackgrounds below).
+function _knockOutWhiteBackground(imgEl) {
+  try {
+    const w = imgEl.naturalWidth, h = imgEl.naturalHeight;
+    if (!w || !h || w * h > IMG_BG_MAX_PIXELS) return null;
+    if (!_looksLikeWhiteBgLineArt(imgEl)) return null;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(imgEl, 0, 0, w, h);
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const d = imgData.data;
+    const hi = IMG_BG_WHITE_THRESHOLD, lo = hi - 30; // soft-edge fade between lo and hi, avoids a hard jaggy cutout
+    for (let i = 0; i < d.length; i += 4) {
+      const lum = (d[i] + d[i+1] + d[i+2]) / 3;
+      if (lum >= hi) d[i+3] = 0;
+      else if (lum > lo) d[i+3] = Math.round(d[i+3] * (hi - lum) / (hi - lo));
+    }
+    ctx.putImageData(imgData, 0, 0);
+    return c.toDataURL('image/png');
+  } catch (err) { warn('[reader] image background knockout failed:', err.message); return null; }
+}
+
+// Walk every image once per chapter document and knock out white backgrounds on the
+// ones that look like line-art. Covers two cases:
+//  1. Real <img> elements — the common case.
+//  2. A CSS `background-image` on an otherwise-empty element — many EPUBs render a
+//     scene-break/ornament as e.g. `<hr class="transition"/>` styled with
+//     `background: url(asterisks.jpg) no-repeat center` in the book's own
+//     stylesheet, so the image never appears as an <img> at all. Checking every
+//     element's computed style would be needlessly expensive on weak/e-ink CPUs, so
+//     this is restricted to <hr> (essentially always decorative) plus elements with
+//     no text and no children (a background-image is the only thing they can be
+//     rendering — real content elements are skipped).
+function stripImageWhiteBackgrounds(doc) {
+  if (doc.documentElement.dataset.brImgBgFixed) return;
+  doc.documentElement.dataset.brImgBgFixed = '1';
+
+  doc.querySelectorAll('img').forEach(img => {
+    const process = () => { const url = _knockOutWhiteBackground(img); if (url) img.src = url; };
+    if (img.complete && img.naturalWidth) process();
+    else img.addEventListener('load', process, { once: true });
+  });
+
+  const win = doc.defaultView;
+  if (!win) return;
+  const candidates = new Set(doc.querySelectorAll('hr'));
+  doc.querySelectorAll('div, span, p, li, td').forEach(el => {
+    if (el.childElementCount === 0 && el.textContent.trim() === '') candidates.add(el);
+  });
+  candidates.forEach(el => {
+    let bg;
+    try { bg = win.getComputedStyle(el).backgroundImage; } catch { return; }
+    const m = /^url\(["']?(.+?)["']?\)$/.exec(bg || '');
+    if (!m || !m[1]) return;
+    const probe = new Image();
+    probe.onload = () => {
+      const url = _knockOutWhiteBackground(probe);
+      if (url) el.style.backgroundImage = `url("${url}")`;
+    };
+    probe.src = m[1];
+  });
+}
+
 function injectIntoContents(contents) {
   if (!contents?.document) return;
   const doc = contents.document;
@@ -1502,6 +1624,7 @@ function injectIntoContents(contents) {
     el.textContent = newCss;
   }
   fixDropCaps(doc);
+  stripImageWhiteBackgrounds(doc);
   if (prefs.bionicReading) {
     applyBionicToDocument(doc);
   }
