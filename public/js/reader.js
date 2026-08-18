@@ -1853,7 +1853,13 @@ function attachIframeDictionary(contents) {
   // iOS: suppress native callout and text-selection takeover inside epub iframes.
   if (isIOS) {
     const iosStyle = doc.createElement('style');
-    iosStyle.textContent = '* { -webkit-touch-callout: none !important; -webkit-user-select: none !important; user-select: none !important; }';
+    // -webkit-tap-highlight-color also needs killing here: the outer app disables it globally
+    // (reader.css/main.css), but that CSS never reaches this iframe's own document. Without it,
+    // WebKit falls back to its default translucent grey/blue "tap flash" on whichever ancestor
+    // owns the touch listeners that fire our long-press timer below (effectively the whole
+    // page here) — it washes the entire visible page a different shade the instant a long-press
+    // is held, on top of (and unrelated to) our own small <mark> word highlight.
+    iosStyle.textContent = '* { -webkit-touch-callout: none !important; -webkit-user-select: none !important; user-select: none !important; -webkit-tap-highlight-color: transparent !important; }';
     (doc.head || doc.documentElement).appendChild(iosStyle);
   }
 
@@ -1909,6 +1915,21 @@ function attachIframeDictionary(contents) {
   }
 
   doc.addEventListener('touchstart', (e) => {
+    // iOS: the iosStyle block above (user-select/touch-callout: none) only suppresses the
+    // *outcome* of WebKit's native long-press-to-select gesture, not the gesture recognizer
+    // itself — it still runs on every touch-and-hold, racing our own 450ms timer below. Most
+    // of the time the CSS wins and nothing shows, but the race is genuinely unreliable: it can
+    // also partially win (grabbing some native selection range, painted with the browser's
+    // default ::selection background across the whole visible page — the "whole background
+    // tints" report) or fully win (the native Copy/Select All/Translate callout). Android is
+    // deliberately left alone here (see the !isIOS branch below — its native long-press IS the
+    // selection mechanism this app relies on there), but iOS gets no benefit from that gesture
+    // at all since it never reaches the OS UI cleanly, so killing it outright with an explicit
+    // preventDefault() is more reliable than the CSS alone. Nothing else on this document needs
+    // the default touchstart behavior: CXReader pagination is `html{overflow:hidden}` + JS
+    // transforms (no native scroll to preserve), and preventDefault() on touchstart doesn't
+    // suppress the synthetic click taps/nav-zones/footnotes rely on (only touchend would).
+    if (isIOS && e.cancelable) e.preventDefault();
     const t = e.touches[0];
     pressX = t.clientX;
     pressY = t.clientY;
@@ -1968,7 +1989,7 @@ function attachIframeDictionary(contents) {
         window.parent.postMessage({ type: 'dict-lookup', word }, '*');
       }
     }, 450);
-  }, { passive: true });
+  }, { passive: false });
 
   doc.addEventListener('touchmove', (e) => {
     if (Math.abs(e.touches[0].clientX - pressX) > 18 || Math.abs(e.touches[0].clientY - pressY) > 18) {
@@ -2186,7 +2207,17 @@ function attachIframeAnnotation(contents) {
       // Selection was cleared — e.g. the user tapped elsewhere in the book to dismiss it
       // (a plain tap collapses any active selection on its own). Close the toolbar to match,
       // instead of leaving it stranded open with nothing selected underneath it.
-      window.parent.postMessage({ type: 'annotation-deselect' }, '*');
+      //
+      // iOS is excluded: its long-press flow (attachIframeDictionary's isIOS branch) never
+      // populates a real window Selection at all — it force-disables user-select and instead
+      // builds its own <mark> highlight from a synthetic Range, so doc.getSelection() here is
+      // permanently collapsed. Without this guard, the very next touchend after opening the
+      // toolbar (including the long-press gesture's own finger-lift) would immediately fire
+      // this branch and close the toolbar a moment after it appeared — text looked "selected"
+      // for an instant, then deselected itself. Dismissal-by-tapping-elsewhere is already
+      // covered on iOS by the full-screen #annot-backdrop overlay (it sits above the iframe
+      // whenever the toolbar is open), so skipping this message there loses nothing.
+      if (!isIOS) window.parent.postMessage({ type: 'annotation-deselect' }, '*');
       return;
     }
     const text = sel.toString().trim();
