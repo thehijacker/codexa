@@ -1,6 +1,8 @@
 // CXReader — Chapter Renderer
 // Renders a spine item into an iframe inside containerEl.
 // Resource URLs (images, CSS) are rewritten to blob URLs from the manifest.
+import { warn } from '../logger.js';
+import { stripImageWhiteBackgrounds } from '../img-bg-fix.js';
 
 export class ChapterRenderer {
   constructor(manifest) {
@@ -62,8 +64,9 @@ export class ChapterRenderer {
     // Fetch chapter source via blob URL
     const raw = await fetch(spineItem.blobUrl).then(r => r.text());
 
-    // Parse as HTML (handles both HTML5 and XHTML spine items)
-    const doc = new DOMParser().parseFromString(this._xhtmlToHtml(raw), 'text/html');
+    // Parse as HTML (handles both HTML5 and XHTML spine items). Reassigned below (e-ink
+    // only) to a live document if the pre-render white-background pass runs.
+    let doc = new DOMParser().parseFromString(this._xhtmlToHtml(raw), 'text/html');
 
     // Remove any <base> tags — we resolve URLs ourselves
     doc.querySelectorAll('base').forEach(el => el.remove());
@@ -95,6 +98,53 @@ export class ChapterRenderer {
 
     // Rewrite element resource attributes to blob (or data: on legacy WebViews) URLs
     await this._rewriteElements(doc, chapterBase);
+
+    // stripImageWhiteBackgrounds (img-bg-fix.js) needs getComputedStyle to see the book's
+    // own background-image CSS, which needs a live document with a window/layout — `doc`
+    // here is a detached DOMParser document, and by definition this must run BEFORE
+    // readerCss (added just below) is present, since on e-ink themes readerCss carries a
+    // blanket `body * { background-image: none !important }` reset that would otherwise
+    // make every candidate's computed style read back "none" (see the top-of-file comment
+    // in img-bg-fix.js — confirmed live on a Boox Palma 2, where e-ink is the device's
+    // saved default, so every chapter's very first render already has this problem; it's
+    // not something a live post-render pass in reader.js can ever recover from once it's
+    // baked into the HTML like that). So for e-ink chapters only, briefly attach the
+    // in-progress document to a hidden throwaway iframe just to run detection with a real
+    // layout engine, then keep working with THAT iframe's live document as `doc` for the
+    // rest of this function — cheaper and far less invasive than hand-rolling a
+    // getComputedStyle-free CSS-rule matcher. Skipped for fixed-layout pages, which never
+    // get readerCss injected at all (see the `if (!fixedLayout)` block below) and so were
+    // never affected by this in the first place.
+    let tmpIframe = null;
+    if (!fixedLayout && readerCss.includes('e-ink mode: strip all colours')) {
+      let tmpUrl = null;
+      try {
+        tmpUrl = URL.createObjectURL(new Blob(
+          ['<!DOCTYPE html>' + doc.documentElement.outerHTML], { type: 'text/html; charset=utf-8' }));
+        tmpIframe = document.createElement('iframe');
+        tmpIframe.setAttribute('sandbox', 'allow-same-origin');
+        // Off-screen but real dimensions — a zero-size iframe can skip layout on some
+        // engines, which would defeat the whole point of using a live document here.
+        tmpIframe.style.cssText = 'position:fixed; left:-9999px; top:0; width:800px; height:1200px; border:none;';
+        document.body.appendChild(tmpIframe);
+        await new Promise((resolve, reject) => {
+          tmpIframe.addEventListener('load', resolve, { once: true });
+          tmpIframe.addEventListener('error', reject, { once: true });
+          tmpIframe.src = tmpUrl;
+        });
+        // MUST await: the knockout work (image loads, canvas processing) is async, and
+        // this function serializes doc.documentElement.outerHTML right after returning —
+        // an un-awaited call here would silently lose the fix for anything not already
+        // cached (see the Promise doc-comment on stripImageWhiteBackgrounds).
+        await stripImageWhiteBackgrounds(tmpIframe.contentDocument, true);
+        doc = tmpIframe.contentDocument; // continue the rest of this function on the live doc
+      } catch (err) {
+        warn('[cxreader] pre-render white-background pass failed, continuing unpatched:', err?.message);
+        if (tmpIframe) { tmpIframe.remove(); tmpIframe = null; }
+      } finally {
+        if (tmpUrl) URL.revokeObjectURL(tmpUrl);
+      }
+    }
 
     // Inject reader CSS last so it wins over book styles.
     // Fixed-layout pages use the book's own precise CSS — skip injection to preserve layout.
@@ -129,7 +179,11 @@ export class ChapterRenderer {
 },true);`;
     doc.body.appendChild(linkScript);
 
-    return '<!DOCTYPE html>' + doc.documentElement.outerHTML;
+    const html = '<!DOCTYPE html>' + doc.documentElement.outerHTML;
+    // Only now, after outerHTML has been serialized out of it — removing earlier risks the
+    // temp document losing its window association mid-use on some engines.
+    if (tmpIframe) tmpIframe.remove();
+    return html;
   }
 
   async _rewriteElements(doc, base) {
