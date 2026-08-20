@@ -1862,6 +1862,10 @@ html[data-lib-theme="eink"] .imt-related-bo-badge {
   background: #e8650a;
   color: #fff;
 }
+.book-format-badge--pdf {
+  background: #b3221c;
+  color: #fff;
+}
 /* ── Book card status / rating badges ───────────────────────────────────────── */
 .book-status-badge {
   display: inline-block;
@@ -3283,6 +3287,12 @@ html[data-lib-theme="eink"] .bookorbit-card-series-badge,
 .admin-user-info { display: flex; flex-direction: column; gap: .1rem; min-width: 0; flex: 1; }
 .admin-user-name { font-size: .875rem; font-weight: 500; color: var(--color-text); }
 .admin-user-meta { font-size: .75rem; color: var(--color-text-muted); }
+/* Per-user 7-day reading-activity dots — visually modeled on .bod-streak-dots (BookOrbit
+   Dash) but a separate class: different data source (this instance's own reading_sessions,
+   not a BookOrbit account) and audience (admin-only, not the reading user themself). */
+.admin-activity-dots { display: flex; gap: .2rem; margin-top: .2rem; }
+.admin-activity-dot { width: .4rem; height: .4rem; border-radius: 50%; background: var(--color-border); display: inline-block; }
+.admin-activity-dot.filled { background: var(--color-accent); }
 .admin-upload-btn {
   display: inline-flex;
   align-items: center;

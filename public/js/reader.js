@@ -5,6 +5,8 @@ import { isBookDownloaded, downloadBook, fetchOfflineBookFile, getBookMeta, save
 import { queueProgress, clearProgress, flushProgressOutbox } from './progress-outbox.js';
 import { log, warn } from './logger.js';
 import { stripImageWhiteBackgrounds } from './img-bg-fix.js';
+import { createComicViewer } from './comic-viewer.js';
+import { renderPdfCoverBlob, uploadPdfCover } from './pdf-cover.js';
 
 const READER_BUILD = 'br-v89-cxreader-only';
 const _i18nReady = initI18n();
@@ -309,6 +311,15 @@ let _cxViewerPaddingSet = false; // true after the first post-render inset measu
 let _cxTouchNavIframe = null; // iframe that currently has touch-nav handlers attached
 let currentBook  = null;
 let prefs        = loadPrefs();
+// Pure global baseline, captured once here — BEFORE loadBookPrefs() (called later, once book
+// metadata loads) layers this book's own per-book overrides onto `prefs`. saveBookPrefs()
+// diffs against THIS, not a fresh loadPrefs() re-read, which would otherwise be comparing a
+// per-book value against itself: persistPrefs() writes the live `prefs` (which by then may
+// already BE this book's override) into the same global br_reader_prefs blob before calling
+// saveBookPrefs, so a live re-read there always looked "unchanged from global" and the
+// override silently never got recorded — confirmed live (a spread-mode / Continuous choice
+// never survived closing and reopening the same book).
+const _globalPrefsSnapshot = { ...prefs };
 // Which reader_presets row (if any) is currently selected. This is a UI selection, not a
 // "still matches exactly" flag: it stays set through further edits (so Update/Rename/Delete
 // remain available) and only changes when the user applies a different preset, saves a new
@@ -399,6 +410,12 @@ let sessionStartPct = null;           // currentPct snapshot when the session st
 //   bestKnownRemotePct — never push backwards unless user confirms manual sync (forced)
 const SYNC_DEBOUNCE_MS   = 60000;    // inactivity debounce — resets on every page turn
 const SYNC_INTERVAL_MS   = 240000;   // 4-minute heartbeat — always fires regardless of activity
+// Continuous mode only: a fast scroll can cross many spine items a second (especially in a
+// comic, where each image IS a spine item) — throttles remote (KOSync/BookOrbit) pushes to at
+// most once per this interval instead of once per crossing, which spammed the server with
+// dozens of pushes in a couple of seconds (confirmed live). See _cxRelocatedHandler.
+const CONTINUOUS_REMOTE_PUSH_MS = 3000;
+let _continuousRemotePushTs = 0;
 let syncDebounceTimer  = null;
 let syncIntervalTimer  = null;
 let lastSyncedCfi      = '';           // CFI at last successful remote push — used to skip duplicate syncs
@@ -434,6 +451,17 @@ const loadingCancelBtn = document.getElementById('loading-cancel-btn');
 // pending request for this document as part of unloading it, no matter how old the WebView is.
 loadingCancelBtn?.addEventListener('click', () => { window.location.href = libraryReturnUrl; });
 const epubViewer     = document.getElementById('epub-viewer');
+// Immersive comic (CBZ/PDF) gesture/zoom controller — see comic-viewer.js's own header comment
+// for why it owns no DOM listeners of its own; reader.js's existing handlers below call into
+// it, gated on isImmersivePageMode(). PDF pages render into the same full-bleed canvas/img
+// wrap as CBZ (see cxreader/index.js's _renderPdfItem), so this one seam carries the whole
+// chrome/gesture/zoom system over to PDF for free.
+const comicViewer = createComicViewer({ hostEl: epubViewer });
+function isImmersivePageMode() { return !!(_cxReader?._isCbz || _cxReader?._isPdf); }
+// "Continuous" spread mode — single column, free-scrolling instead of paginated. Applies to
+// EPUB (via cxreader/scroll-paginator.js) and to CBZ (stacked full-width images, see
+// _renderCbzContinuous in cxreader/index.js) alike, driven by the same prefs.spread value.
+function isContinuousMode() { return prefs.spread === 'continuous'; }
 const bookTitleEl    = document.getElementById('book-title');
 const chapterTitleEl = document.getElementById('chapter-title');
 const progressFillEl      = document.getElementById('progress-fill');
@@ -480,7 +508,10 @@ const annotationAcceptBtn = document.getElementById('btn-annotation-accept');
 
 // ── Prefs ─────────────────────────────────────────────────────────────────────
 // Keys that are stored per-book (content appearance).  All others are global.
-const PER_BOOK_KEYS = ['fontSize','fontFamily','lineHeight','letterSpacing','margin','theme','overrideStyles','paraIndent','paraIndentSize','paraSpacing','dictionaries','dictionaryOrder','bionicReading','skipOpenProgressCheck','skipSaveOnClose'];
+// 'spread' (One page / Two pages / Continuous) is per-book, not global — some books (mostly
+// comics) suit Continuous, others read better paginated, so switching it for one book
+// shouldn't carry over to the next one, same reasoning as margin/theme already being per-book.
+const PER_BOOK_KEYS = ['fontSize','fontFamily','lineHeight','letterSpacing','margin','theme','overrideStyles','paraIndent','paraIndentSize','paraSpacing','dictionaries','dictionaryOrder','bionicReading','skipOpenProgressCheck','skipSaveOnClose','spread'];
 
 // Deep-merge a saved prefs object onto DEFAULT_PREFS (missing keys/nested keys fall
 // back to defaults). Shared by loadPrefs() (source: localStorage) and the server pull
@@ -550,9 +581,11 @@ function loadBookPrefs(bookId) {
 function saveBookPrefs(bookId) {
   if (!bookId) return;
   try {
-    const global = loadPrefs();
+    // NOT loadPrefs() — see _globalPrefsSnapshot's own comment for why a live re-read here
+    // always failed to detect an override (persistPrefs writes the live, possibly
+    // already-book-specific `prefs` into the same global blob this would be re-reading).
     const overrides = {};
-    PER_BOOK_KEYS.forEach(k => { if (prefs[k] !== global[k]) overrides[k] = prefs[k]; });
+    PER_BOOK_KEYS.forEach(k => { if (prefs[k] !== _globalPrefsSnapshot[k]) overrides[k] = prefs[k]; });
     const all = JSON.parse(localStorage.getItem('br_book_prefs') || '{}');
     if (Object.keys(overrides).length) all[bookId] = overrides;
     else delete all[bookId];
@@ -713,13 +746,17 @@ function applyPreset(id) {
   }
 
   applyUiTheme();
-  // Sync column-layout state (two-column on/off, inter-column gap) from the preset's
-  // spread/margin BEFORE repaginating, so the single reapplyStyles() call below already
-  // paginates with the preset's layout in effect — otherwise it silently keeps whatever
-  // single/dual-page state the reader was in before the preset was applied.
+  // Sync column-layout state (two-column on/off, inter-column gap, continuous) from the
+  // preset's spread/margin BEFORE repaginating, so the single reapplyStyles() call below
+  // already paginates with the preset's layout in effect — otherwise it silently keeps
+  // whatever single/dual-page/continuous state the reader was in before the preset was
+  // applied. Set directly rather than via setLayout() to avoid re-paginating twice (once
+  // here, once in reapplyStyles) — _initPaginator's own self-correction (cxreader/index.js)
+  // still swaps the paginator class if continuous changed here.
   if (_cxReader) {
-    _cxReader._twoColumn = cxWantsTwoCol();
-    _cxReader._columnGap = prefs.margin * 2;
+    _cxReader._twoColumn  = cxWantsTwoCol();
+    _cxReader._columnGap  = prefs.margin * 2;
+    _cxReader._continuous = isContinuousMode();
   }
   reapplyStyles();
   // Every other setting category has its own dedicated "apply" function, normally invoked
@@ -1277,7 +1314,20 @@ h1, h2, h3, h4, h5, h6 {
 /* cx-fonts-end */
 html {
   background: ${theme.bg} !important;
+  /* Thin, theme-coloured scrollbar — only actually visible in Continuous mode (paginated
+     modes are overflow:hidden, so this is harmless dead weight there). Firefox's standard
+     scrollbar-color/-width; WebKit/Blink's own ::-webkit-scrollbar-* pseudo-elements, since
+     there's no unprefixed equivalent yet. */
+  scrollbar-width: thin;
+  scrollbar-color: ${hexToRgba(theme.text, 0.35)} transparent;
 }
+html::-webkit-scrollbar { width: 8px; }
+html::-webkit-scrollbar-track { background: transparent; }
+html::-webkit-scrollbar-thumb {
+  background: ${hexToRgba(theme.text, 0.35)};
+  border-radius: 4px;
+}
+html::-webkit-scrollbar-thumb:hover { background: ${hexToRgba(theme.text, 0.55)}; }
 body {
   background:     ${theme.bg} !important;
   color:          ${theme.text} !important;
@@ -1731,7 +1781,12 @@ function applyUiTheme() {
     document.documentElement.style.setProperty('--reader-header-border',      text);
     document.documentElement.style.setProperty('--reader-header-text',        text);
     document.documentElement.style.setProperty('--reader-header-text-muted',  text);
-    if (safeAreaFill) safeAreaFill.style.background = bg;
+    // Comics are always black letterboxed regardless of theme (see the .comic-mode #epub-viewer
+    // rule in reader.css) — safe-area-fill is a separate element outside .reader-layout (for
+    // the translucent-header-over-notch case), so it needs the same override applied directly
+    // here rather than via that CSS rule, or the notch/camera-hole strip stays theme-coloured
+    // even with a comic open. Confirmed live on a phone with a top safe area.
+    if (safeAreaFill) safeAreaFill.style.background = isImmersivePageMode() ? '#000' : bg;
     epubViewer.style.background = bg;
     syncStatusBarAppearance(bg);
   } else {
@@ -1763,7 +1818,10 @@ function applyUiTheme() {
     document.documentElement.style.setProperty('--reader-header-text',        theme.text);
     document.documentElement.style.setProperty('--reader-header-text-muted',  headerMuted);
     // Safe-area fill: solid (opaque) page colour so the translucent header doesn't leak through
-    if (safeAreaFill) safeAreaFill.style.background = theme.bg;
+    // — except for comics, which are always black letterboxed regardless of theme (see the
+    // .comic-mode #epub-viewer rule in reader.css); safe-area-fill sits outside .reader-layout
+    // so it needs the same override applied directly here too.
+    if (safeAreaFill) safeAreaFill.style.background = isImmersivePageMode() ? '#000' : theme.bg;
     epubViewer.style.background = theme.bg;
     syncStatusBarAppearance(ui.bg);
   }
@@ -2988,7 +3046,9 @@ function applyHeaderBtnVisibility() {
     if (el) el.style.display = visible ? '' : 'none';
   };
   const hasAnnotations = annotationsCache.length > 0;
-  const isCbz = !!_cxReader?._isCbz;
+  // Applies to both CBZ and PDF — neither has a text layer, so dictionary/annotations/search
+  // (which all need selectable text) stay disabled for both, same as the plan's stated scope.
+  const isCbz = isImmersivePageMode();
   set('btn-annotations',  !isCbz && (prefs.headerBtnAnnotations || hasAnnotations));
   set('btn-search',       !isCbz && prefs.headerBtnSearch);
   set('btn-jump-pct',     prefs.headerBtnPercentage);
@@ -3203,9 +3263,15 @@ function applyAutoHide() {
   }
 }
 
-// Show header when mouse enters the thin sensor zone at very top of page
+// Show header when mouse enters the thin sensor zone at very top of page. Comic mode always
+// wants this on desktop (chrome is forced-hidden there regardless of the user's own
+// autoHideHeader preference), so it's an extra condition here rather than folded into
+// prefs.autoHideHeader — but touch does NOT get this in comic mode: mobile reveals chrome
+// exclusively via the up/down swipe cycle in handleTouchEnd (comicSwipeChrome) now, not by
+// tapping an edge sensor band, which was too easy to trigger by accident with no easy tap-
+// based way back out. touchstart/touchend/click below are unchanged EPUB-only behaviour.
 document.getElementById('header-sensor').addEventListener('mouseenter', () => {
-  if (!prefs.autoHideHeader || _sensorCooldown) return;
+  if ((!prefs.autoHideHeader && !isImmersivePageMode()) || _sensorCooldown) return;
   revealHeader();
 });
 document.getElementById('header-sensor').addEventListener('touchstart', () => {
@@ -3225,6 +3291,47 @@ document.getElementById('header-sensor').addEventListener('click', () => {
     revealHeader();
   }
 });
+
+// Comic-mode-only, DESKTOP hover: bottom-edge hover reveals the STATUS BARS (top + bottom
+// overlay text), independent of the toolbar's own header-peek — deliberately a separate
+// class (bars-peek) so hovering top vs bottom reveals only the chrome that edge visually
+// belongs to, rather than one hover showing everything at both ends of the screen. No touch
+// listeners here at all (see the header-sensor comment above) — mobile uses comicSwipeChrome.
+function revealComicBars() { readerLayout.classList.add('bars-peek'); }
+function hideComicBars()   { readerLayout.classList.remove('bars-peek'); }
+document.getElementById('footer-sensor').addEventListener('mouseenter', () => {
+  if (!isImmersivePageMode()) return;
+  revealComicBars();
+});
+// Unlike the header (which stays open while the mouse hovers the revealed header element
+// itself, via .reader-header's own mouseenter/mouseleave below), the status bars have no
+// interactive surface to hover (pointer-events:none, matching their non-comic behaviour) —
+// so simply leaving the thin sensor strip hides them again, matching "move mouse back up
+// outside the bottom place and it hides".
+document.getElementById('footer-sensor').addEventListener('mouseleave', () => {
+  if (!isImmersivePageMode()) return;
+  hideComicBars();
+});
+
+// Mobile-only vertical swipe cycle for comic-mode chrome: HEADER — HIDDEN — BARS, one step
+// per swipe, entirely independent of prefs.autoHideHeader (see handleTouchEnd, which calls
+// this). Swipe down always moves one step toward HEADER, swipe up always moves one step
+// toward BARS — so from any state there's always exactly one gesture that gets you back to
+// HIDDEN, unlike the previous tap-to-toggle scheme (too easy to trigger by an incidental tap,
+// with no reliable way back out).
+function _comicChromeState() {
+  if (readerLayout.classList.contains('header-peek')) return 0;
+  if (readerLayout.classList.contains('bars-peek'))   return 2;
+  return 1;
+}
+function _setComicChromeState(state) {
+  readerLayout.classList.toggle('header-peek', state === 0);
+  readerLayout.classList.toggle('bars-peek',   state === 2);
+}
+function comicSwipeChrome(dir) { // 'down' → toward header (0), 'up' → toward bars (2)
+  const state = _comicChromeState();
+  _setComicChromeState(dir === 'down' ? Math.max(0, state - 1) : Math.min(2, state + 1));
+}
 
 // Capture-phase guard: swallow any click that lands on the header within
 // HEADER_REVEAL_GUARD_MS of a reveal, so the tap-to-show gesture never
@@ -5074,6 +5181,7 @@ function initSettingsUi() {
   document.querySelectorAll('.spread-btn[data-spread]').forEach(btn => {
     btn.addEventListener('click', async () => {
       prefs.spread = btn.dataset.spread;
+      readerLayout.classList.toggle('continuous', isContinuousMode());
       syncSettingsUi(); persistPrefs();
       if (_cxReader) _cxSyncLayout();   // re-paginate CXReader in place
     });
@@ -5615,12 +5723,15 @@ function cxWantsTwoCol() {
 // Push the current column-mode decision into the live CXReader (re-paginates if needed).
 function _cxSyncLayout() {
   if (!_cxReader) return;
-  _cxReader.setLayout({ twoColumn: cxWantsTwoCol(), columnGap: prefs.margin * 2 });
+  _cxReader.setLayout({ twoColumn: cxWantsTwoCol(), columnGap: prefs.margin * 2, continuous: isContinuousMode() });
 }
 
 function _cxRelocatedHandler(e) {
   if (pendingNavDirection) _pageEnter(pendingNavDirection);
   pendingNavDirection = null;
+  // Comic pages always render at full-bleed fit-to-screen zoom on arrival — reset any
+  // zoom/pan left over from the previous page.
+  if (isImmersivePageMode()) comicViewer.reset();
   const oldSpineIndex = currentSpineIndex;
   const { spineIndex, href, page, pageCount, endPage, twoColumn } = e.detail;
   currentSpineIndex = spineIndex;
@@ -5646,34 +5757,50 @@ function _cxRelocatedHandler(e) {
   updateActiveTocItem(href);
   // First cx-relocated: status bars now have content → measure real inset and reinit
   // paginator so page boundaries reflect the visible area (not the full viewer height).
-  if (!_cxViewerPaddingSet && _cxReader) {
+  // Comics skip this entirely — status bars overlay the full-bleed image instead of
+  // reserving space (see cxreader/index.js's _renderCbzItem), so there's no inset to
+  // repaginate around.
+  if (!_cxViewerPaddingSet && _cxReader && !isImmersivePageMode()) {
     _cxViewerPaddingSet = true;
     _cxMeasureViewerInset();
     if (_cxViewerPadTop > 0 || _cxViewerPadBot > 0) {
-      if (_cxReader._isCbz) {
-        _cxReader.setCbzInset(_cxViewerPadTop, _cxViewerPadBot);
-      } else {
-        _cxReader.reinitPaginator();
-        // Re-sync ALL page vars (not just the total) from the inset-corrected paginator, and
-        // refresh the cache, so the very first page shows the right page/total immediately.
-        currentChapPage  = _cxReader.page;
-        currentEndPage   = _cxReader.endPage;
-        currentChapTotal = _cxReader.pageCount;
-        if (currentChapTotal > 0) chapPageCache[spineIndex] = currentChapTotal;
-        renderStatusSlots();
-      }
+      _cxReader.reinitPaginator();
+      // Re-sync ALL page vars (not just the total) from the inset-corrected paginator, and
+      // refresh the cache, so the very first page shows the right page/total immediately.
+      currentChapPage  = _cxReader.page;
+      currentEndPage   = _cxReader.endPage;
+      currentChapTotal = _cxReader.pageCount;
+      if (currentChapTotal > 0) chapPageCache[spineIndex] = currentChapTotal;
+      renderStatusSlots();
     }
   }
   if (isReady) {
     const crossedChapter = oldSpineIndex !== null && spineIndex !== oldSpineIndex;
-    if (crossedChapter) {
+    if (crossedChapter && currentBook) logChapterVisit(currentBook.id, href, chapterLabelFromHref(href));
+    if (isContinuousMode()) {
+      // Continuous mode gets neither of the two paths below: forcing an immediate remote push
+      // on every crossedChapter (like the discrete-mode branch does) spams the server — a fast
+      // scroll can blow through many spine items a second (especially in a comic, where each
+      // image IS a spine item), confirmed live as dozens of BookOrbit/KOSync pushes in a
+      // couple of seconds. But relying purely on the 60s idle debounce (like an ordinary
+      // within-chapter page turn) would leave other devices' synced position stale for the
+      // entire reading session, only updating once the book is closed. So: local save is
+      // still (re)scheduled on every relocate via the debounce below, and a REMOTE push is
+      // additionally allowed through at most once every CONTINUOUS_REMOTE_PUSH_MS — frequent
+      // enough to keep other devices reasonably current, far too infrequent to spam anything.
+      if (currentPct > 0) scheduleDebouncedSync();
+      const nowTs = Date.now();
+      if (nowTs - _continuousRemotePushTs >= CONTINUOUS_REMOTE_PUSH_MS) {
+        _continuousRemotePushTs = nowTs;
+        void saveProgress({ allowRemote: true });
+      }
+    } else if (crossedChapter) {
       // Chapter boundary — mirror epub.js: force remote push, log visit, reset debounce.
       const alreadySent = href === lastSentChapterHref;
       const bookmarkPending = !!preBookmarkCfi;
       saveProgress({ forceRemote: !alreadySent && !bookmarkPending, allowRemote: !alreadySent && !bookmarkPending });
       cancelDebouncedSync();
       writeInterruptedSession();
-      if (currentBook) logChapterVisit(currentBook.id, href, chapterLabelFromHref(href));
       if (!alreadySent && !bookmarkPending) lastSentChapterHref = href;
     } else if (currentPct > 0) {
       // Within-chapter page turn — debounce remote push (matches epub.js pattern).
@@ -5735,9 +5862,39 @@ function _attachCxKbd(iframe) {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, bubbles: true }));
   }, true);
   iframe.contentWindow.addEventListener('wheel', (e) => {
+    if (isContinuousMode()) {
+      // Native scroll handles wheel input WITHIN a chapter on its own — nothing to do here for
+      // that. But at the very top/bottom of what's currently loaded, there's nothing left to
+      // scroll, so a wheel gesture there produces no 'scroll' event at all and would otherwise
+      // just do nothing (confirmed live: most noticeably on a short chapter — e.g. a
+      // single-page "Copyright"/"Dedication" chapter — that never has anything to scroll in
+      // the first place). Step in only at that boundary to advance/retreat chapters instead.
+      const doc = iframe.contentDocument;
+      const se  = doc?.scrollingElement || doc?.documentElement;
+      if (!se) return;
+      const atBottom = se.scrollTop + se.clientHeight >= se.scrollHeight - 2;
+      const atTop    = se.scrollTop <= 2;
+      if (e.deltaY > 0 && atBottom) _continuousBoundaryNav('next');
+      else if (e.deltaY < 0 && atTop) _continuousBoundaryNav('prev');
+      return;
+    }
     if (!prefs.mouseWheelNav) return;
     document.dispatchEvent(new CustomEvent('br-wheel', { detail: { deltaY: e.deltaY } }));
   }, { passive: true });
+}
+
+// Cooldown-guarded chapter-boundary nav for continuous mode — shared by wheel (_attachCxKbd
+// above) and touch (attachIframeTouchNav below), both of which step in only when there's
+// nothing left to scroll. A fast trackpad/wheel or a quick second swipe can fire multiple
+// times while still sitting at the boundary, each of which would otherwise call
+// goNext()/goPrev() again before the previous chapter-advance finished rendering. Mirrors
+// handleWheel's own wheelCooldown pattern.
+let _continuousBoundaryCooldown = false;
+function _continuousBoundaryNav(dir) {
+  if (_continuousBoundaryCooldown) return;
+  _continuousBoundaryCooldown = true;
+  setTimeout(() => { _continuousBoundaryCooldown = false; }, 400);
+  if (dir === 'next') goNext(); else goPrev();
 }
 
 // Returns a spine-level CFI for the current CXReader chapter (fallback when range is unavailable).
@@ -5937,6 +6094,27 @@ function _cxApplyIframeInset(iframe) {
   iframe.style.height    = inset > 0 ? `calc(100% - ${inset}px)` : '100%';
 }
 
+// See the call site's own comment (startCXRendition, right after _cxReader.open()) for when
+// this runs. Reaches into _cxReader._book._pdfDoc directly — reader.js already does the same
+// for _isCbz/_isPdf themselves throughout this file, cxreader/index.js has no public accessor
+// for the underlying pdf.js document and doesn't need one just for this.
+async function _backfillPdfCover(cxReader, book) {
+  try {
+    const doc = cxReader._book?._pdfDoc;
+    if (!doc) return;
+    const blob = await renderPdfCoverBlob(doc);
+    if (!blob) return;
+    const coverPath = await uploadPdfCover(apiFetch, book.id, blob);
+    if (coverPath) {
+      book.cover_path = coverPath;
+      if (currentBook === book) currentBook.cover_path = coverPath;
+      saveBookMeta(book).catch(() => {}); // keep the offline metadata cache in sync too
+    }
+  } catch (err) {
+    log('[reader] PDF cover backfill failed:', err?.message);
+  }
+}
+
 async function startCXRendition(displayCfi = null) {
   _cxViewerPaddingSet = false;
   _cxViewerPadTop = 0;
@@ -5966,11 +6144,28 @@ async function startCXRendition(displayCfi = null) {
     // has no query string of its own otherwise, so it can go stale independently of reader.js
     // (browser/SW cache keys purely on URL) even when reader.js itself is freshly fetched.
     // Bump this alongside reader.html's ?v= whenever cxreader/index.js changes.
-    const { CXReader } = await import('./cxreader/index.js?v=br-v109');
+    const { CXReader } = await import('./cxreader/index.js?v=br-v116');
     _cxReader = new CXReader();
     _cxReader.onBeforePaginate = (iframe) => { _cxApplyIframeInset(iframe); _cxApplyHooks(iframe); };
 
-    await _cxReader.open(_epubArrayBuffer);
+    await _cxReader.open(_epubArrayBuffer, currentBook?.title);
+    // Backfill a cover for a PDF that arrived without one — manual uploads already get theirs
+    // right after upload (see library.js), but a PDF added via OPDS or BookOrbit import happens
+    // server-side with no browser in the loop to render one at import time. Fire-and-forget:
+    // purely cosmetic, must never delay or fail the actual open.
+    if (_cxReader._isPdf && !isPeekMode && currentBook?.id && !currentBook.cover_path) {
+      void _backfillPdfCover(_cxReader, currentBook);
+    }
+    // Comics always start with chrome hidden, regardless of the user's own autoHideHeader
+    // preference — see the .comic-mode rules in reader.css and handleComicTap()/
+    // handleComicDesktopClick() below.
+    readerLayout.classList.toggle('comic-mode', isImmersivePageMode());
+    readerLayout.classList.toggle('continuous', isContinuousMode());
+    if (isImmersivePageMode()) readerLayout.classList.remove('header-peek', 'bars-peek');
+    // Re-apply now that isImmersivePageMode() (_cxReader._isCbz / _isPdf) is actually known — the
+    // earlier applyUiTheme() call in init() ran before _cxReader existed, so it couldn't yet
+    // force the safe-area-fill strip (notch/camera-hole area) black for a comic.
+    applyUiTheme();
     if (_cxReader.toc?.length) {
       buildToc(_cxReader.toc);
       buildChapterMarkers();
@@ -5985,8 +6180,10 @@ async function startCXRendition(displayCfi = null) {
       if (_m) _cxStartIdx = Math.max(0, Math.floor(parseInt(_m[1], 10) / 2) - 1);
     }
 
-    // Choose single/two-column BEFORE the first render so page counts are correct from page 1.
-    _cxReader.setLayout({ twoColumn: cxWantsTwoCol(), columnGap: prefs.margin * 2 });
+    // Choose single/two-column/continuous BEFORE the first render so page counts are correct
+    // from page 1 (and, for continuous mode, so _makePaginator() picks ScrollPaginator from
+    // the very first render instead of only after a later setLayout call).
+    _cxReader.setLayout({ twoColumn: cxWantsTwoCol(), columnGap: prefs.margin * 2, continuous: isContinuousMode() });
 
     const readerCss = buildEpubCss();
     await _cxReader.renderChapter(_cxStartIdx, viewer, readerCss);
@@ -6058,7 +6255,8 @@ function _slideCapable() { return !prefs.eink && !_isLegacyWv; }
 function _useEngineSlide() {
   return (prefs.pageTurnAnim === 'paper' || prefs.pageTurnAnim === 'momentum')
     && !!_cxReader
-    && !_cxReader._isCbz && !_cxReader._isFixedLayout
+    && !isImmersivePageMode() && !_cxReader._isFixedLayout
+    && !isContinuousMode()
     && _slideCapable();
 }
 
@@ -6107,7 +6305,8 @@ function _momEnabled() {
   return prefs.pageTurnDrag
     && (prefs.pageTurnAnim === 'paper' || prefs.pageTurnAnim === 'momentum')
     && !!_cxReader
-    && !_cxReader._isCbz && !_cxReader._isFixedLayout
+    && !isImmersivePageMode() && !_cxReader._isFixedLayout
+    && !isContinuousMode()
     && _slideCapable() && isTouchReader() && !hasOpenPanel();
 }
 
@@ -6261,18 +6460,109 @@ let touchStartY = 0;
 let suppressNextTap = false; // set by long-press dict lookup to prevent navigation on touchend
 let _selectSuppressNav = false; // true while a text-selection gesture is active — blocks swipe-nav preventDefault
 
+// Comic-mode-only, TOUCH tap path (see handleTouchEnd below): resolves a simple tap into a
+// page turn (nav zone / vertical tap zones), only at fit-to-screen zoom. Chrome reveal on
+// touch is swipe-only now (comicSwipeChrome, in handleTouchEnd) — not tap — so a tap that
+// isn't in a nav zone (or the page is zoomed in) simply does nothing. inNavZone(x) here is
+// only ever relevant to touch: a real edge click on the visible nav-zone-prev/next bands
+// never reaches this function at all (separate DOM elements with their own click listeners,
+// always winning first).
+function handleComicTap(x, y) {
+  if (comicViewer.zoom > 1) return;
+  const nav = inNavZone(x);
+  if (nav) { nav === 'prev' ? goPrev() : goNext(); return; }
+  if (prefs.vertNavZones) {
+    const isTop  = y < window.innerHeight / 2;
+    const goBack = prefs.vertNavZonesReversed ? !isTop : isTop;
+    goBack ? goPrev() : goNext();
+  }
+}
+
+// Comic-mode-only, DESKTOP click path: a plain left-half/right-half page-turn split,
+// independent of the configurable navZoneLeftPct/RightPct (which default to 0 — disabled —
+// and are shared with EPUB reading) since half-screen click-to-page is the standard,
+// discoverable comic-reader convention and shouldn't depend on tuning an unrelated setting.
+// No bars-reveal here at all: on desktop that's entirely hover-driven (header-sensor /
+// footer-sensor), so every click is free to just turn the page.
+function handleComicDesktopClick(x) {
+  if (comicViewer.zoom > 1) return; // zoomed: click doesn't page — drag/pan owns the gesture
+  x < window.innerWidth / 2 ? goPrev() : goNext();
+}
+
+// Comic mode routes a touch through comicViewer (pan/pinch) once either two fingers are down
+// or the page is already zoomed in — otherwise it falls through to the normal tap/swipe/nav-
+// zone handling below unmodified, so swipe-to-page-turn never needs reimplementing here.
+// Continuous comic mode never engages this at all — pinch/wheel zoom is out of scope there
+// (see the continuous-mode plan), and comicViewer.zoom never exceeds 1 since nothing else
+// calls into comicViewer for continuous mode either, so a stray 2-finger touch doesn't need
+// a special exclusion beyond this one check.
+let _comicGestureOwnsTouch = false;
+
 function handleTouchStart(e) {
+  if (isImmersivePageMode() && !isContinuousMode() && (e.touches.length >= 2 || comicViewer.zoom > 1)) {
+    _comicGestureOwnsTouch = true;
+    comicViewer.onTouchStart(e);
+    return;
+  }
+  _comicGestureOwnsTouch = false;
   touchStartX = e.changedTouches[0].clientX;
   touchStartY = e.changedTouches[0].clientY;
 }
 
+function handleTouchMove(e) {
+  if (_comicGestureOwnsTouch) { comicViewer.onTouchMove(e); return; }
+  // Continuous mode (comics): same reasoning as the EPUB iframe's own touchmove handler in
+  // attachIframeTouchNav — block the browser's own pull-to-refresh/overscroll-bounce right at
+  // the scroll boundary, or it can hijack the gesture (up to and including reloading the page)
+  // instead of leaving it to our own boundary-swipe chapter nav.
+  if (isImmersivePageMode() && isContinuousMode()) {
+    const curX = e.touches[0].clientX, curY = e.touches[0].clientY;
+    const absDx = Math.abs(curX - touchStartX), absDy = Math.abs(curY - touchStartY);
+    if (absDy > 8 && absDy > absDx) {
+      const pag = _cxReader?._paginator;
+      const draggingDown = curY > touchStartY;
+      if ((draggingDown && pag?.isAtStart) || (!draggingDown && pag?.isAtEnd)) e.preventDefault();
+    }
+  }
+}
+
 function handleTouchEnd(e) {
+  if (_comicGestureOwnsTouch) {
+    const result = comicViewer.onTouchEnd(e);
+    if (e.touches.length > 0) { comicViewer.onTouchStart(e); return; } // fingers remain — re-anchor, keep owning
+    _comicGestureOwnsTouch = false;
+    if (result?.type === 'tap') handleComicTap(result.x, result.y);
+    return;
+  }
   if (suppressNextTap) { suppressNextTap = false; return; }
   const dx    = e.changedTouches[0].clientX - touchStartX;
   const dy    = e.changedTouches[0].clientY - touchStartY;
   const absDx = Math.abs(dx);
   const absDy = Math.abs(dy);
   const y     = e.changedTouches[0].clientY;
+  // Continuous comic mode: vertical drag is native scroll (never intercepted — see
+  // handleTouchMove/handleTouchStart above, _comicGestureOwnsTouch never engages here), so the
+  // only gesture left for this handler to resolve is a horizontal swipe — axis-dominance
+  // checked explicitly so it doesn't fight scrolling. Swipe left→right (rightward, dx>0)
+  // toward the toolbar, right→left toward the status bars — reusing comicSwipeChrome's exact
+  // 'down'/'up' semantics (toward header / toward bars) from the paginated case, just keyed
+  // off the horizontal axis instead of vertical since vertical is now claimed by scroll. No
+  // page-turn/tap-to-page here at all — there's no discrete page in continuous mode.
+  if (isImmersivePageMode() && isContinuousMode()) {
+    if (absDx > absDy && absDx > SWIPE_THRESHOLD) comicSwipeChrome(dx > 0 ? 'down' : 'up');
+    return;
+  }
+  // Paginated comic mode: vertical swipe is the ONLY way to reveal chrome on touch (see
+  // comicSwipeChrome's own comment for why) — entirely independent of prefs.autoHideHeader,
+  // and checked before it so EPUB's own swipe-to-reveal-header behaviour below is untouched.
+  if (isImmersivePageMode() && dy > SWIPE_DOWN_OPEN && absDx < 70) {
+    comicSwipeChrome('down');
+    return;
+  }
+  if (isImmersivePageMode() && dy < -SWIPE_UP_CLOSE && absDx < 70) {
+    comicSwipeChrome('up');
+    return;
+  }
   if (prefs.autoHideHeader && dy > SWIPE_DOWN_OPEN && absDx < 70) {
     const wasHidden = !readerLayout.classList.contains('header-peek');
     if (!readerLayout.classList.toggle('header-peek')) closeJumpPanel();
@@ -6287,6 +6577,10 @@ function handleTouchEnd(e) {
   }
   if (absDx < TAP_MAX_DRIFT && absDy < TAP_MAX_DRIFT) {
     const x = e.changedTouches[0].clientX;
+    // Comic mode: handleComicTap already covers nav-zone / vertNavZones / bars-reveal (in
+    // that order) for a plain tap — comic pages have no per-iframe touch handler to fall
+    // back on for this at all (unlike EPUB's attachIframeTouchNav), so it belongs here.
+    if (isImmersivePageMode()) { handleComicTap(x, y); return; }
     const nav = inNavZone(x);
     if (nav === 'prev') { goPrev(); return; }
     if (nav === 'next') { goNext(); return; }
@@ -6303,7 +6597,42 @@ function handleTouchEnd(e) {
 }
 // Attach to the host container — covers the area outside the iframe (nav zones etc)
 epubViewer.addEventListener('touchstart', handleTouchStart, { passive: true });
+epubViewer.addEventListener('touchmove',  handleTouchMove,  { passive: false });
 epubViewer.addEventListener('touchend',   handleTouchEnd,   { passive: false });
+
+// ── Comic mode: desktop mouse drag-to-pan + click-to-page, wheel/pinch-to-zoom ────────────
+// Only meaningfully active once isImmersivePageMode() — the listeners are unconditional
+// (cheap early-return) to keep binding in one place rather than attach/detach per book.
+let _mouseDownX = 0, _mouseDownY = 0, _mouseDragged = false;
+epubViewer.addEventListener('mousedown', (e) => {
+  if (!isImmersivePageMode()) return;
+  _mouseDownX = e.clientX; _mouseDownY = e.clientY; _mouseDragged = false;
+  if (comicViewer.zoom > 1) comicViewer.onDragStart(e.clientX, e.clientY);
+});
+epubViewer.addEventListener('mousemove', (e) => {
+  if (!isImmersivePageMode() || e.buttons !== 1) return;
+  if (Math.hypot(e.clientX - _mouseDownX, e.clientY - _mouseDownY) > TAP_MAX_DRIFT) _mouseDragged = true;
+  if (comicViewer.zoom > 1) comicViewer.onDragMove(e.clientX, e.clientY);
+});
+// Bound on window, not epubViewer, so a drag that ends after the cursor left the viewer
+// (fast mouse movement) still resolves instead of leaving comicViewer's drag state stuck.
+window.addEventListener('mouseup', () => { if (isImmersivePageMode()) comicViewer.onDragEnd(); });
+epubViewer.addEventListener('click', (e) => {
+  // Continuous mode: no discrete page to click-turn to — desktop chrome reveal is entirely
+  // hover-driven there (header-sensor/footer-sensor), unaffected by this being a no-op.
+  if (!isImmersivePageMode() || isContinuousMode()) return;
+  if (_mouseDragged) { _mouseDragged = false; return; } // a real drag — not a page-turn click
+  handleComicDesktopClick(e.clientX);
+});
+// (Comic-mode wheel-zoom is handled by the existing wheel listener further down, near
+// handleWheel — kept as a single listener rather than a second one on the same element.)
+// Safari desktop trackpad pinch — Chrome/Firefox trackpad pinch instead arrives as a
+// ctrlKey wheel event, already handled by comicViewer.onWheel above.
+if ('GestureEvent' in window) {
+  epubViewer.addEventListener('gesturestart',  (e) => { if (isImmersivePageMode()) comicViewer.onGestureStart(e); });
+  epubViewer.addEventListener('gesturechange', (e) => { if (isImmersivePageMode()) comicViewer.onGestureChange(e); });
+  epubViewer.addEventListener('gestureend',    (e) => { if (isImmersivePageMode()) comicViewer.onGestureEnd(e); });
+}
 
 // Per-page: forward touch events from inside the epub iframe into our handlers
 function attachIframeTouchNav(view) {
@@ -6340,9 +6669,22 @@ function attachIframeTouchNav(view) {
     // Momentum finger-tracking drives the live page slide; if it engages it owns
     // the gesture (it preventDefaults too).
     if (_momMove(e.touches[0].clientX + iframeOffX, e.touches[0].clientY + iframeOffY, e)) return;
+    const curY = e.touches[0].clientY + iframeOffY;
     const absDx = Math.abs(e.touches[0].clientX + iframeOffX - touchStartX);
-    const absDy = Math.abs(e.touches[0].clientY + iframeOffY - touchStartY);
-    if (absDx > 8 && absDx > absDy) e.preventDefault();
+    const absDy = Math.abs(curY - touchStartY);
+    if (absDx > 8 && absDx > absDy) { e.preventDefault(); return; }
+    // Continuous mode: block the browser's own pull-to-refresh / overscroll-bounce right at
+    // the scroll boundary — dragging further down with nothing above (or up with nothing
+    // below) otherwise hands the gesture to the BROWSER instead of our own boundary-swipe
+    // chapter nav (see touchend below), and on at least some mobile browsers that native
+    // gesture can reload the page outright — confirmed live as "the whole content disappears"
+    // scrolling up from the very first page. Only guarded right at the boundary, so a normal
+    // scroll that's actually moving content is never touched.
+    if (isContinuousMode() && absDy > 8 && absDy > absDx) {
+      const pag = _cxReader?._paginator;
+      const draggingDown = curY > touchStartY; // finger moving down = trying to scroll UP further
+      if ((draggingDown && pag?.isAtStart) || (!draggingDown && pag?.isAtEnd)) e.preventDefault();
+    }
   }, { passive: false });
 
   // Zone-click navigation from inside the iframe (desktop + any pointer type).
@@ -6352,7 +6694,7 @@ function attachIframeTouchNav(view) {
   // of treating the first click as a navigation intent.
   let _zoneClickTimer = null;
   win.addEventListener('click', (e) => {
-    if (hasOpenPanel()) return;
+    if (hasOpenPanel() || isContinuousMode()) return; // continuous: no discrete page to click-jump to
     const iframe = view.element?.querySelector('iframe') || view.element;
     const offX = iframe ? iframe.getBoundingClientRect().left : 0;
     const nav = inNavZone(e.clientX + offX);
@@ -6391,7 +6733,14 @@ function attachIframeTouchNav(view) {
     const dy     = cy - touchStartY;
     const absDx  = Math.abs(dx);
     const absDy  = Math.abs(dy);
-    if (prefs.autoHideHeader && dy > SWIPE_DOWN_OPEN && absDx < 70) {
+    // Continuous mode: dy has no upper bound in these two checks below (by design, for the
+    // normal short deliberate reveal-gesture they're meant for) — but every ordinary downward
+    // scroll drag in continuous mode also satisfies "dy > SWIPE_DOWN_OPEN", so without this
+    // guard the header would pop open on every scroll-down instead of only a real short swipe.
+    // Continuous EPUB has no autoHideHeader-driven swipe-reveal of its own at all (status bars
+    // stay always-visible, same as paginated EPUB — see the continuous-mode plan), so skipping
+    // both checks entirely here is correct, not just a narrower threshold.
+    if (prefs.autoHideHeader && !isContinuousMode() && dy > SWIPE_DOWN_OPEN && absDx < 70) {
       if (e.cancelable) e.preventDefault();
       const wasHidden = !readerLayout.classList.contains('header-peek');
       if (!readerLayout.classList.toggle('header-peek')) closeJumpPanel();
@@ -6399,7 +6748,7 @@ function attachIframeTouchNav(view) {
       syncHeaderDismissBackdrop();
       return;
     }
-    if (prefs.autoHideHeader && dy < -SWIPE_UP_CLOSE && absDx < 70 && readerLayout.classList.contains('header-peek')) {
+    if (prefs.autoHideHeader && !isContinuousMode() && dy < -SWIPE_UP_CLOSE && absDx < 70 && readerLayout.classList.contains('header-peek')) {
       if (e.cancelable) e.preventDefault();
       forceHideAutoHeader();
       closeJumpPanel();
@@ -6408,7 +6757,10 @@ function attachIframeTouchNav(view) {
     if (absDx < TAP_MAX_DRIFT && absDy < TAP_MAX_DRIFT) {
       // Footnote links take priority over navigation hot zones — let the click fire
       if (e.changedTouches[0].target?.closest?.('a[data-footnote-href]')) return;
-      const nav = inNavZone(cx);
+      // Continuous mode: no discrete page to tap-jump to — a nav-zone/vertical-zone tap there
+      // just disorients (confirmed live: "jumps lower but it's hard to figure out where you
+      // left off"), so both are skipped entirely; scrolling is the only way to move.
+      const nav = isContinuousMode() ? null : inNavZone(cx);
       if (nav) {
         if (e.cancelable) e.preventDefault();
         if (nav === 'prev') goPrev(); else goNext();
@@ -6427,7 +6779,7 @@ function attachIframeTouchNav(view) {
       const otherOverlayOpen = hasOpenPanel()
         || document.getElementById('sleep-timer-panel')?.classList.contains('open')
         || document.getElementById('footnote-popup')?.classList.contains('open');
-      if (prefs.vertNavZones && !otherOverlayOpen && !e.changedTouches[0].target?.closest?.('a')) {
+      if (prefs.vertNavZones && !isContinuousMode() && !otherOverlayOpen && !e.changedTouches[0].target?.closest?.('a')) {
         if (e.cancelable) e.preventDefault();
         if (document.getElementById('dict-popup')?.classList.contains('open')) closeDictPopup();
         if (document.getElementById('annot-toolbar')?.classList.contains('open')) closeAnnotationToolbar(true);
@@ -6441,6 +6793,24 @@ function attachIframeTouchNav(view) {
       if (prefs.autoHideHeader && readerLayout.classList.contains('header-peek')) {
         if (e.cancelable) e.preventDefault();
         forceHideAutoHeader();
+      }
+      return;
+    }
+    // Continuous mode: no horizontal page-turn on swipe — a discrete page-jump makes no sense
+    // once there's no discrete page (confirmed live: "swiping left and right will still jump
+    // to next page... makes no sense"). Vertical drag is native scroll wherever there's
+    // actually something to scroll; the one gap that leaves is a chapter (or the exact edge of
+    // one) with NOTHING left to scroll at all — most commonly a short single-page chapter (a
+    // title/copyright page) — where touchmove never fires a native scroll in the first place,
+    // so there'd otherwise be no way to swipe past it (confirmed live too: "on single page
+    // chapters I can't scroll to next chapter"). Gated on the paginator's own isAtEnd/isAtStart
+    // so a normal scroll that already moved real content never ALSO triggers a chapter jump —
+    // mirrors the wheel-boundary fix in _attachCxKbd's wheel listener above.
+    if (isContinuousMode()) {
+      if (absDy > absDx && absDy > SWIPE_THRESHOLD) {
+        const pag = _cxReader?._paginator;
+        if (dy < 0 && pag?.isAtEnd) { if (e.cancelable) e.preventDefault(); _continuousBoundaryNav('next'); }
+        else if (dy > 0 && pag?.isAtStart) { if (e.cancelable) e.preventDefault(); _continuousBoundaryNav('prev'); }
       }
       return;
     }
@@ -6587,13 +6957,27 @@ async function applyPortraitLock(enabled) {
 // ── Mouse wheel navigation ────────────────────────────────────────────────────
 let wheelCooldown = false;
 function handleWheel(deltaY) {
-  if (!prefs.mouseWheelNav || !isReady) return;
+  // Continuous mode: wheel scrolls natively (the iframe/container is overflow:auto — see
+  // ScrollPaginator/comic-viewer wiring) regardless of the mouseWheelNav preference, which is
+  // specifically the OPT-IN "one wheel gesture = one discrete page turn" feature — the two
+  // don't compose (a page-turn on top of native scroll would double-navigate every tick).
+  if (isContinuousMode() || !prefs.mouseWheelNav || !isReady) return;
   if (wheelCooldown) return;
   wheelCooldown = true;
   setTimeout(() => { wheelCooldown = false; }, 400);
   if (deltaY > 0) goNext(); else goPrev();
 }
-epubViewer.addEventListener('wheel', (e) => { handleWheel(e.deltaY); }, { passive: true });
+// Paginated comic mode: wheel (and Chrome/Firefox trackpad pinch, which arrives as a ctrlKey
+// wheel event) always zooms instead of paging — comicViewer.onWheel() calls preventDefault()
+// itself, so this listener can't stay passive. Continuous comic mode skips comicViewer
+// entirely and falls through to native scroll instead — pinch/wheel zoom-while-scrolling is
+// out of scope for v1 (see the continuous-mode plan), and #epub-viewer is overflow-y:auto in
+// that mode (see reader.css's .comic-mode.continuous rules) so the wheel event's default
+// native-scroll behaviour is exactly what's wanted, undisturbed.
+epubViewer.addEventListener('wheel', (e) => {
+  if (isImmersivePageMode() && !isContinuousMode()) { comicViewer.onWheel(e); return; }
+  handleWheel(e.deltaY);
+}, { passive: false });
 document.addEventListener('br-wheel', (e) => { handleWheel(e.detail.deltaY); });
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }

@@ -2,6 +2,14 @@ const jwt = require('jsonwebtoken');
 const { getDb } = require('../db');
 const { runWithUser } = require('../utils/logger');
 
+// Throttled last_active_at writer — authenticateToken runs on every authenticated request
+// (progress autosave, polling, etc.), far too often to write on every hit. Cache the last
+// write time per user in memory and only touch the DB once per ACTIVE_WRITE_THROTTLE_MS;
+// that's plenty of granularity for the admin panel's "last active" display (server/routes/
+// auth.js's GET /admin/users). Reset on restart — harmless, just means one extra write.
+const ACTIVE_WRITE_THROTTLE_MS = 2 * 60 * 1000;
+const _lastActiveWriteCache = new Map(); // userId → ms timestamp of last DB write
+
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.startsWith('Bearer ')
@@ -22,6 +30,17 @@ function authenticateToken(req, res, next) {
     }
     req.user = payload;
     req.user.username = user.username; // expose for handlers + logging
+
+    const nowMs = Date.now();
+    const lastWrite = _lastActiveWriteCache.get(user.id) || 0;
+    if (nowMs - lastWrite > ACTIVE_WRITE_THROTTLE_MS) {
+      _lastActiveWriteCache.set(user.id, nowMs);
+      try {
+        getDb().prepare('UPDATE users SET last_active_at = ? WHERE id = ?')
+          .run(Math.floor(nowMs / 1000), user.id);
+      } catch { /* best-effort — never block a request over this */ }
+    }
+
     // Run the rest of the request within the user's logging context so every
     // console line emitted while handling it is tagged with this username.
     return runWithUser(user.username, () => next());

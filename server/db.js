@@ -265,6 +265,9 @@ function initDb() {
     [`ALTER TABLE users           ADD COLUMN oidc_provider          TEXT    DEFAULT NULL`,     'users.oidc_provider'],
     [`ALTER TABLE users           ADD COLUMN oidc_sub                TEXT    DEFAULT NULL`,     'users.oidc_sub'],
     [`ALTER TABLE users           ADD COLUMN email                   TEXT    DEFAULT NULL`,     'users.email'],
+    // Last time this user made an authenticated request — throttled write, see
+    // server/middleware/auth.js. Powers the admin panel's per-user activity display.
+    [`ALTER TABLE users           ADD COLUMN last_active_at          INTEGER DEFAULT 0`,        'users.last_active_at'],
   ];
   for (const [sql, label] of migrations) {
     try {

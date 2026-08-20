@@ -608,6 +608,26 @@ async function loadAdminSection() {
   } catch (_) { /* not admin or error — keep hidden */ }
 }
 
+// Relative "last active" label — this codebase's convention is a small local formatter per
+// file (see e.g. reader.js's fmtTs for the sync dialog) rather than a shared date-fmt util.
+function fmtRelativeActive(unixSecs) {
+  if (!unixSecs) return t('settings.admin_never_active');
+  const mins = Math.floor((Date.now() / 1000 - unixSecs) / 60);
+  if (mins < 3)   return t('settings.admin_active_now');
+  if (mins < 60)  return t('settings.admin_active_mins_ago',  { n: mins });
+  if (mins < 1440) return t('settings.admin_active_hours_ago', { n: Math.floor(mins / 60) });
+  return t('settings.admin_active_days_ago', { n: Math.floor(mins / 1440) });
+}
+
+// 7-day reading-activity dots, modeled visually on bookorbitDash.js's .bod-streak-dots
+// (own small CSS class here, not a shared one — that panel is BookOrbit-account-wide,
+// this is per-user-in-this-Codexa-instance, different data source and audience).
+function adminActivityDotsHtml(dailySecs) {
+  if (!dailySecs?.length) return '';
+  return `<div class="admin-activity-dots">${dailySecs.map(secs =>
+    `<span class="admin-activity-dot${secs > 0 ? ' filled' : ''}"></span>`).join('')}</div>`;
+}
+
 async function loadAdminUsers() {
   const list = document.getElementById('admin-users-list');
   if (!list) return;
@@ -617,15 +637,22 @@ async function loadAdminUsers() {
       list.innerHTML = `<p style="color:var(--color-text-muted);font-size:.85rem;margin:0" data-i18n="settings.admin_users_empty">${t('settings.admin_users_empty')}</p>`;
       return;
     }
-    list.innerHTML = users.map(u => `
+    list.innerHTML = users.map(u => {
+      const reading = u.currently_reading
+        ? `<span class="admin-user-meta">${t('settings.admin_currently_reading', { title: escHtml(u.currently_reading.title) })}</span>`
+        : '';
+      return `
       <div class="admin-user-row" data-id="${u.id}">
         <div class="admin-user-info">
           <span class="admin-user-name">${escHtml(u.username)}</span>
-          <span class="admin-user-meta">${t('settings.admin_users_books', { n: u.book_count })}</span>
+          <span class="admin-user-meta">${t('settings.admin_users_books', { n: u.book_count })} &middot; ${fmtRelativeActive(u.last_active_at)}</span>
+          ${reading}
+          ${adminActivityDotsHtml(u.daily_secs)}
         </div>
         <button class="btn btn-danger btn-sm admin-user-delete-btn" data-id="${u.id}" data-username="${escHtml(u.username)}">${t('common.delete')}</button>
       </div>
-    `).join('');
+    `;
+    }).join('');
     list.querySelectorAll('.admin-user-delete-btn').forEach(btn => {
       btn.addEventListener('click', () => deleteAdminUser(Number(btn.dataset.id), btn.dataset.username));
     });

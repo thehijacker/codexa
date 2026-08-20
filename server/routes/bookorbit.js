@@ -11,6 +11,7 @@ const { getDb, DATA_DIR }              = require('../db');
 const { authenticateToken }            = require('../middleware/auth');
 const { computeFileHash, computeFileMd5, extractEpubMetadata, extractCbzMetadata } = require('../utils/epub');
 const { isCbrBuffer, convertCbrToCbz } = require('../utils/cbr');
+const { isPdfBuffer, extractPdfMetadata } = require('../utils/pdf');
 const { peekFilePath, PEEK_TTL_SECONDS } = require('../utils/peekCleanup');
 const bookorbit = require('../services/bookorbitSync');
 
@@ -335,7 +336,7 @@ router.delete('/books/:boBookId/collections/:collectionId', async (req, res) => 
 // (server/routes/opds.js), but the source is BookOrbit's Bearer-token file endpoint instead of
 // an OPDS Basic-auth acquisition link. Shared by the single-book import route and the bulk
 // collection/smart-scope sync route below — never writes to `res` itself, just returns a result.
-const SUPPORTED_FORMATS = new Set(['epub', 'cbz', 'cbr']);
+const SUPPORTED_FORMATS = new Set(['epub', 'cbz', 'cbr', 'pdf']);
 
 async function importBookOrbitFile(userId, ctx, { boBookId, fileId, format, title, author }) {
   const clientFormat = String(format || '').toLowerCase();
@@ -357,11 +358,23 @@ async function importBookOrbitFile(userId, ctx, { boBookId, fileId, format, titl
   let workBuf = buf;
   let outFormat = 'epub';
   const ctLower = (asset.contentType || '').toLowerCase();
-  if (isCbrBuffer(workBuf)) {
+  const isPdf = isPdfBuffer(workBuf);
+  if (isPdf || ctLower.includes('pdf') || clientFormat === 'pdf') {
+    outFormat = 'pdf';
+  } else if (isCbrBuffer(workBuf)) {
     workBuf = await convertCbrToCbz(workBuf);
     outFormat = 'cbz';
   } else if (ctLower.includes('cbz') || ctLower.includes('comicbook+zip') || clientFormat === 'cbz') {
     outFormat = 'cbz';
+  }
+  // EPUB/CBZ are both ZIP containers ('PK' signature); anything defaulting to 'epub' that isn't
+  // actually a PDF or a ZIP isn't a real book file at all — most likely BookOrbit's own download
+  // endpoint returned an error page/JSON body instead of the asset (confirmed possible: this
+  // endpoint's fetchAsset() doesn't itself validate content, so a 200-with-wrong-body slips
+  // through as "ok"). Failing clearly here beats writing that response to disk as a fake
+  // ".epub"/".pdf" and only discovering it's not a real book once the reader tries to open it.
+  if (outFormat === 'epub' && !isPdf && !(workBuf.length >= 2 && workBuf[0] === 0x50 && workBuf[1] === 0x4b)) {
+    return { ok: false, status: 502, error: 'error.bookorbit_invalid_file' };
   }
 
   const tmpPath = path.join(TMP_DIR, `bo_${Date.now()}_${userId}_${Math.random().toString(36).slice(2)}.tmp`);
@@ -380,13 +393,14 @@ async function importBookOrbitFile(userId, ctx, { boBookId, fileId, format, titl
       return { ok: false, status: 409, error: 'error.book_already_in_library', id: existing.id, alreadyOwned: true };
     }
 
-    const ext      = outFormat === 'cbz' ? '.cbz' : '.epub';
+    const ext      = outFormat === 'pdf' ? '.pdf' : outFormat === 'cbz' ? '.cbz' : '.epub';
     const filename = `${fileHash}${ext}`;
     const destPath = path.join(userDir, filename);
     try { fs.renameSync(tmpPath, destPath); }
     catch { fs.copyFileSync(tmpPath, destPath); fs.unlinkSync(tmpPath); }
 
-    const meta = outFormat === 'cbz'
+    const meta = outFormat === 'pdf' ? await extractPdfMetadata(destPath, COVERS_DIR, fileHash)
+      : outFormat === 'cbz'
       ? extractCbzMetadata(destPath, COVERS_DIR, fileHash)
       : extractEpubMetadata(destPath, COVERS_DIR, fileHash);
     const bookTitle  = meta.title  || title  || 'Unknown';
@@ -455,11 +469,23 @@ async function createBookOrbitPeek(userId, ctx, { boBookId, fileId, format, titl
   let workBuf = buf;
   let outFormat = 'epub';
   const ctLower = (asset.contentType || '').toLowerCase();
-  if (isCbrBuffer(workBuf)) {
+  const isPdf = isPdfBuffer(workBuf);
+  if (isPdf || ctLower.includes('pdf') || clientFormat === 'pdf') {
+    outFormat = 'pdf';
+  } else if (isCbrBuffer(workBuf)) {
     workBuf = await convertCbrToCbz(workBuf);
     outFormat = 'cbz';
   } else if (ctLower.includes('cbz') || ctLower.includes('comicbook+zip') || clientFormat === 'cbz') {
     outFormat = 'cbz';
+  }
+  // EPUB/CBZ are both ZIP containers ('PK' signature); anything defaulting to 'epub' that isn't
+  // actually a PDF or a ZIP isn't a real book file at all — most likely BookOrbit's own download
+  // endpoint returned an error page/JSON body instead of the asset (confirmed possible: this
+  // endpoint's fetchAsset() doesn't itself validate content, so a 200-with-wrong-body slips
+  // through as "ok"). Failing clearly here beats writing that response to disk as a fake
+  // ".epub"/".pdf" and only discovering it's not a real book once the reader tries to open it.
+  if (outFormat === 'epub' && !isPdf && !(workBuf.length >= 2 && workBuf[0] === 0x50 && workBuf[1] === 0x4b)) {
+    return { ok: false, status: 502, error: 'error.bookorbit_invalid_file' };
   }
 
   const stagingPath = path.join(TMP_DIR, `bo_peek_${Date.now()}_${userId}_${Math.random().toString(36).slice(2)}.tmp`);
@@ -484,7 +510,7 @@ async function createBookOrbitPeek(userId, ctx, { boBookId, fileId, format, titl
     // POST /api/books/:id/opened's triggerSync() never wastes a round-trip on this row, and this
     // row's transient reading_sessions can never get synced into BookOrbit before cleanup runs.
     const peekHash = `peek_${boBookId}_${fileId}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const ext      = outFormat === 'cbz' ? '.cbz' : '.epub';
+    const ext      = outFormat === 'pdf' ? '.pdf' : outFormat === 'cbz' ? '.cbz' : '.epub';
     const filename = `${peekHash}${ext}`;
     const destPath = peekFilePath(userId, filename);
     fs.mkdirSync(path.dirname(destPath), { recursive: true });

@@ -6,6 +6,7 @@ const { getDb, DATA_DIR }              = require('../db');
 const { authenticateToken }            = require('../middleware/auth');
 const { computeFileHash, computeFileMd5, extractEpubMetadata, extractCbzMetadata } = require('../utils/epub');
 const { isCbrBuffer, convertCbrToCbz } = require('../utils/cbr');
+const { extractPdfMetadata, isPdfBuffer } = require('../utils/pdf');
 const { PEEK_TTL_SECONDS, peekFilePath, deletePeekRow } = require('../utils/peekCleanup');
 const bookorbit = require('../services/bookorbitSync');
 
@@ -31,9 +32,11 @@ const upload = multer({
             || file.mimetype === 'application/zip'
             || file.mimetype === 'application/rar'
             || file.mimetype === 'application/x-rar-compressed'
+            || file.mimetype === 'application/pdf'
             || name.endsWith('.epub')
             || name.endsWith('.cbz')
-            || name.endsWith('.cbr');
+            || name.endsWith('.cbr')
+            || name.endsWith('.pdf');
     cb(ok ? null : new Error('error.epub_required'), ok);
   },
 });
@@ -151,7 +154,8 @@ router.get('/:id/file', (req, res) => {
   }
 
   const isCbzFile = book.filename?.endsWith('.cbz') || book.format === 'cbz';
-  res.setHeader('Content-Type', isCbzFile ? 'application/x-cbz' : 'application/epub+zip');
+  const isPdfFile = book.filename?.endsWith('.pdf') || book.format === 'pdf';
+  res.setHeader('Content-Type', isPdfFile ? 'application/pdf' : (isCbzFile ? 'application/x-cbz' : 'application/epub+zip'));
   res.setHeader('Accept-Ranges', 'bytes');
 
   // ?download=1 → trigger browser Save-As with a nice human-readable filename
@@ -165,7 +169,7 @@ router.get('/:id/file', (req, res) => {
       const sNum  = sanitize(book.series_number);
       fname += ` (${sName}${sNum ? ` #${sNum}` : ''})`;
     }
-    fname += isCbzFile ? '.cbz' : '.epub';
+    fname += isPdfFile ? '.pdf' : (isCbzFile ? '.cbz' : '.epub');
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fname)}`);
   }
 
@@ -186,7 +190,8 @@ router.post('/', upload.single('epub'), async (req, res) => {
     // Detect and convert CBR → CBZ BEFORE hashing so the stored hash matches the CBZ content.
     const origName = req.file.originalname.toLowerCase();
     let isCbz = origName.endsWith('.cbz');
-    if (origName.endsWith('.cbr') || isCbrBuffer(fs.readFileSync(tmpPath).slice(0, 8))) {
+    let isPdf = origName.endsWith('.pdf') || isPdfBuffer(fs.readFileSync(tmpPath).slice(0, 8));
+    if (!isPdf && (origName.endsWith('.cbr') || isCbrBuffer(fs.readFileSync(tmpPath).slice(0, 8)))) {
       console.log('[books] converting CBR → CBZ...');
       const cbzBuf = await convertCbrToCbz(fs.readFileSync(tmpPath));
       fs.writeFileSync(tmpPath, cbzBuf);
@@ -205,8 +210,8 @@ router.post('/', upload.single('epub'), async (req, res) => {
       return res.status(409).json({ error: 'error.book_already_in_library' });
     }
 
-    const ext      = isCbz ? '.cbz' : '.epub';
-    const format   = isCbz ? 'cbz'  : 'epub';
+    const ext      = isPdf ? '.pdf' : (isCbz ? '.cbz' : '.epub');
+    const format   = isPdf ? 'pdf'  : (isCbz ? 'cbz'  : 'epub');
     const filename = `${fileHash}${ext}`;
     const destPath = path.join(userDir, filename);
 
@@ -219,7 +224,8 @@ router.post('/', upload.single('epub'), async (req, res) => {
     }
 
     const { title, author, cover_path, series_name, series_number, description, publisher, language, isbn, genres, pages } =
-      isCbz ? extractCbzMetadata(destPath, COVERS_DIR, fileHash)
+      isPdf ? await extractPdfMetadata(destPath, COVERS_DIR, fileHash)
+      : isCbz ? extractCbzMetadata(destPath, COVERS_DIR, fileHash)
              : extractEpubMetadata(destPath, COVERS_DIR, fileHash);
     const fileSize = fs.statSync(destPath).size;
 
@@ -256,6 +262,41 @@ router.patch('/:id', (req, res) => {
   res.json({ success: true, kosync_hash: h });
 });
 
+// ── POST /api/books/:id/cover — client-rendered cover thumbnail (PDF only, see pdf-cover.js) ──
+// EPUB/CBZ covers come out of the file itself at import time (extractEpubMetadata/
+// extractCbzMetadata) — a PDF's "cover" is just its first page, which needs actually rendering,
+// and this project deliberately does that in the browser (see public/js/pdf-cover.js's header
+// comment: the server-side native-canvas option segfaulted the whole process on a real test
+// file). Idempotent by design — a book that already has a cover just gets a 200 no-op, so
+// reader.js can call this speculatively on every PDF open without needing to track state itself.
+const uploadCover = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB — a 600px-wide JPEG thumbnail is a few hundred KB
+  fileFilter: (_req, file, cb) => {
+    const ok = file.mimetype === 'image/jpeg' || file.mimetype === 'image/png' || file.mimetype === 'image/webp';
+    cb(ok ? null : new Error('error.invalid_cover_image'), ok);
+  },
+});
+router.post('/:id/cover', uploadCover.single('cover'), (req, res) => {
+  const db   = getDb();
+  const book = db.prepare('SELECT id, file_hash, cover_path FROM books WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+  if (!book) return res.status(404).json({ error: 'error.book_not_found' });
+  if (!req.file) return res.status(400).json({ error: 'error.invalid_cover_image' });
+  if (book.cover_path) return res.json({ success: true, cover_path: book.cover_path }); // already has one — no-op
+
+  const ext = req.file.mimetype === 'image/png' ? '.png' : req.file.mimetype === 'image/webp' ? '.webp' : '.jpg';
+  const coverFilename = `${book.file_hash}${ext}`;
+  try {
+    fs.mkdirSync(COVERS_DIR, { recursive: true });
+    fs.writeFileSync(path.join(COVERS_DIR, coverFilename), req.file.buffer);
+  } catch (err) {
+    console.error('[books] cover write failed:', err.message);
+    return res.status(500).json({ error: 'error.cover_save_failed' });
+  }
+  db.prepare('UPDATE books SET cover_path = ? WHERE id = ?').run(coverFilename, book.id);
+  res.json({ success: true, cover_path: coverFilename });
+});
+
 // ── PATCH /api/books/:id/file — replace local file with a fresh copy from OPDS or BookOrbit ──
 // Two request shapes: { href, serverId } for an OPDS acquisition link (Basic-auth fetch), or
 // { source:'bookorbit', boBookId, fileId } for a BookOrbit file (Bearer-token fetch via the
@@ -287,9 +328,11 @@ router.patch('/:id/file', async (req, res) => {
 
   const tmpPath = path.join(TMP_DIR, `replace-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`);
   let fileHandle;
-  // The new file's format — preserved from the book being replaced for OPDS (which only ever
-  // fetches epub); for BookOrbit, CBR gets normalized to CBZ the same way import/peek do.
-  let outFormat = book.filename?.endsWith('.cbz') || book.format === 'cbz' ? 'cbz' : 'epub';
+  // The new file's format — preserved from the book being replaced (for OPDS this is normally
+  // epub, but a book originally added as a PDF keeps its own format on a re-sync too); for
+  // BookOrbit, CBR gets normalized to CBZ the same way import/peek do.
+  let outFormat = (book.filename?.endsWith('.pdf') || book.format === 'pdf') ? 'pdf'
+    : (book.filename?.endsWith('.cbz') || book.format === 'cbz') ? 'cbz' : 'epub';
   try {
     if (isBookorbit) {
       const ctx = bookorbit.getContext(req.user.id);
@@ -310,7 +353,7 @@ router.patch('/:id/file', async (req, res) => {
       const r = await fetch(href, { headers, signal: AbortSignal.timeout(120000) });
       if (!r.ok) return res.status(502).json({ error: `error.opds_download_failed_${r.status}` });
       const ct = r.headers.get('content-type') || '';
-      if (!ct.includes('epub') && !ct.includes('octet-stream')) {
+      if (!ct.includes('epub') && !ct.includes('octet-stream') && !ct.includes('pdf')) {
         return res.status(502).json({ error: 'error.opds_not_epub' });
       }
 
@@ -342,7 +385,8 @@ router.patch('/:id/file', async (req, res) => {
 
     // Re-extract all metadata from the new file so genres, description, etc. stay current.
     // Title and author are intentionally preserved in case the user edited them manually.
-    const meta = outFormat === 'cbz'
+    const meta = outFormat === 'pdf' ? await extractPdfMetadata(destPath, COVERS_DIR, book.file_hash)
+      : outFormat === 'cbz'
       ? extractCbzMetadata(destPath, COVERS_DIR, book.file_hash)
       : extractEpubMetadata(destPath, COVERS_DIR, book.file_hash);
     db.prepare(`UPDATE books SET

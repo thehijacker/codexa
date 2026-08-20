@@ -1,7 +1,7 @@
 // Codexa Service Worker
 // Caches app shell for offline use. EPUBs are cached on demand in BOOKS_CACHE.
 
-const CACHE_VERSION = 'br-v20260820007';
+const CACHE_VERSION = 'br-v20260820030';
 const BOOKS_CACHE   = 'codexa-books-v2';
 const APP_SHELL = [
   '/',
@@ -23,12 +23,15 @@ const APP_SHELL = [
   '/js/api.js',
   '/js/ui.js',
   '/js/library.js',
+  '/js/pdf-cover.js',
   '/js/sidebar.js',
   '/js/i18n.js',
   '/js/opds.js',
   '/js/bookorbit.js',
   '/js/bookorbitDash.js',
   '/js/reader.js',
+  '/js/comic-viewer.js',
+  '/js/img-bg-fix.js',
   // Dynamically imported by reader.js (await import('./cxreader/index.js')) when opening a
   // book. Inlined already when serving the bundled dist/js/reader.js, but reader.js is loaded
   // unbundled straight from here when dist/ isn't in use — must be precached for that path too.
@@ -38,7 +41,11 @@ const APP_SHELL = [
   '/js/cxreader/column-paginator.js',
   '/js/cxreader/fixed-paginator.js',
   '/js/cxreader/cbz-parser.js',
+  '/js/cxreader/pdf-parser.js',
+  '/js/cxreader/scroll-paginator.js',
   '/js/vendor/jszip.min.js',
+  '/js/vendor/pdf.min.mjs',
+  '/js/vendor/pdf.worker.min.mjs',
   '/locales/en.json',
   '/locales/de.json',
   '/locales/es.json',
@@ -334,9 +341,18 @@ async function handleCacheBook(e) {
     const booksCache = await caches.open(BOOKS_CACHE);
     await booksCache.put(
       `/offline/books/${bookId}/epub`,
+      // The cache KEY stays the generic "/epub" suffix regardless of actual format (same
+      // historical, format-agnostic convention as the 'epub' multer field name / IndexedDB
+      // downloadStatus — this already works for CBZ today) — but the stored Content-TYPE should
+      // reflect the real format, forwarded from the network response (already correct per-format
+      // there, see books.js's GET /:id/file) rather than hardcoded, so anything that later reads
+      // it back via .headers instead of raw bytes sees the right value. Reading code itself
+      // (fetchOfflineBookFile → .arrayBuffer()) doesn't care either way — content-sniffed by
+      // CXReader.open(), not by this header — so this was a latent inconsistency, not a bug that
+      // actually broke offline PDF/CBZ reading, but worth being correct about while auditing this.
       new Response(buf.buffer, {
         headers: {
-          'Content-Type':   'application/epub+zip',
+          'Content-Type':   res.headers.get('content-type') || 'application/epub+zip',
           'Content-Length': String(loaded),
         },
       })

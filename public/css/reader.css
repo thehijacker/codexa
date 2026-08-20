@@ -81,12 +81,33 @@ html, body {
   z-index: 19;
   pointer-events: none;
 }
-.autohide-header #header-sensor {
+.autohide-header #header-sensor,
+.comic-mode #header-sensor {
+  pointer-events: auto;
+}
+
+/* Comic-mode-only mirror of #header-sensor at the bottom edge — EPUB has no bottom chrome to
+   reveal this way, so this stays inert (pointer-events:none) outside comic mode. */
+#footer-sensor {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: calc(5% + var(--sab, 0px));
+  z-index: 19;
+  pointer-events: none;
+}
+.comic-mode #footer-sensor {
   pointer-events: auto;
 }
 
 /* ── Auto-hide header ────────────────────────────────────────────────────────── */
-.reader-layout.autohide-header .reader-header {
+/* Comic mode (.comic-mode, set whenever a CBZ is open) reuses this exact overlay + peek
+   mechanism to hide/reveal the header, regardless of the user's own autoHideHeader
+   preference — comics always start with chrome hidden. Deliberately independent from the
+   status bars' own .bars-peek toggle further down (top-edge hover reveals the toolbar;
+   bottom-edge hover reveals the status bars — mirroring how the two edges read visually,
+   rather than one hover revealing chrome at both ends of the screen at once). */
+.reader-layout.autohide-header .reader-header,
+.reader-layout.comic-mode .reader-header {
   position: absolute;
   top: var(--sat);
   left: 0;
@@ -97,14 +118,16 @@ html, body {
   transition: transform .25s ease, opacity .25s ease;
   z-index: 20;
 }
-.reader-layout.autohide-header.header-peek .reader-header {
+.reader-layout.autohide-header.header-peek .reader-header,
+.reader-layout.comic-mode.header-peek .reader-header {
   transform: translateY(0);
   opacity: 1;
   pointer-events: auto;
   z-index: 21;
 }
 /* Reader main fills full height when header is out of flow */
-.reader-layout.autohide-header .reader-main {
+.reader-layout.autohide-header .reader-main,
+.reader-layout.comic-mode .reader-main {
   flex: 1;
   height: 100%;
 }
@@ -582,6 +605,86 @@ html, body {
 /* epub.js injects an iframe — give it a bg matching current theme */
 #epub-viewer iframe {
   background: var(--reader-page-bg, #1a1a2e) !important;
+}
+/* Comic mode: force black background the whole way up the #epub-viewer ancestor chain, not
+   just on #epub-viewer itself. #epub-viewer's own inline background (set by JS to match the
+   reading theme, for the EPUB case) was the first fix here — but the page-turn animation
+   (fade/zoom, see the anim-fade/anim-zoom rules below) animates #epub-viewer's own `opacity`
+   down to 0 and back on every page turn, and while it's not fully opaque, whatever sits
+   BEHIND it shows through regardless of #epub-viewer's own background colour. .reader-layout
+   and .reader-main both default to the reading theme's own colour (.reader-layout's own
+   background rule below reads var(--reader-page-bg)) — hence the flash from theme colour to
+   black on every page turn, confirmed live. Blacking out the whole chain removes anything
+   theme-coloured for the animation to reveal in the first place. */
+.reader-layout.comic-mode,
+.comic-mode .reader-main,
+.comic-mode #epub-viewer {
+  background: #000 !important;
+}
+
+/* ── Comic (CBZ) full-bleed immersive viewer ─────────────────────────────────── */
+/* Always black, regardless of reading theme — letterboxing around a comic page should
+   read as "cinema black," not the theme's paper colour. See cxreader/index.js's
+   _renderCbzItem and comic-viewer.js, which transforms this element for zoom/pan. */
+.cx-cbz-wrap {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  box-sizing: border-box;
+  /* No transition here deliberately — comic-viewer.js drives this transform every frame of a
+     live wheel/pinch/drag gesture, and a CSS transition would make 1:1 tracking feel laggy. */
+}
+.cx-cbz-wrap.two-page { gap: 6px; }
+.cx-cbz-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  /* Without this, mousedown-and-move on the image itself starts the browser's own native
+     image drag-and-drop instead of comic-viewer.js's pan gesture — the native drag swallows
+     the rest of the pointer sequence, so the pan appeared to "stop" the instant the mouse
+     moved. Confirmed live (desktop Chrome). */
+  -webkit-user-drag: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.cx-cbz-wrap.two-page .cx-cbz-img { max-width: calc(50% - 3px); }
+/* Desktop affordance: only show a pan cursor once actually zoomed in — clicking at
+   fit-to-screen zoom pages/reveals chrome, not zooms (that's wheel/pinch-only), so a
+   zoom-in cursor there would misleadingly suggest click-to-zoom. Never applies in continuous
+   mode — zoom is out of scope there, comicViewer is never invoked, so .cx-comic-zoomed never
+   gets added. */
+.comic-mode #epub-viewer.cx-comic-zoomed { cursor: grab; }
+.comic-mode #epub-viewer.cx-comic-zoomed:active { cursor: grabbing; }
+
+/* ── Continuous comic mode: full book stacked, no gaps, native scroll ───────────────────── */
+/* #epub-viewer is overflow:hidden everywhere else (paginated modes clip by design) — here it's
+   the actual scroll container (see cxreader/index.js's _renderCbzContinuous, which passes it
+   directly to ScrollPaginator rather than an inner wrapper). touch-action on #epub-viewer
+   (further up this file) already reserves horizontal touch gestures for JS — see reader.js's
+   continuous-mode branch in handleTouchEnd — while leaving vertical panning native. */
+.comic-mode.continuous #epub-viewer {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.cx-cbz-continuous-wrap {
+  display: flex;
+  flex-direction: column;
+}
+/* Overrides .cx-cbz-img's fit-to-screen max-height/object-fit (meant for one full-bleed page)
+   — here every image is full width, height auto per its own aspect ratio, the standard
+   "webtoon" convention. display:block eliminates the few-px inline-image whitespace gap
+   between stacked images that "no gaps" means avoiding. */
+.cx-cbz-continuous-wrap .cx-cbz-img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  max-height: none;
+  object-fit: initial;
 }
 
 /* ── Page turn animations ────────────────────────────────────────────────────── */
@@ -1640,6 +1743,67 @@ html.no-flexgap .spread-buttons.page-anim-grid > * + * { margin-left: 0; }
 }
 .sb-bar-top    { top:    calc(var(--edge-pad-top, 0px) + 6px); }
 .sb-bar-bottom { bottom: calc(var(--sab) + 4px + var(--edge-pad-bottom, 0px)); }
+
+/* Comic mode: status bars overlay the full-bleed image instead of the page reserving space
+   for them (see cxreader/index.js's _renderCbzItem) — hidden by default, revealed via
+   .bars-peek, a toggle independent of the header's own .header-peek (bottom-edge hover/tap
+   reveals the status bars; top-edge hover/tap reveals the toolbar — see reader.js's
+   footer-sensor/header-sensor wiring). Styled to match the toolbar (same background/blur/text
+   variables, see .reader-header below) rather than a plain black scrim, since .sb-bar itself
+   has no background at all normally (fine sitting on a themed page, not on an image) — and
+   pinned flush to the true screen edge (--sat/--sab only, dropping the small cosmetic offset
+   .sb-bar-top/.sb-bar-bottom otherwise use to sit a little inset from the page margin, which
+   read as a stray gap once here at the very edge of a full-bleed image). */
+/* Slide + fade, matching .reader-header's own reveal transition above — #sb-top slides down
+   from off-screen, #sb-bottom slides up from off-screen. (The blanket
+   "[data-reader-eink] * { transition: none !important }" rule further up this file already
+   kills this transition — and the .reader-header one it mirrors — in e-ink mode, so nothing
+   extra is needed here for that.) */
+.comic-mode #sb-top {
+  opacity: 0;
+  transform: translateY(-100%);
+  transition: opacity .25s ease, transform .25s ease;
+}
+.comic-mode #sb-bottom {
+  opacity: 0;
+  transform: translateY(100%);
+  transition: opacity .25s ease, transform .25s ease;
+}
+.comic-mode .sb-sep-top,
+.comic-mode .sb-sep-bottom {
+  opacity: 0;
+  transition: opacity .25s ease;
+}
+.comic-mode.bars-peek #sb-top,
+.comic-mode.bars-peek #sb-bottom {
+  opacity: 1;
+  transform: translateY(0);
+}
+/* Separators (independently toggled on/off by the user's own status-bar settings, via
+   inline display:none/'' — see reader.js's renderStatusSlots) restore their own normal
+   opacity rather than 1, matching how subtle they're meant to look outside comic mode too. */
+.comic-mode.bars-peek .sb-sep-top,
+.comic-mode.bars-peek .sb-sep-bottom {
+  opacity: .3;
+}
+.comic-mode .sb-bar-top,
+.comic-mode .sb-bar-bottom {
+  background: var(--reader-header-bg, var(--color-surface));
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.comic-mode .sb-bar-top {
+  top: var(--sat);
+  padding-top: .5rem;
+}
+.comic-mode .sb-bar-bottom {
+  bottom: var(--sab);
+  padding-bottom: .5rem;
+}
+.comic-mode .sb-bar-top .sb-slot,
+.comic-mode .sb-bar-bottom .sb-slot {
+  color: var(--reader-header-text, var(--color-text));
+}
 .sb-slot       { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-slot:first-child  { text-align: left; }
 .sb-slot:nth-child(2) { text-align: center; }

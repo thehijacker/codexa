@@ -206,6 +206,9 @@
 
     <!-- Sensor zone: shows the header when mouse enters top edge (auto-hide mode) -->
     <div id="header-sensor"></div>
+    <!-- Comic mode only: mirrors header-sensor at the bottom edge, so hovering near either
+         edge reveals the header + both status bars together (see reader.js/reader.css). -->
+    <div id="footer-sensor"></div>
 
     <!-- Header -->
     <header class="reader-header">
@@ -799,6 +802,7 @@
           <div class="spread-buttons">
             <button class="spread-btn" data-spread="none" data-i18n="reader.spread_one">Ena stran</button>
             <button class="spread-btn" data-spread="auto" data-i18n="reader.spread_two">Dve strani</button>
+            <button class="spread-btn" data-spread="continuous" data-i18n="reader.spread_continuous">Neprekinjeno</button>
           </div>
         </div>
 
@@ -808,7 +812,7 @@
             <div class="setting-label" data-i18n="reader.sb_margins">Robovi</div>
             <span id="margin-value" class="setting-value">40px</span>
           </div>
-          <input type="range" id="margin-slider" min="0" max="120" step="4" value="40" />
+          <input type="range" id="margin-slider" min="0" max="300" step="4" value="40" />
         </div>
 
         <!-- Auto-hide header -->
@@ -1282,7 +1286,7 @@
        cross-origin requests are deliberately left uncached by sw.js, and third-party CDN
        resources aren't reliably available offline in iOS home-screen PWAs. -->
   <script src="/js/vendor/jszip.min.js"></script>
-  <script type="module" src="/js/reader.js?v=br-v109"></script>
+  <script type="module" src="/js/reader.js?v=br-v116"></script>
   <script src="/js/sw-register.js"></script>
 </body>
 </html>

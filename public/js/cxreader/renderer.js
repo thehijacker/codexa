@@ -51,6 +51,54 @@ export class ChapterRenderer {
 
   get iframe() { return this._iframe; }
 
+  // Continuous mode only: appends (or prepends) spineItem's content directly into the
+  // ALREADY-LIVE iframe document from an earlier render() call, instead of creating a fresh
+  // iframe — this is what lets scrolling flow seamlessly across a chapter boundary rather than
+  // jumping to a freshly-reset top (see cxreader/index.js's _maybeAppendNextChapter). Returns
+  // the wrapper element (tagged data-spine-idx, used by CXReader to track which chapter a
+  // given scroll position belongs to), or null if there's no live document to append into.
+  //
+  // Deliberately narrower than render()/_buildHtml(): no reader-CSS injection (already present
+  // in <head>, shared by the whole document) and no link-intercept script (same — document-
+  // level event delegation already covers dynamically added content). The e-ink white-
+  // background pass (img-bg-fix.js) is also skipped here — it self-guards per DOCUMENT
+  // (dataset.brImgBgFixed), assuming one call per chapter-document, which the original
+  // single-chapter-per-iframe model always was; re-running it correctly per APPENDED chapter
+  // within one shared document would need a real per-chapter guard, which is a large enough
+  // change (and a narrow enough impact — only e-ink theme + continuous EPUB + a book with
+  // scene-break images) to leave as a known gap for now rather than solve inline here.
+  async appendChapter(spineItem, spineIdx, direction = 'after') {
+    const doc = this._iframe?.contentDocument;
+    if (!doc?.body) return null;
+
+    const raw = await fetch(spineItem.blobUrl).then(r => r.text());
+    const frag = new DOMParser().parseFromString(this._xhtmlToHtml(raw), 'text/html');
+    frag.querySelectorAll('base').forEach(el => el.remove());
+
+    const chapterBase = spineItem.absPath.includes('/')
+      ? spineItem.absPath.slice(0, spineItem.absPath.lastIndexOf('/') + 1)
+      : '';
+
+    await this._inlineStylesheets(frag, chapterBase);
+    await this._rewriteElements(frag, chapterBase);
+
+    // Build the wrapper in the LIVE document so appendChild/insertBefore work directly.
+    // adoptNode, not importNode: importNode CLONES (leaves the original in frag untouched),
+    // so "while (frag.body.firstChild)" would never advance and loop forever, synchronously
+    // flooding the DOM with clones until the tab hangs and crashes — confirmed live. adoptNode
+    // actually MOVES the node (removes it from frag as part of adopting it into doc), so each
+    // iteration genuinely consumes frag.body's children and the loop correctly terminates.
+    const wrap = doc.createElement('div');
+    wrap.className = 'cx-continuous-chapter';
+    wrap.dataset.spineIdx = String(spineIdx);
+    while (frag.body.firstChild) wrap.appendChild(doc.adoptNode(frag.body.firstChild));
+
+    if (direction === 'before') doc.body.insertBefore(wrap, doc.body.firstChild);
+    else doc.body.appendChild(wrap);
+
+    return wrap;
+  }
+
   destroy() { this._cleanup(); }
 
   // ── Private ───────────────────────────────────────────────────────────────────
@@ -75,26 +123,7 @@ export class ChapterRenderer {
       ? spineItem.absPath.slice(0, spineItem.absPath.lastIndexOf('/') + 1)
       : '';
 
-    // Inline stylesheets (fetch CSS text, rewrite url() refs, inject as <style>)
-    const linkEls = [...doc.querySelectorAll('link[rel="stylesheet"]')];
-    for (const link of linkEls) {
-      const href = link.getAttribute('href');
-      if (!href) continue;
-      const absPath = this._resolve(href, chapterBase);
-      const blobUrl = this._blobFor(absPath);
-      if (!blobUrl) continue;
-      try {
-        const cssText  = await fetch(blobUrl).then(r => r.text());
-        const rewritten = this._clampLargeMargins(this._rewriteCssUrls(cssText, absPath));
-        const style = doc.createElement('style');
-        style.textContent = rewritten;
-        link.replaceWith(style);
-      } catch { link.remove(); }
-    }
-    // Inline <style> blocks (no url()s to resolve, but can carry the same margin issue)
-    for (const styleEl of [...doc.querySelectorAll('style')]) {
-      styleEl.textContent = this._clampLargeMargins(styleEl.textContent);
-    }
+    await this._inlineStylesheets(doc, chapterBase);
 
     // Rewrite element resource attributes to blob (or data: on legacy WebViews) URLs
     await this._rewriteElements(doc, chapterBase);
@@ -184,6 +213,31 @@ export class ChapterRenderer {
     // temp document losing its window association mid-use on some engines.
     if (tmpIframe) tmpIframe.remove();
     return html;
+  }
+
+  // Fetches each <link rel="stylesheet">'s CSS text, rewrites its url() references, and
+  // replaces it with an inline <style> (also margin-clamped) — shared by _buildHtml (the
+  // whole-document, first-chapter case) and appendChapter (the continuous-mode append case).
+  async _inlineStylesheets(doc, chapterBase) {
+    const linkEls = [...doc.querySelectorAll('link[rel="stylesheet"]')];
+    for (const link of linkEls) {
+      const href = link.getAttribute('href');
+      if (!href) continue;
+      const absPath = this._resolve(href, chapterBase);
+      const blobUrl = this._blobFor(absPath);
+      if (!blobUrl) continue;
+      try {
+        const cssText   = await fetch(blobUrl).then(r => r.text());
+        const rewritten = this._clampLargeMargins(this._rewriteCssUrls(cssText, absPath));
+        const style = doc.createElement('style');
+        style.textContent = rewritten;
+        link.replaceWith(style);
+      } catch { link.remove(); }
+    }
+    // Inline <style> blocks (no url()s to resolve, but can carry the same margin issue)
+    for (const styleEl of [...doc.querySelectorAll('style')]) {
+      styleEl.textContent = this._clampLargeMargins(styleEl.textContent);
+    }
   }
 
   async _rewriteElements(doc, base) {

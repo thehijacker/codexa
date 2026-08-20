@@ -106,6 +106,7 @@ router.get('/sync-sse', async (req, res) => {
     const { DATA_DIR }                                                           = require('../db');
     const { computeFileHash, computeFileMd5, extractEpubMetadata, extractCbzMetadata } = require('../utils/epub');
     const { isCbrBuffer, convertCbrToCbz }                                      = require('../utils/cbr');
+    const { isPdfBuffer, extractPdfMetadata }                                   = require('../utils/pdf');
     const db         = getDb();
     const TMP_DIR    = path.join(DATA_DIR, 'tmp');
     const BOOKS_DIR  = path.join(DATA_DIR, 'books');
@@ -168,7 +169,9 @@ router.get('/sync-sse', async (req, res) => {
         if (buf.length < 100) throw new Error('error.file_empty');
 
         let format = 'epub';
-        if (isCbrBuffer(buf)) {
+        if (isPdfBuffer(buf)) {
+          format = 'pdf';
+        } else if (isCbrBuffer(buf)) {
           console.log('[opds/sse] converting CBR → CBZ:', entry.title);
           buf = await convertCbrToCbz(buf);
           format = 'cbz';
@@ -189,8 +192,10 @@ router.get('/sync-sse', async (req, res) => {
                 const destPath = path.join(userDir, existingBook.filename || (existingBook.file_hash + '.epub'));
                 try { fs.renameSync(tmpPath, destPath); }
                 catch { fs.copyFileSync(tmpPath, destPath); fs.unlinkSync(tmpPath); }
+                const isPdfExisting = format === 'pdf' || existingBook.format === 'pdf' || existingBook.filename?.endsWith('.pdf');
                 const isCbzExisting = existingBook.format === 'cbz' || existingBook.filename?.endsWith('.cbz');
-                const meta = isCbzExisting
+                const meta = isPdfExisting ? await extractPdfMetadata(destPath, COVERS_DIR, existingBook.file_hash)
+                  : isCbzExisting
                   ? extractCbzMetadata(destPath, COVERS_DIR, existingBook.file_hash)
                   : extractEpubMetadata(destPath, COVERS_DIR, existingBook.file_hash);
                 db.prepare(`UPDATE books SET
@@ -223,12 +228,13 @@ router.get('/sync-sse', async (req, res) => {
 
           let book = db.prepare('SELECT id FROM books WHERE user_id = ? AND file_hash = ?').get(user.id, fileHash);
           if (!book) {
-            const ext      = format === 'cbz' ? '.cbz' : '.epub';
+            const ext      = format === 'pdf' ? '.pdf' : format === 'cbz' ? '.cbz' : '.epub';
             const filename = `${fileHash}${ext}`;
             const destPath = path.join(userDir, filename);
             try { fs.renameSync(tmpPath, destPath); }
             catch { fs.copyFileSync(tmpPath, destPath); fs.unlinkSync(tmpPath); }
-            const meta = format === 'cbz'
+            const meta = format === 'pdf' ? await extractPdfMetadata(destPath, COVERS_DIR, fileHash)
+              : format === 'cbz'
               ? extractCbzMetadata(destPath, COVERS_DIR, fileHash)
               : extractEpubMetadata(destPath, COVERS_DIR, fileHash);
             const bookTitle  = meta.title  || entry.title  || 'Unknown';
@@ -767,6 +773,7 @@ router.post('/sync', async (req, res) => {
     const { DATA_DIR }                                                           = require('../db');
     const { computeFileHash, computeFileMd5, extractEpubMetadata, extractCbzMetadata } = require('../utils/epub');
     const { isCbrBuffer, convertCbrToCbz }                                      = require('../utils/cbr');
+    const { isPdfBuffer, extractPdfMetadata }                                   = require('../utils/pdf');
     const db        = getDb();
     const TMP_DIR   = path.join(DATA_DIR, 'tmp');
     const BOOKS_DIR = path.join(DATA_DIR, 'books');
@@ -807,7 +814,9 @@ router.post('/sync', async (req, res) => {
         if (buf.length < 100) throw new Error('error.file_empty');
 
         let format = 'epub';
-        if (isCbrBuffer(buf)) {
+        if (isPdfBuffer(buf)) {
+          format = 'pdf';
+        } else if (isCbrBuffer(buf)) {
           console.log('[opds/sync] converting CBR → CBZ:', entry.title);
           buf = await convertCbrToCbz(buf);
           format = 'cbz';
@@ -825,13 +834,14 @@ router.post('/sync', async (req, res) => {
           ).get(req.user.id, fileHash);
 
           if (!book) {
-            const ext      = format === 'cbz' ? '.cbz' : '.epub';
+            const ext      = format === 'pdf' ? '.pdf' : format === 'cbz' ? '.cbz' : '.epub';
             const filename = `${fileHash}${ext}`;
             const destPath = path.join(userDir, filename);
             try { fs.renameSync(tmpPath, destPath); }
             catch { fs.copyFileSync(tmpPath, destPath); fs.unlinkSync(tmpPath); }
 
-            const meta = format === 'cbz'
+            const meta = format === 'pdf' ? await extractPdfMetadata(destPath, COVERS_DIR, fileHash)
+              : format === 'cbz'
               ? extractCbzMetadata(destPath, COVERS_DIR, fileHash)
               : extractEpubMetadata(destPath, COVERS_DIR, fileHash);
             const bookTitle  = meta.title  || entry.title  || 'Unknown';
@@ -897,7 +907,8 @@ router.post('/download/:id', async (req, res) => {
     const ctLow = ct.toLowerCase();
     if (!ctLow.includes('epub') && !ctLow.includes('octet') &&
         !ctLow.includes('zip')  && !ctLow.includes('rar')   &&
-        !ctLow.includes('cbr')  && !ctLow.includes('cbz')) {
+        !ctLow.includes('cbr')  && !ctLow.includes('cbz')   &&
+        !ctLow.includes('pdf')) {
       console.warn('[opds] unexpected content-type:', ct);
       throw new Error('error.unexpected_content_type');
     }
@@ -907,6 +918,7 @@ router.post('/download/:id', async (req, res) => {
     const { DATA_DIR }                                                      = require('../db');
     const { computeFileHash, computeFileMd5, extractEpubMetadata, extractCbzMetadata } = require('../utils/epub');
     const { isCbrBuffer, convertCbrToCbz }                                 = require('../utils/cbr');
+    const { isPdfBuffer, extractPdfMetadata }                              = require('../utils/pdf');
     const db       = getDb();
     const TMP_DIR  = path.join(DATA_DIR, 'tmp');
     const BOOKS_DIR = path.join(DATA_DIR, 'books');
@@ -918,7 +930,9 @@ router.post('/download/:id', async (req, res) => {
     if (buf.length < 100) throw new Error('error.file_empty');
 
     let format = 'epub';
-    if (isCbrBuffer(buf)) {
+    if (isPdfBuffer(buf)) {
+      format = 'pdf';
+    } else if (isCbrBuffer(buf)) {
       console.log('[opds] converting CBR → CBZ...');
       buf = await convertCbrToCbz(buf);
       format = 'cbz';
@@ -945,13 +959,14 @@ router.post('/download/:id', async (req, res) => {
         return res.status(409).json({ error: 'error.book_already_in_library', id: existing.id });
       }
 
-      const ext      = format === 'cbz' ? '.cbz' : '.epub';
+      const ext      = format === 'pdf' ? '.pdf' : format === 'cbz' ? '.cbz' : '.epub';
       const filename = `${fileHash}${ext}`;
       const destPath = path.join(userDir, filename);
       try { fs.renameSync(tmpPath, destPath); }
       catch { fs.copyFileSync(tmpPath, destPath); fs.unlinkSync(tmpPath); }
 
-      const meta = format === 'cbz'
+      const meta = format === 'pdf' ? await extractPdfMetadata(destPath, COVERS_DIR, fileHash)
+        : format === 'cbz'
         ? extractCbzMetadata(destPath, COVERS_DIR, fileHash)
         : extractEpubMetadata(destPath, COVERS_DIR, fileHash);
       const bookTitle  = meta.title  || title  || 'Unknown';
@@ -1002,7 +1017,8 @@ async function createOpdsPeek(userId, server, { href, title, author }) {
   const ct = (r.headers.get('content-type') || '').toLowerCase();
   if (!ct.includes('epub') && !ct.includes('octet') &&
       !ct.includes('zip')  && !ct.includes('rar')   &&
-      !ct.includes('cbr')  && !ct.includes('cbz')) {
+      !ct.includes('cbr')  && !ct.includes('cbz')   &&
+      !ct.includes('pdf')) {
     return { ok: false, status: 502, error: 'error.unexpected_content_type' };
   }
 
@@ -1011,6 +1027,7 @@ async function createOpdsPeek(userId, server, { href, title, author }) {
   const { DATA_DIR }                      = require('../db');
   const { computeFileHash }               = require('../utils/epub');
   const { isCbrBuffer, convertCbrToCbz }  = require('../utils/cbr');
+  const { isPdfBuffer }                   = require('../utils/pdf');
   const { peekFilePath, PEEK_TTL_SECONDS } = require('../utils/peekCleanup');
   const db      = getDb();
   const TMP_DIR = path.join(DATA_DIR, 'tmp');
@@ -1020,7 +1037,9 @@ async function createOpdsPeek(userId, server, { href, title, author }) {
   if (buf.length < 100) return { ok: false, status: 502, error: 'error.file_empty' };
 
   let format = 'epub';
-  if (isCbrBuffer(buf)) {
+  if (isPdfBuffer(buf)) {
+    format = 'pdf';
+  } else if (isCbrBuffer(buf)) {
     buf = await convertCbrToCbz(buf);
     format = 'cbz';
   } else if (ct.includes('cbz') || ct.includes('comicbook+zip')) {
@@ -1048,7 +1067,7 @@ async function createOpdsPeek(userId, server, { href, title, author }) {
     // UNIQUE(user_id, file_hash) against a real book, even from a concurrent second peek of the
     // same book (each gets its own timestamp+random suffix). Mirrors createBookOrbitPeek exactly.
     const peekHash = `peek_opds_${Date.now()}_${userId}_${Math.random().toString(36).slice(2)}`;
-    const ext      = format === 'cbz' ? '.cbz' : '.epub';
+    const ext      = format === 'pdf' ? '.pdf' : format === 'cbz' ? '.cbz' : '.epub';
     const filename = `${peekHash}${ext}`;
     const destPath = peekFilePath(userId, filename);
     fs.mkdirSync(path.dirname(destPath), { recursive: true });

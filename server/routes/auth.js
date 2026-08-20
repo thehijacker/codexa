@@ -199,19 +199,68 @@ router.put('/email', authenticateToken, (req, res) => {
   }
 });
 
+// A session counts as real reading only when the user navigated at least 2 pages and spent
+// at least 60 seconds — same definition stats.js's own REAL_SESSION uses for the per-user
+// Statistics modal; kept as a local copy since stats.js doesn't export it.
+const ADMIN_REAL_SESSION = 'end_ts IS NOT NULL AND pages_nav >= 2 AND (end_ts - start_ts) >= 60';
+const ADMIN_ACTIVITY_DAYS = 7;
+
 // ── Admin: list non-admin users ───────────────────────────────────────────────
 router.get('/admin/users', authenticateToken, (req, res) => {
   if (!isAdmin(req.user.id)) return res.status(403).json({ error: 'error.admin_only' });
   const db      = getDb();
   const adminId = db.prepare('SELECT id FROM users ORDER BY id ASC LIMIT 1').get()?.id;
   const users   = db.prepare(
-    'SELECT id, username, name, created_at FROM users WHERE id != ? ORDER BY created_at ASC'
+    'SELECT id, username, name, created_at, last_active_at FROM users WHERE id != ? ORDER BY created_at ASC'
   ).all(adminId);
   const bookCounts = db.prepare(
     'SELECT user_id, COUNT(*) AS cnt FROM books WHERE user_id != ? GROUP BY user_id'
   ).all(adminId);
   const countMap = Object.fromEntries(bookCounts.map(r => [r.user_id, r.cnt]));
-  res.json(users.map(u => ({ ...u, book_count: countMap[u.id] || 0 })));
+
+  // Currently reading: the book from each user's most recent real-or-not session, plus its
+  // reading_progress percentage if one exists. SQLite's documented MAX()-aggregate extension
+  // (bare columns in a query with a single min()/max() are drawn from that same winning row)
+  // is what makes the plain JOIN-then-GROUP BY below pick the right book/pct pair per user,
+  // rather than needing a window function or per-user subquery.
+  const currentlyReading = db.prepare(
+    `SELECT rs.user_id, MAX(rs.start_ts) AS last_ts, b.title, b.author, rp.percentage
+     FROM reading_sessions rs
+     JOIN books b ON b.id = rs.book_id
+     LEFT JOIN reading_progress rp ON rp.document_hash = b.file_hash AND rp.user_id = rs.user_id
+     WHERE rs.user_id != ?
+     GROUP BY rs.user_id`
+  ).all(adminId);
+  const currentlyReadingMap = Object.fromEntries(currentlyReading.map(r => [r.user_id, {
+    title: r.title, author: r.author, percentage: r.percentage ?? null,
+  }]));
+
+  // Last N days of reading time per user, bucketed by UTC calendar day — powers the admin
+  // panel's per-user activity dots (modeled visually on bookorbitDash.js's streak dots).
+  const weekAgo = Math.floor(Date.now() / 1000) - ADMIN_ACTIVITY_DAYS * 86400;
+  const recentSessions = db.prepare(
+    `SELECT user_id, start_ts, end_ts FROM reading_sessions WHERE start_ts >= ? AND ${ADMIN_REAL_SESSION}`
+  ).all(weekAgo);
+  const todayBucket = Math.floor(Date.now() / 1000 / 86400);
+  const dailySecsByUser = {}; // user_id → [oldest ... today] seconds array, length ADMIN_ACTIVITY_DAYS
+  for (const s of recentSessions) {
+    const bucket = Math.floor(s.start_ts / 86400);
+    const idx = ADMIN_ACTIVITY_DAYS - 1 - (todayBucket - bucket);
+    if (idx < 0 || idx >= ADMIN_ACTIVITY_DAYS) continue;
+    if (!dailySecsByUser[s.user_id]) dailySecsByUser[s.user_id] = new Array(ADMIN_ACTIVITY_DAYS).fill(0);
+    dailySecsByUser[s.user_id][idx] += (s.end_ts - s.start_ts);
+  }
+
+  res.json(users.map(u => {
+    const daily = dailySecsByUser[u.id] || new Array(ADMIN_ACTIVITY_DAYS).fill(0);
+    return {
+      ...u,
+      book_count:        countMap[u.id] || 0,
+      currently_reading: currentlyReadingMap[u.id] || null,
+      daily_secs:        daily,
+      today_secs:        daily[daily.length - 1],
+    };
+  }));
 });
 
 // ── Admin: delete a user and all their data/files ─────────────────────────────

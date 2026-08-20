@@ -4,6 +4,7 @@ import { reloadShelves, getShelves, setActive, updateDownloadedCount, updateNavC
 import { t } from './i18n.js';
 import { showPanel } from './router.js';
 import { openSyncModal, openOpdsBrowserAtFolder } from './opds.js';
+import { renderPdfCoverBlobFromBytes, uploadPdfCover } from './pdf-cover.js';
 import { openBookorbitSyncModal, openBookorbitBrowserAt, openBookorbitStaleDialog } from './bookorbit.js';
 import { clearProgress } from './progress-outbox.js';
 import {
@@ -2150,7 +2151,7 @@ function openUploadStatusModal(fileNames) {
 }
 
 async function handleFiles(fileList) {
-  const epubs = [...fileList].filter(f => f.name.endsWith('.epub') || f.name.endsWith('.cbz') || f.name.endsWith('.cbr'));
+  const epubs = [...fileList].filter(f => f.name.endsWith('.epub') || f.name.endsWith('.cbz') || f.name.endsWith('.cbr') || f.name.endsWith('.pdf'));
   if (!epubs.length) { toast.error(t('library.err_not_epub')); return; }
 
   setButtonLoading(uploadBtn, true);
@@ -2177,6 +2178,19 @@ async function handleFiles(fileList) {
       const book = await r.json();
       uploaded++;
       modal.setRow(i, 'ok', book.id);
+      // PDFs get no cover at import time (server-side rendering was tried and rejected — see
+      // pdf-cover.js's header comment). Render + upload it here, awaited, so the loadBooks()
+      // call right after this loop already shows it — not fire-and-forget, since a PDF's cover
+      // is otherwise missing until the book is next opened in the reader (see reader.js's own
+      // backfill for books that arrived via OPDS/BookOrbit instead of a manual upload like this).
+      if (file.name.toLowerCase().endsWith('.pdf')) {
+        try {
+          const blob = await renderPdfCoverBlobFromBytes(await file.arrayBuffer());
+          if (blob) await uploadPdfCover(apiFetch, book.id, blob);
+        } catch (coverErr) {
+          console.error('[library] PDF cover generation failed:', file.name, coverErr?.message);
+        }
+      }
     } catch (err) {
       failed++;
       console.error('Upload failed:', file.name, err.message);
