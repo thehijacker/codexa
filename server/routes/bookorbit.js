@@ -338,13 +338,13 @@ router.delete('/books/:boBookId/collections/:collectionId', async (req, res) => 
 // collection/smart-scope sync route below — never writes to `res` itself, just returns a result.
 const SUPPORTED_FORMATS = new Set(['epub', 'cbz', 'cbr', 'pdf']);
 
-async function importBookOrbitFile(userId, ctx, { boBookId, fileId, format, title, author }) {
+async function importBookOrbitFile(userId, ctx, { boBookId, fileId, format, title, author, seriesName, seriesIndex, language, onProgress }) {
   const clientFormat = String(format || '').toLowerCase();
   if (clientFormat && !SUPPORTED_FORMATS.has(clientFormat)) {
     return { ok: false, status: 400, error: 'error.epub_required' };
   }
 
-  const asset = await bookorbit.fetchAsset(userId, ctx, `/books/files/${fileId}/download`);
+  const asset = await bookorbit.fetchAssetStream(userId, ctx, `/books/files/${fileId}/download`, onProgress);
   if (!asset.ok) return { ok: false, status: 502, error: 'error.bookorbit_unreachable' };
 
   const buf = asset.buffer;
@@ -405,15 +405,21 @@ async function importBookOrbitFile(userId, ctx, { boBookId, fileId, format, titl
       : extractEpubMetadata(destPath, COVERS_DIR, fileHash);
     const bookTitle  = meta.title  || title  || 'Unknown';
     const bookAuthor = meta.author || author || '';
+    // The file's own metadata wins when present, but a comic/PDF often has none at all (e.g.
+    // no ComicInfo.xml) — fall back to what BookOrbit's own catalog already told us about this
+    // book (its series membership in particular is almost never embedded in the file itself).
+    const bookSeriesName   = meta.series_name   || seriesName || '';
+    const bookSeriesNumber = meta.series_number || (seriesIndex != null ? String(seriesIndex) : '');
+    const bookLanguage     = meta.language      || language   || '';
     const fileSize   = fs.statSync(destPath).size;
 
     const result = db.prepare(`
       INSERT INTO books (user_id, title, author, series_name, series_number, description, file_hash, file_hash_md5, filename, cover_path, file_size,
                          publisher, language, isbn, genres, pages, format)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(userId, bookTitle, bookAuthor, meta.series_name || '', meta.series_number || '', meta.description || '',
+    `).run(userId, bookTitle, bookAuthor, bookSeriesName, bookSeriesNumber, meta.description || '',
            fileHash, fileHashMd5, filename, meta.cover_path || '', fileSize,
-           meta.publisher || '', meta.language || '', meta.isbn || '', meta.genres || '', meta.pages || null, outFormat);
+           meta.publisher || '', bookLanguage, meta.isbn || '', meta.genres || '', meta.pages || null, outFormat);
 
     const newBookId = result.lastInsertRowid;
     bookorbit.mapLocalBook(userId, newBookId, boBookId, Number(fileId));
@@ -430,16 +436,58 @@ router.post('/books/:boBookId/import', async (req, res) => {
   if (!ctx) return;
 
   const boBookId = parseInt(req.params.boBookId, 10);
-  const { fileId, format, title, author } = req.body || {};
+  const { fileId, format, title, author, seriesName, seriesIndex, language } = req.body || {};
   if (!fileId) return res.status(400).json({ error: 'error.file_id_required' });
 
   try {
-    const result = await importBookOrbitFile(req.user.id, ctx, { boBookId, fileId, format, title, author });
+    const result = await importBookOrbitFile(req.user.id, ctx, { boBookId, fileId, format, title, author, seriesName, seriesIndex, language });
     if (!result.ok) return res.status(result.status || 500).json({ error: result.error, id: result.id });
     res.status(201).json({ id: result.id, title: result.title, author: result.author });
   } catch (err) {
     console.error('[bookorbit] import error:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/bookorbit/books/:boBookId/import-sse?fileId=&format=&title=&author=&seriesName=&
+// seriesIndex=&language=&token= — same import as POST /import above, but streamed as SSE so the
+// client can show a real byte-progress bar on the book's cover while BookOrbit's file downloads
+// (the plain POST route blocks silently until the whole thing is done). GET+query-params (not
+// POST) because EventSource can only issue GET requests; auth via ?token= — same fallback
+// authenticateToken already supports for /sync-sse above.
+router.get('/books/:boBookId/import-sse', async (req, res) => {
+  const ctx = requireContext(req, res);
+  if (!ctx) return;
+
+  const boBookId = parseInt(req.params.boBookId, 10);
+  const { fileId, format, title, author, seriesName, language } = req.query;
+  const seriesIndex = req.query.seriesIndex != null && req.query.seriesIndex !== '' ? Number(req.query.seriesIndex) : null;
+  if (!fileId) return res.status(400).json({ error: 'error.file_id_required' });
+
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no', // defeat nginx/reverse-proxy response buffering if present
+  });
+  res.flushHeaders();
+  const send = (obj) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(obj)}\n\n`); };
+
+  try {
+    const result = await importBookOrbitFile(req.user.id, ctx, {
+      boBookId, fileId, format, title, author, seriesName, seriesIndex, language,
+      onProgress: (loaded, total) => send({ type: 'progress', loaded, total }),
+    });
+    if (!result.ok) {
+      send({ type: 'error', message: result.error, id: result.id, alreadyOwned: result.alreadyOwned });
+    } else {
+      send({ type: 'done', id: result.id, title: result.title, author: result.author });
+    }
+  } catch (err) {
+    console.error('[bookorbit] import-sse error:', err.message);
+    send({ type: 'error', message: err.message });
+  } finally {
+    if (!res.writableEnded) res.end();
   }
 });
 
@@ -700,6 +748,7 @@ router.get('/sync-sse', async (req, res) => {
         const result = await importBookOrbitFile(req.user.id, ctx, {
           boBookId: b.id, fileId: primaryFile.id, format: primaryFile.format,
           title: b.title, author: (b.authors || [])[0],
+          seriesName: b.seriesName, seriesIndex: b.seriesIndex, language: b.language,
         });
         if (result.ok) {
           addToShelf.run(shelf.id, result.id);

@@ -389,6 +389,7 @@ function updateEditToolbar() {
   }
   if (reextractBtn) {
     reextractBtn.classList.toggle('hidden', currentShelfId !== 'all');
+    reextractBtn.disabled = count === 0;
   }
   if (selectAllBtn) {
     const visibleIds = [...document.querySelectorAll('.book-card[data-id]')].map(c => Number(c.dataset.id));
@@ -2529,14 +2530,18 @@ export async function initLibrary() {
   });
 
   document.getElementById('edit-reextract-btn').addEventListener('click', () => {
+    if (!selectedBooks.size) return;
     confirmDialog(
-      t('library.confirm_reextract'),
+      t('library.confirm_reextract', { n: selectedBooks.size }),
       async () => {
         const btn = document.getElementById('edit-reextract-btn');
         const origText = btn.textContent;
         setButtonLoading(btn, true);
         try {
-          const result = await apiFetch('/books/reextract-all', { method: 'POST' });
+          const result = await apiFetch('/books/reextract-all', {
+            method: 'POST',
+            body: JSON.stringify({ bookIds: [...selectedBooks] }),
+          });
           toast.success(t('library.toast_reextract_done', { updated: result.updated, total: result.total }));
           await loadBooks();
         } catch (err) {

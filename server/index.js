@@ -52,7 +52,24 @@ app.set('trust proxy', 1);
 // Placed before static/route handlers so it wraps all of them; a reverse proxy in front (see
 // README's "Self-Hosting Behind a Reverse Proxy") may also compress, which is harmless — this
 // just guarantees it happens even for users running Codexa directly with no proxy at all.
-app.use(compression());
+//
+// EXCEPT text/event-stream: the `compressible` mime lookup this package uses under the hood
+// actually says SSE is compressible, so without this override every SSE route (BookOrbit/OPDS
+// sync progress, the "Add to Codexa" download-progress bar) gets silently wrapped in a gzip
+// Transform stream that buffers output until enough has accumulated — the client saw nothing
+// but 0% for the whole download, then got the final result all at once. Worse, on a long enough
+// gap with zero bytes actually reaching the browser, EventSource's own auto-reconnect kicked in
+// and re-ran the entire import from scratch, downloading (and re-inserting) the same book twice.
+// compression()'s own default filter is otherwise fine — only override the one content-type.
+app.use(compression({
+  filter: (req, res) => {
+    // Express's res.set('Content-Type', 'text/event-stream') auto-appends "; charset=utf-8",
+    // so this has to be a prefix check, not strict equality (confirmed live — a strict === here
+    // silently never matched and gzip kept right on buffering the SSE stream).
+    if (String(res.getHeader('Content-Type') || '').startsWith('text/event-stream')) return false;
+    return compression.filter(req, res);
+  },
+}));
 
 if (process.env.CORS_ORIGIN) {
   app.use(cors({ origin: process.env.CORS_ORIGIN, credentials: true }));

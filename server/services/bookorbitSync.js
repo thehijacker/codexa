@@ -638,6 +638,53 @@ async function fetchAsset(userId, ctx, path) {
   return { ok: true, contentType: res.headers.get('content-type') || 'image/jpeg', buffer: Buffer.from(await res.arrayBuffer()) };
 }
 
+// Same as fetchAsset, but reads the response body incrementally and reports {loaded, total}
+// via onProgress as chunks arrive — used for the "Add to Codexa" book-file download, where the
+// client wants a real byte progress bar (see server/routes/bookorbit.js's import-sse route).
+// fetchAsset itself stays untouched (still used for small, progress-irrelevant assets like
+// cover thumbnails) rather than growing an optional-callback parameter everywhere.
+async function fetchAssetStream(userId, ctx, path, onProgress) {
+  if (!tokens.has(userId)) {
+    try { await login(userId, ctx); } catch { return { ok: false }; }
+  }
+  const doFetch = () => {
+    const tok = tokens.get(userId);
+    return fetch(`${ctx.webBase}${path}`, {
+      headers: { authorization: `Bearer ${tok.access}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  };
+  let res;
+  try { res = await doFetch(); } catch { return { ok: false }; }
+  if (res.status === 401) {
+    try { await refresh(userId, ctx); } catch { return { ok: false }; }
+    try { res = await doFetch(); } catch { return { ok: false }; }
+  }
+  if (!res.ok) return { ok: false, status: res.status };
+
+  const total = Number(res.headers.get('content-length')) || 0;
+  const contentType = res.headers.get('content-type') || 'application/octet-stream';
+
+  if (!res.body?.getReader) {
+    // No streamable body (shouldn't happen with Node's fetch) — fall back to buffering whole.
+    const buffer = Buffer.from(await res.arrayBuffer());
+    onProgress?.(buffer.length, total || buffer.length);
+    return { ok: true, contentType, buffer };
+  }
+
+  const reader = res.body.getReader();
+  const chunks = [];
+  let loaded = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.length;
+    onProgress?.(loaded, total);
+  }
+  return { ok: true, contentType, buffer: Buffer.concat(chunks.map(c => Buffer.from(c))) };
+}
+
 async function getCover(userId, boBookId) {
   const ctx = getContext(userId);
   if (!ctx) return { ok: false };
@@ -746,6 +793,7 @@ module.exports = {
   getCover,
   api,
   fetchAsset,
+  fetchAssetStream,
   mapLocalBook,
   pushProgress,
   triggerProgressPush,

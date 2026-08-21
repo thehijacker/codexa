@@ -29,7 +29,14 @@ async function convertCbrToCbz(rarBuffer) {
   for (const file of files) {
     if (file.fileHeader.flags.directory) continue;
     if (!IMAGE_EXT.test(file.fileHeader.name)) continue;
-    zip.addFile(file.fileHeader.name, Buffer.from(file.extraction));
+    const entry = zip.addFile(file.fileHeader.name, Buffer.from(file.extraction));
+    // adm-zip stamps each entry with the current wall-clock time by default, which makes the
+    // resulting CBZ's bytes (and therefore its hash) different on every single conversion of
+    // the exact same source RAR — breaking both our own file_hash duplicate-detection on
+    // re-import and any hash-based matching against BookOrbit's copy of the original file.
+    // Pin every entry to a fixed epoch so byte-identical input always produces a byte-identical
+    // CBZ (confirmed live: converting the same CBR twice now yields the same SHA-256).
+    entry.header.time = new Date(0);
     count++;
   }
   if (count === 0) throw new Error('[cbr] no images found in RAR archive');

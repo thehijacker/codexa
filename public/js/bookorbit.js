@@ -367,6 +367,29 @@ function renderGrid(items) {
   });
 }
 
+// In-place cover download-progress overlay, driven by the import-sse route below — the exact
+// same markup/CSS classes as public/js/library.js's offline-download progress bar
+// (.book-download-progress / -pct / -track / -bar) so "Add to Codexa" and "download for
+// offline" look identical, just anchored to a .bookorbit-card-cover-wrap instead of a
+// .book-card. CSS is shared/generic already, so no new styles are needed.
+function showCoverProgress(coverWrapEl) {
+  coverWrapEl.querySelector('.book-download-progress')?.remove();
+  const el = document.createElement('div');
+  el.className = 'book-download-progress';
+  el.innerHTML = `<span class="book-download-progress-pct">0%</span><div class="book-download-progress-track"><div class="book-download-progress-bar" style="width:0%"></div></div>`;
+  coverWrapEl.appendChild(el);
+  return el;
+}
+function updateCoverProgress(el, loaded, total) {
+  if (!el?.isConnected) return;
+  const pct = total ? Math.round((loaded / total) * 100) : 0;
+  el.querySelector('.book-download-progress-pct').textContent = pct + '%';
+  el.querySelector('.book-download-progress-bar').style.width = pct + '%';
+}
+function hideCoverProgress(el) {
+  el?.remove();
+}
+
 // "Already in your Codexa library" badge — same visual treatment as the main library grid's
 // offline badge (public/js/library.js _makeCard), just a different meaning here (downloaded
 // into Codexa at all, vs. cached for offline reading).
@@ -490,33 +513,58 @@ function renderCardActions(actionsEl, book) {
     addBtn.title = t('bookorbit.no_file');
   } else {
     addBtn.title = t('bookorbit.btn_add');
-    addBtn.addEventListener('click', async e => {
+    addBtn.addEventListener('click', e => {
       e.stopPropagation();
       addBtn.disabled = true;
       addBtn.classList.add('bookorbit-btn-busy');
-      try {
-        const result = await apiFetch(`/bookorbit/books/${book.boBookId}/import`, {
-          method: 'POST',
-          body: JSON.stringify({ fileId: primaryFile.id, format: primaryFile.format, title: book.title, author: book.authors?.[0] }),
-        });
-        toast.success(t('opds.toast_book_added', { title: book.title }));
-        book.localBookId = result.id;
-        renderCardActions(actionsEl, book);
-        renderDownloadedBadge(actionsEl.closest('.bookorbit-card-cover-wrap'), book);
-        reloadLibrary().catch(e2 => console.error('[bookorbit] reloadLibrary failed:', e2));
-      } catch (err) {
-        const bookId = err.data?.id;
-        if (bookId) {
-          toast.info(t('opds.err_already_in_library'));
-          book.localBookId = bookId;
+      const coverWrapEl  = actionsEl.closest('.bookorbit-card-cover-wrap');
+      const progressEl   = showCoverProgress(coverWrapEl);
+
+      const finish = () => {
+        hideCoverProgress(progressEl);
+        addBtn.disabled = false;
+        addBtn.classList.remove('bookorbit-btn-busy');
+      };
+
+      const params = new URLSearchParams({
+        fileId: primaryFile.id, format: primaryFile.format || '',
+        title: book.title || '', author: book.authors?.[0] || '',
+        seriesName: book.seriesName || '', seriesIndex: book.seriesIndex ?? '',
+        language: book.language || '', token: localStorage.getItem('br_token') || '',
+      });
+      const es = new EventSource(`/api/bookorbit/books/${book.boBookId}/import-sse?${params}`);
+
+      es.onmessage = evt => {
+        let data;
+        try { data = JSON.parse(evt.data); } catch { return; }
+        if (data.type === 'progress') {
+          updateCoverProgress(progressEl, data.loaded, data.total);
+        } else if (data.type === 'done') {
+          es.close();
+          finish();
+          toast.success(t('opds.toast_book_added', { title: book.title }));
+          book.localBookId = data.id;
           renderCardActions(actionsEl, book);
-          renderDownloadedBadge(actionsEl.closest('.bookorbit-card-cover-wrap'), book);
-        } else {
-          toast.error(err.message);
-          addBtn.disabled = false;
-          addBtn.classList.remove('bookorbit-btn-busy');
+          renderDownloadedBadge(coverWrapEl, book);
+          reloadLibrary().catch(e2 => console.error('[bookorbit] reloadLibrary failed:', e2));
+        } else if (data.type === 'error') {
+          es.close();
+          finish();
+          if (data.id) {
+            toast.info(t('opds.err_already_in_library'));
+            book.localBookId = data.id;
+            renderCardActions(actionsEl, book);
+            renderDownloadedBadge(coverWrapEl, book);
+          } else {
+            toast.error(t(data.message));
+          }
         }
-      }
+      };
+      es.onerror = () => {
+        es.close();
+        finish();
+        toast.error(t('bookorbit.import_failed'));
+      };
     });
   }
   actionsEl.appendChild(addBtn);

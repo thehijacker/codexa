@@ -27,6 +27,38 @@
 const PDFJS_URL    = '/js/vendor/pdf.min.mjs';
 const PDFJS_WORKER = '/js/vendor/pdf.worker.min.mjs';
 
+// Resolve a pdf.js outline entry's `dest` (either a named destination string, or an already-
+// explicit [ref, ...] array) down to a 1-based page number — matching spine[i].pageNum above.
+async function pdfDestToPageNum(doc, dest) {
+  const explicitDest = typeof dest === 'string' ? await doc.getDestination(dest) : dest;
+  const ref = Array.isArray(explicitDest) ? explicitDest[0] : null;
+  if (ref == null) return null;
+  const pageIndex = await doc.getPageIndex(ref);
+  return pageIndex + 1;
+}
+
+// Recursively convert pdf.js's outline tree (title/dest/items) into the { label, href,
+// children } shape epub-parser.js's TOC already uses. An outline entry that points at an
+// external URL (no dest) rather than a page in this document is kept only if it has children
+// worth showing (href stays '' — unclickable, same as epub-parser.js's landmarks-only nodes).
+async function pdfOutlineToToc(doc, items) {
+  const out = [];
+  for (const item of items) {
+    const label = (item.title || '').trim();
+    if (!label) continue;
+    let href = '';
+    if (item.dest) {
+      try {
+        const pageNum = await pdfDestToPageNum(doc, item.dest);
+        if (pageNum != null) href = `page-${pageNum}`;
+      } catch { /* unresolvable destination — leave href empty, still show the label/children */ }
+    }
+    const children = item.items?.length ? await pdfOutlineToToc(doc, item.items) : [];
+    if (href || children.length) out.push({ label, href, children });
+  }
+  return out;
+}
+
 export class PdfParser {
   async parse(arrayBuffer, filenameHint) {
     // A variable, not a string literal, is what actually matters here — esbuild can only
@@ -61,11 +93,20 @@ export class PdfParser {
     }
     if (!spine.length) throw new Error('[CXReader] PDF: no pages found');
 
+    // PDF outline (bookmarks) → the same { label, href, children } shape epub-parser.js's TOC
+    // uses — href is a spine item's own href ("page-N"), so the existing TOC panel/progress-bar
+    // chapter markers/active-item highlighting all work unchanged, no PDF-specific UI needed.
+    let toc = [];
+    try {
+      const outline = await doc.getOutline();
+      if (outline?.length) toc = await pdfOutlineToToc(doc, outline);
+    } catch { /* no outline, or a malformed one — toc stays [] like any PDF without bookmarks */ }
+
     return {
       spine,
       manifest: new Map(),
       metadata: { title, author, description, series: '', seriesNumber: '', genre: '', language: '', identifier: '' },
-      toc: [],
+      toc,
       opfBase: '',
       spineWeights: spine.map(() => 1),
       isPdf: true,

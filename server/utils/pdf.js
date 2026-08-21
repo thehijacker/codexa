@@ -34,8 +34,11 @@ function loadPdfjs() {
 
 // ── PDF metadata extraction ─────────────────────────────────────────────────
 async function extractPdfMetadata(pdfPath, coversDir, fileHash) {
+  // title starts empty rather than falling back to the filename (which by the time this runs
+  // is always the hash-renamed destination file) — see extractEpubMetadata's comment in
+  // server/utils/epub.js for why callers, not this function, own the final fallback.
   const result = {
-    title: path.basename(pdfPath, '.pdf'), author: '', cover_path: '',
+    title: '', author: '', cover_path: '',
     series_name: '', series_number: '', description: '', publisher: '',
     language: '', isbn: '', genres: '', pages: '',
   };

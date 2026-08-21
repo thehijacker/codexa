@@ -673,11 +673,19 @@ html, body {
 .cx-cbz-continuous-wrap {
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+  /* Honors the reader's existing margin setting (see reader.js's applyComicMargin) — 0px keeps
+     today's edge-to-edge "webtoon" full-bleed behavior; a wide desktop monitor can otherwise
+     stretch a comic page uncomfortably wide with no way to rein it in. The black background
+     comes from #epub-viewer (top of this file), so the margin reads as letterboxing, matching
+     paginated comic mode's look. */
+  padding-left:  var(--cx-comic-margin, 0px);
+  padding-right: var(--cx-comic-margin, 0px);
 }
 /* Overrides .cx-cbz-img's fit-to-screen max-height/object-fit (meant for one full-bleed page)
-   — here every image is full width, height auto per its own aspect ratio, the standard
-   "webtoon" convention. display:block eliminates the few-px inline-image whitespace gap
-   between stacked images that "no gaps" means avoiding. */
+   — here every image is full width (of the padded wrap above), height auto per its own aspect
+   ratio, the standard "webtoon" convention. display:block eliminates the few-px inline-image
+   whitespace gap between stacked images that "no gaps" means avoiding. */
 .cx-cbz-continuous-wrap .cx-cbz-img {
   display: block;
   width: 100%;

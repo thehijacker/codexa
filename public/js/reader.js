@@ -758,6 +758,7 @@ function applyPreset(id) {
     _cxReader._columnGap  = prefs.margin * 2;
     _cxReader._continuous = isContinuousMode();
   }
+  applyComicMargin();
   reapplyStyles();
   // Every other setting category has its own dedicated "apply" function, normally invoked
   // only by that setting's own control in the settings panel. A preset can change all of them
@@ -2783,6 +2784,15 @@ function estimateChapPages(spineIndex) {
 
 // Estimated book pages
 function estimateBookTotal() {
+  // CBZ/PDF: every spine item IS one real page (no reflow, no estimation needed) — the weight-
+  // calibration estimate below is built for EPUB's reflowable text, where a chapter's real page
+  // count genuinely isn't known until it's actually paginated. Applying that same estimator to
+  // a CBZ/PDF's uniform (weight=1) spine compounded badly: one visited "chapter" (one page)
+  // getting its real pageCount cached — for continuous mode, misread from the scroll paginator's
+  // whole-document scrollHeight/viewportHeight ratio, not an actual per-page count — then got
+  // applied as the per-weight-unit ratio across every other page too, inflating the total by
+  // roughly that same factor (confirmed live: a 220-page comic showing 25520 "book pages").
+  if (isImmersivePageMode()) return Math.max(1, _cxReader?.spine?.length || 1);
   const len = _cxReader?.spine?.length || 1;
   let total = 0;
   for (let i = 0; i < len; i++) total += estimateChapPages(i);
@@ -2790,6 +2800,9 @@ function estimateBookTotal() {
 }
 
 function estimateBookPage() {
+  // See estimateBookTotal — currentSpineIndex already IS the real 0-based page number for
+  // CBZ/PDF, no accumulation needed.
+  if (isImmersivePageMode()) return currentSpineIndex + 1;
   let pages = 0;
   for (let i = 0; i < currentSpineIndex; i++) pages += estimateChapPages(i);
   return pages + currentChapPage;
@@ -2813,16 +2826,15 @@ function computeStatValue(id) {
     }
     case 'pagesLeftChap': {
       if (currentChapTotal <= 0) return '';
-      // Single-page: count the current page itself, so the last page reads "1 left"
-      //   and earlier pages count down (page 1 of a 2-page chapter shows 2).
-      // Two-page: the left page is already read; count the visible right page and
-      //   beyond. A lone left-only last spread (endPage===0) still gets +1 to show 1.
-      const _bonus = currentIsTwoPage ? (currentEndPage === 0 ? 1 : 0) : 1;
-      return String(Math.max(1, currentChapTotal - currentChapPage + _bonus));
+      // The last page of the chapter reads "0 left" (not floored to 1 — reversed per explicit
+      // request; the old "never show 0" convention made the last page look like there was
+      // still a page to go, and disagreed with pagesLeftBook, which never had that floor).
+      // Two-page: the left page is already read, so only the visible right page and beyond
+      // count — unaffected by this change, that case was already bonus-free.
+      return String(Math.max(0, currentChapTotal - currentChapPage));
     }
     case 'pagesLeftBook': {
-      const _tpBonus = currentIsTwoPage && currentEndPage === 0 ? 1 : 0;
-      return String(Math.max(0, estimateBookPagesLeft() + _tpBonus));
+      return String(Math.max(0, estimateBookPagesLeft()));
     }
     case 'pctChapter':
       return currentChapTotal > 0 ? Math.round((currentChapPage / currentChapTotal) * 100) + '%' : '';
@@ -2830,14 +2842,11 @@ function computeStatValue(id) {
       return Math.round(currentPct * 100) + '%';
     case 'timeLeftChap': {
       if (currentChapTotal <= 0) return formatEta(0);
-      // Mirror pagesLeftChap: single-page counts the current page, two-page counts
-      // from the left page (with the lone last-spread +1).
-      const _bonus = currentIsTwoPage ? (currentEndPage === 0 ? 1 : 0) : 1;
-      return formatEta(Math.max(1, currentChapTotal - currentChapPage + _bonus));
+      // Mirrors pagesLeftChap — see its comment.
+      return formatEta(Math.max(0, currentChapTotal - currentChapPage));
     }
     case 'timeLeftBook': {
-      const _tpBonus = currentIsTwoPage && currentEndPage === 0 ? 1 : 0;
-      return formatEta(Math.max(0, estimateBookPagesLeft() + _tpBonus));
+      return formatEta(Math.max(0, estimateBookPagesLeft()));
     }
     case 'currentTime': {
       const now = new Date();
@@ -3055,6 +3064,16 @@ function applyHeaderBtnVisibility() {
   set('btn-sync',         prefs.headerBtnSync);
   set('btn-sleep-timer',  prefs.headerBtnSleepTimer);
   set('btn-fullscreen',   prefs.headerBtnFullscreen);
+}
+
+// Comic/PDF continuous mode honoring the reader's margin setting (see .cx-cbz-continuous-wrap
+// in reader.css). Paginated comic pages already respect the viewport naturally (object-fit:
+// contain shrinks/centers to fit both dimensions); continuous mode stacks full-width images
+// with nothing constraining width, which looks fine on a phone but stretches uncomfortably wide
+// on a large desktop monitor — margin (already a familiar per-book setting for EPUB) reins that
+// back in, with 0px preserving the original edge-to-edge behavior.
+function applyComicMargin() {
+  document.documentElement.style.setProperty('--cx-comic-margin', prefs.margin + 'px');
 }
 
 // Apply CSS vars for edge inset (curved phone screens)
@@ -3415,10 +3434,18 @@ function updateActiveTocItem(href) {
   // Strip _split_NNN suffix — epub.js splits large chapters but TOC only lists _split_000
   const norm  = h => (h || '').split('#')[0].replace(/_split_\d+(\.\w+)$/, '$1').toLowerCase();
   const base  = norm(href).split('/').pop();
+  // CBZ/PDF spine hrefs ("page-N") need an EXACT match — the substring fuzzy-match below exists
+  // to tolerate EPUB filename variants (e.g. a resolved path vs. a raw href), but on page-N it's
+  // actively wrong: "page-1" is a substring of "page-10"/"page-100"/... and vice versa, so on a
+  // real multi-page PDF it lit up every TOC entry whose page number shared a numeric prefix with
+  // the current page — confirmed live.
+  const isPageHref = /^page-\d+$/.test(base);
   let anyActive = false;
   tocFlatItems.forEach(({ href: ih, button }) => {
     const ib     = norm(ih || '').split('/').pop();
-    const active = !!(base && ib && (base === ib || base.includes(ib) || ib.includes(base)));
+    const active = isPageHref
+      ? base === ib
+      : !!(base && ib && (base === ib || base.includes(ib) || ib.includes(base)));
     button.classList.toggle('active', active);
     if (active) anyActive = true;
   });
@@ -4935,6 +4962,7 @@ function initSettingsUi() {
     // it here rather than via setLayout() avoids re-paginating twice (once with the old
     // margin CSS, again a moment later inside reapplyStyles with the new CSS).
     if (_cxReader) _cxReader._columnGap = prefs.margin * 2;
+    applyComicMargin();
     reapplyStyles();
     persistPrefs();
   });
@@ -5198,6 +5226,7 @@ function initSettingsUi() {
   initStatusBarSettings();
   applyStatusBarStyles();
   applyEdgePadding();
+  applyComicMargin();
   applyNavZones();
   applyHeaderButtonSize();
   applyHeaderBtnVisibility();

@@ -75,7 +75,13 @@ function dcText(val) {
 
 // ── Main extraction function ──────────────────────────────────────────────────
 function extractEpubMetadata(epubPath, coversDir, fileHash) {
-  const result = { title: path.basename(epubPath, '.epub'), author: '', cover_path: '', series_name: '', series_number: '', description: '', publisher: '', language: '', isbn: '', genres: '', pages: '' };
+  // title deliberately starts empty rather than falling back to the filename — epubPath is
+  // always the hash-renamed destination file (e.g. "<hash>.epub") by the time this runs in
+  // every caller, so a filename-derived fallback here would just be the hash, masking the
+  // fact that no real title was found and preventing callers (BookOrbit/OPDS import, upload)
+  // from falling back to a better source (the catalog entry's own title, the original upload
+  // filename). Callers are responsible for the final "nothing found at all" fallback.
+  const result = { title: '', author: '', cover_path: '', series_name: '', series_number: '', description: '', publisher: '', language: '', isbn: '', genres: '', pages: '' };
 
   try {
     const zip = new AdmZip(epubPath);
@@ -259,8 +265,9 @@ function extractEpubMetadata(epubPath, coversDir, fileHash) {
 // ── CBZ metadata extraction ───────────────────────────────────────────────────
 function extractCbzMetadata(cbzPath, coversDir, fileHash) {
   const IMAGE_EXT = /\.(jpe?g|png|webp|gif|avif)$/i;
+  // See extractEpubMetadata's comment above — title starts empty, not filename-derived.
   const result = {
-    title: path.basename(cbzPath, '.cbz'), author: '', cover_path: '',
+    title: '', author: '', cover_path: '',
     series_name: '', series_number: '', description: '', publisher: '',
     language: '', isbn: '', genres: '', pages: '',
   };

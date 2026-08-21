@@ -1181,8 +1181,24 @@ export class CXReader {
     // _setContinuousChapterPaging) rather than the paginator's own — which spans however many
     // chapters have been appended into the live document so far, not just the current one.
     const continuousEpub = this._continuous && !this._isCbz && !this._isPdf && !this._isFixedLayout;
-    const page      = continuousEpub ? (this._continuousChapterPage      ?? 1) : (this._paginator?.currentPage ?? 1);
-    const pageCount = continuousEpub ? (this._continuousChapterPageCount ?? 1) : (this._paginator?.pageCount   ?? 1);
+    // CBZ/PDF: every spine item IS one real page, so report the real spine position/count
+    // directly rather than the paginator's own page/pageCount. In continuous mode those come
+    // from ScrollPaginator, whose "page" is deliberately a generic one-viewport-height-of-
+    // scrolled-content unit (see scroll-paginator.js's own header comment) — the right notion
+    // for EPUB's virtual paging, but not a real page count for a comic/PDF, and it doesn't
+    // track scroll position the way _spineIdx already correctly does (updated on every scroll
+    // by _updateCbzContinuousPosition/_updatePdfContinuousPosition) — confirmed live: a 220-
+    // page PDF reported a "chapter total" of 116 unrelated to its actual page count, and a
+    // short comic got stuck reporting a constant, non-advancing "5/5". In paginated mode this
+    // also replaces FixedPagePaginator's hardcoded 1/1, which was equally meaningless for a
+    // reader trying to gauge position without a TOC.
+    const isPageBased = this._isCbz || this._isPdf;
+    const page      = continuousEpub ? (this._continuousChapterPage      ?? 1)
+      : isPageBased ? (this._spineIdx + 1)
+      : (this._paginator?.currentPage ?? 1);
+    const pageCount = continuousEpub ? (this._continuousChapterPageCount ?? 1)
+      : isPageBased ? (this._book?.spine?.length || 1)
+      : (this._paginator?.pageCount   ?? 1);
     this._containerEl.dispatchEvent(new CustomEvent('cx-relocated', {
       bubbles: false,
       detail: {

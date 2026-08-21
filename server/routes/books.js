@@ -229,12 +229,18 @@ router.post('/', upload.single('epub'), async (req, res) => {
              : extractEpubMetadata(destPath, COVERS_DIR, fileHash);
     const fileSize = fs.statSync(destPath).size;
 
+    // The extractor leaves title empty when the file itself has no title metadata (e.g. a CBZ
+    // with no ComicInfo.xml <Title>). Fall back to the originally-uploaded filename (not the
+    // hash-renamed destPath) rather than showing the file hash as the title.
+    const origBase  = path.basename(req.file.originalname, path.extname(req.file.originalname));
+    const bookTitle = title || origBase || 'Unknown';
+
     const result = db.prepare(`
       INSERT INTO books (user_id, title, author, series_name, series_number, description, publisher, language, isbn, genres, pages, file_hash, file_hash_md5, filename, cover_path, file_size, format)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(req.user.id, title, author, series_name, series_number, description, publisher, language, isbn, genres, pages, fileHash, fileHashMd5, filename, cover_path, fileSize, format);
+    `).run(req.user.id, bookTitle, author, series_name, series_number, description, publisher, language, isbn, genres, pages, fileHash, fileHashMd5, filename, cover_path, fileSize, format);
 
-    res.status(201).json({ id: result.lastInsertRowid, title, author, series_name, series_number, cover_path, file_hash: fileHash, file_hash_md5: fileHashMd5 });
+    res.status(201).json({ id: result.lastInsertRowid, title: bookTitle, author, series_name, series_number, cover_path, file_hash: fileHash, file_hash_md5: fileHashMd5 });
   } catch (err) {
     // Best-effort cleanup of temp file
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
@@ -389,6 +395,9 @@ router.patch('/:id/file', async (req, res) => {
       : outFormat === 'cbz'
       ? extractCbzMetadata(destPath, COVERS_DIR, book.file_hash)
       : extractEpubMetadata(destPath, COVERS_DIR, book.file_hash);
+    // PDFs never get a cover from extraction (metadata-only — see server/utils/pdf.js); their
+    // cover comes from the client-side render-and-upload flow, so don't clear an existing one.
+    const newCoverPath = outFormat === 'pdf' ? (book.cover_path || '') : meta.cover_path;
     db.prepare(`UPDATE books SET
       file_hash_md5 = ?, kosync_hash = '',
       cover_path  = ?,
@@ -402,7 +411,7 @@ router.patch('/:id/file', async (req, res) => {
       series_number = CASE WHEN ? != '' THEN ? ELSE series_number END
     WHERE id = ?`).run(
       newMd5,
-      meta.cover_path,
+      newCoverPath,
       meta.description || '', meta.description || '',
       meta.publisher   || '', meta.publisher   || '',
       meta.language    || '', meta.language    || '',
@@ -413,7 +422,7 @@ router.patch('/:id/file', async (req, res) => {
       meta.series_number || '', meta.series_number || '',
       book.id
     );
-    res.json({ file_hash_md5: newMd5, cover_path: meta.cover_path });
+    res.json({ file_hash_md5: newMd5, cover_path: newCoverPath });
   } catch (err) {
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     console.error('[books] replace file error:', err.message);
@@ -421,24 +430,57 @@ router.patch('/:id/file', async (req, res) => {
   }
 });
 
-// ── POST /api/books/reextract-all — re-extract metadata for all books
-router.post('/reextract-all', (req, res) => {
-  const db    = getDb();
-  const books = db.prepare(
-    'SELECT * FROM books WHERE user_id = ?'
-  ).all(req.user.id);
+// Re-extract metadata for one book, dispatching to the right format-specific extractor —
+// mirrors the isPdf/isCbz/epub three-way already used by the main upload handler above.
+// PDFs never get a cover from extraction (extractPdfMetadata is metadata-only — see
+// server/utils/pdf.js); their cover comes from the client-side render-and-upload flow
+// (POST /:id/cover), so this must NOT unlink/clear an existing PDF cover_path.
+async function reextractBookMetadata(book, filePath) {
+  const isPdf = book.filename?.endsWith('.pdf') || book.format === 'pdf';
+  const isCbz = book.filename?.endsWith('.cbz') || book.format === 'cbz';
+
+  if (!isPdf && book.cover_path) {
+    try { fs.unlinkSync(path.join(COVERS_DIR, book.cover_path)); } catch { /* already gone */ }
+  }
+
+  const meta = isPdf ? await extractPdfMetadata(filePath, COVERS_DIR, book.file_hash)
+    : isCbz ? extractCbzMetadata(filePath, COVERS_DIR, book.file_hash)
+    : extractEpubMetadata(filePath, COVERS_DIR, book.file_hash);
+
+  return {
+    cover_path:    isPdf ? book.cover_path : meta.cover_path,
+    description:   meta.description   || book.description   || '',
+    publisher:     meta.publisher     || book.publisher     || '',
+    language:      meta.language      || book.language      || '',
+    isbn:          meta.isbn          || book.isbn          || '',
+    genres:        meta.genres        || book.genres        || '',
+    pages:         meta.pages         || book.pages         || '',
+    series_name:   meta.series_name   || book.series_name   || '',
+    series_number: meta.series_number || book.series_number || '',
+  };
+}
+
+// ── POST /api/books/reextract-all — re-extract metadata for the given books ──────────────
+// Scoped to an explicit selection (bookIds) — never silently touches the whole library.
+router.post('/reextract-all', async (req, res) => {
+  const db  = getDb();
+  const ids = Array.isArray(req.body?.bookIds)
+    ? [...new Set(req.body.bookIds.map(Number).filter(Number.isFinite))]
+    : null;
+  if (!ids || !ids.length) return res.status(400).json({ error: 'error.no_books_selected' });
+
+  const placeholders = ids.map(() => '?').join(',');
+  const books = db.prepare(`SELECT * FROM books WHERE user_id = ? AND id IN (${placeholders})`)
+    .all(req.user.id, ...ids);
 
   let updated = 0, failed = 0;
   for (const book of books) {
-    const epubPath = path.join(BOOKS_DIR, String(req.user.id), book.filename);
-    if (!fs.existsSync(epubPath)) { failed++; continue; }
+    const filePath = path.join(BOOKS_DIR, String(req.user.id), book.filename);
+    if (!fs.existsSync(filePath)) { failed++; continue; }
     try {
-      if (book.cover_path) {
-        try { fs.unlinkSync(path.join(COVERS_DIR, book.cover_path)); } catch { /* already gone */ }
-      }
-      const meta = extractEpubMetadata(epubPath, COVERS_DIR, book.file_hash);
+      const f = await reextractBookMetadata(book, filePath);
       db.prepare('UPDATE books SET cover_path = ?, description = ?, publisher = ?, language = ?, isbn = ?, genres = ?, pages = ?, series_name = ?, series_number = ? WHERE id = ?')
-        .run(meta.cover_path, meta.description || book.description || '', meta.publisher || book.publisher || '', meta.language || book.language || '', meta.isbn || book.isbn || '', meta.genres || book.genres || '', meta.pages || book.pages || '', meta.series_name || book.series_name || '', meta.series_number || book.series_number || '', book.id);
+        .run(f.cover_path, f.description, f.publisher, f.language, f.isbn, f.genres, f.pages, f.series_name, f.series_number, book.id);
       updated++;
     } catch { failed++; }
   }
@@ -446,27 +488,22 @@ router.post('/reextract-all', (req, res) => {
 });
 
 // ── POST /api/books/:id/reextract-cover ──────────────────────────────────────
-router.post('/:id/reextract-cover', (req, res) => {
+router.post('/:id/reextract-cover', async (req, res) => {
   const db   = getDb();
   const book = db.prepare(
     'SELECT * FROM books WHERE id = ? AND user_id = ?'
   ).get(req.params.id, req.user.id);
   if (!book) return res.status(404).json({ error: 'error.book_not_found' });
 
-  const epubPath = path.join(BOOKS_DIR, String(req.user.id), book.filename);
-  if (!fs.existsSync(epubPath)) {
+  const filePath = path.join(BOOKS_DIR, String(req.user.id), book.filename);
+  if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'error.epub_not_found' });
   }
 
-  // Remove old cover file if it existed
-  if (book.cover_path) {
-    try { fs.unlinkSync(path.join(COVERS_DIR, book.cover_path)); } catch { /* already gone */ }
-  }
-
-  const meta = extractEpubMetadata(epubPath, COVERS_DIR, book.file_hash);
+  const f = await reextractBookMetadata(book, filePath);
   db.prepare('UPDATE books SET cover_path = ?, description = ?, publisher = ?, language = ?, isbn = ?, genres = ?, pages = ?, series_name = ?, series_number = ? WHERE id = ?')
-    .run(meta.cover_path, meta.description || book.description || '', meta.publisher || book.publisher || '', meta.language || book.language || '', meta.isbn || book.isbn || '', meta.genres || book.genres || '', meta.pages || book.pages || '', meta.series_name || book.series_name || '', meta.series_number || book.series_number || '', book.id);
-  res.json({ cover_path: meta.cover_path, description: meta.description });
+    .run(f.cover_path, f.description, f.publisher, f.language, f.isbn, f.genres, f.pages, f.series_name, f.series_number, book.id);
+  res.json({ cover_path: f.cover_path, description: f.description });
 });
 
 // GET /api/books/:id/related — BookOrbit "more like this" + series info.
