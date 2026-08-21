@@ -3460,9 +3460,15 @@ function updateActiveTocItem(href) {
         return;
       }
     }
-    warn('[toc-debug] NO MATCH for spine href:', href,
-      '| base:', base,
-      '\nTOC hrefs:', tocFlatItems.map(t => t.href).join(' | '));
+    // Only worth a warning when there WAS a TOC to match against — a book with none at all
+    // (any CBZ, most PDFs, an EPUB with no nav/ncx) hits this on every single relocate, which
+    // is expected/harmless, not a diagnostic. Confirmed live: this was spamming console.warn on
+    // every page turn of an entirely TOC-less comic.
+    if (tocFlatItems.length) {
+      warn('[toc-debug] NO MATCH for spine href:', href,
+        '| base:', base,
+        '\nTOC hrefs:', tocFlatItems.map(t => t.href).join(' | '));
+    }
   }
 }
 

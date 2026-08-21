@@ -29,6 +29,10 @@ function _cxImageReady(img) {
   });
 }
 
+// Bounded wait for a paginated CBZ/PDF page to become visible (decode/render) before giving up
+// and swapping in whatever's ready anyway — see _renderCbzItem/_renderPdfItem's own comments.
+const RENDER_TIMEOUT_MS = 4000;
+
 // ── PDF rendering constants ─────────────────────────────────────────────────
 // Cap on a rendered PDF page canvas's pixel width — crisp at fit-to-screen and moderate zoom
 // (comic-viewer.js's zoom is a CSS transform on top of this, same as CBZ) without the memory
@@ -309,7 +313,7 @@ export class CXReader {
   // Switch column mode / gap / continuous-vs-paginated. Stores the setting and, if a chapter
   // is live, re-paginates at the current reading position (preserved by fraction so it
   // survives the engine swap either direction).
-  setLayout({ twoColumn, columnGap, continuous } = {}) {
+  async setLayout({ twoColumn, columnGap, continuous } = {}) {
     if (typeof twoColumn === 'boolean') this._twoColumn = twoColumn;
     if (typeof columnGap === 'number')  this._columnGap = columnGap;
     const continuousChanged = typeof continuous === 'boolean' && continuous !== this._continuous;
@@ -321,7 +325,7 @@ export class CXReader {
       if (this._twoColumn) this._spineIdx = Math.floor(this._spineIdx / 2) * 2;
       this._replacePaginator();
       if (this._continuous) this._renderCbzContinuous();
-      else this._renderCbzItem(this._spineIdx);
+      else await this._renderCbzItem(this._spineIdx);
       this._fireRelocated();
       return;
     }
@@ -329,7 +333,7 @@ export class CXReader {
       if (this._twoColumn) this._spineIdx = Math.floor(this._spineIdx / 2) * 2;
       this._replacePaginator();
       if (this._continuous) this._renderPdfContinuous();
-      else this._renderPdfItem(this._spineIdx);
+      else await this._renderPdfItem(this._spineIdx);
       this._fireRelocated();
       return;
     }
@@ -407,13 +411,13 @@ export class CXReader {
       // (defensive against paginator-type mismatches from any call ordering), but the plain
       // FixedPagePaginator case needs it explicitly here.
       if (this._continuous) this._renderCbzContinuous();
-      else { this._renderCbzItem(this._spineIdx); this._replacePaginator(); }
+      else { await this._renderCbzItem(this._spineIdx); this._replacePaginator(); }
       this._fireRelocated();
       return null;
     }
     if (this._isPdf) {
       if (this._continuous) this._renderPdfContinuous();
-      else { this._renderPdfItem(this._spineIdx); this._replacePaginator(); }
+      else { await this._renderPdfItem(this._spineIdx); this._replacePaginator(); }
       this._fireRelocated();
       return null;
     }
@@ -449,7 +453,7 @@ export class CXReader {
         if (!this._cbzContinuousWrap) this._renderCbzContinuous();
         else await this._scrollCbzContinuousToIndex(idx);
       } else {
-        this._renderCbzItem(idx);
+        await this._renderCbzItem(idx);
         this._replacePaginator();
         this._fireRelocated();
       }
@@ -461,7 +465,7 @@ export class CXReader {
         if (!this._pdfContinuousWrap) this._renderPdfContinuous();
         else await this._scrollPdfContinuousToIndex(idx);
       } else {
-        this._renderPdfItem(idx);
+        await this._renderPdfItem(idx);
         this._replacePaginator();
         this._fireRelocated();
       }
@@ -577,7 +581,7 @@ export class CXReader {
       if (this._spineIdx >= this._book.spine.length - 1) return;
       const step = this._twoColumn ? 2 : 1;
       this._spineIdx = Math.min(this._spineIdx + step, this._book.spine.length - 1);
-      this._renderCbzItem(this._spineIdx);
+      await this._renderCbzItem(this._spineIdx);
       this._replacePaginator();
       this._fireRelocated();
       return;
@@ -590,7 +594,7 @@ export class CXReader {
       if (this._spineIdx >= this._book.spine.length - 1) return;
       const step = this._twoColumn ? 2 : 1;
       this._spineIdx = Math.min(this._spineIdx + step, this._book.spine.length - 1);
-      this._renderPdfItem(this._spineIdx);
+      await this._renderPdfItem(this._spineIdx);
       this._replacePaginator();
       this._fireRelocated();
       return;
@@ -625,7 +629,7 @@ export class CXReader {
       if (this._spineIdx <= 0) return;
       const step = this._twoColumn ? 2 : 1;
       this._spineIdx = Math.max(0, this._spineIdx - step);
-      this._renderCbzItem(this._spineIdx);
+      await this._renderCbzItem(this._spineIdx);
       this._replacePaginator();
       this._fireRelocated();
       return;
@@ -638,7 +642,7 @@ export class CXReader {
       if (this._spineIdx <= 0) return;
       const step = this._twoColumn ? 2 : 1;
       this._spineIdx = Math.max(0, this._spineIdx - step);
-      this._renderPdfItem(this._spineIdx);
+      await this._renderPdfItem(this._spineIdx);
       this._replacePaginator();
       this._fireRelocated();
       return;
@@ -847,6 +851,13 @@ export class CXReader {
   // confirmed live on both desktop and mobile. Keeping the OLD wrap on screen right up until
   // the new one is actually ready to paint removes that gap entirely, regardless of how long
   // decoding takes.
+  // Returns a promise that resolves once the page is actually visible (or the bounded timeout
+  // below gives up waiting) — callers must await this before firing _fireRelocated(), otherwise
+  // the status bar/TOC/percentage update immediately while the real page swap is still pending,
+  // which can look exactly like "the page didn't turn" if a decode is slow or genuinely stuck
+  // (confirmed live: an offline-cached blob URL that hangs). RENDER_TIMEOUT_MS is a safety net,
+  // not the expected path — a broken/corrupt cached image must never leave navigation hung
+  // forever waiting on a decode that will never settle.
   _renderCbzItem(idx) {
     const token = ++this._cbzRenderToken;
     const wrap = document.createElement('div');
@@ -869,7 +880,10 @@ export class CXReader {
     addImg(idx);
     if (showTwo) addImg(idx + 1);
 
-    Promise.all(imgs.map(_cxImageReady)).then(() => {
+    return Promise.race([
+      Promise.all(imgs.map(_cxImageReady)),
+      new Promise(resolve => setTimeout(resolve, RENDER_TIMEOUT_MS)),
+    ]).then(() => {
       // A newer render started (fast swipes/taps) before this one finished decoding —
       // drop it; the newer one owns the container now.
       if (token !== this._cbzRenderToken) return;
@@ -1008,6 +1022,11 @@ export class CXReader {
   // Unlike CBZ (an already-decoded blob URL, cheap), a PDF page is a real async render — the
   // token guard matters more here, since a fast swipe can genuinely leave a slow prior render
   // still in flight when a newer one starts.
+  // Returns a promise — see _renderCbzItem's comment on why callers must await this before
+  // firing _fireRelocated(). Unlike CBZ (an already-decoded blob URL that just needs a display
+  // decode), a PDF page is a real render with nothing to show if it hasn't finished — on
+  // timeout there's no fallback content, so this just leaves whatever's currently on screen
+  // (same as the existing render-failure path below) rather than swapping in nothing.
   _renderPdfItem(idx) {
     const token = ++this._pdfRenderToken;
     const showTwo = this._twoColumn && idx + 1 < this._book.spine.length;
@@ -1017,13 +1036,18 @@ export class CXReader {
     const pageNums = [this._book.spine[idx].pageNum];
     if (showTwo) pageNums.push(this._book.spine[idx + 1].pageNum);
 
-    Promise.all(pageNums.map(pn => this._renderPdfCanvas(pn))).then(canvases => {
+    return Promise.race([
+      Promise.all(pageNums.map(pn => this._renderPdfCanvas(pn))).then(canvases => ({ canvases })),
+      new Promise(resolve => setTimeout(() => resolve({ timedOut: true }), RENDER_TIMEOUT_MS)),
+    ]).then(result => {
       // A newer render started (fast swipes/taps) before this one finished — drop it; the
       // newer one owns the container now.
       if (token !== this._pdfRenderToken) return;
-      for (const c of canvases) { c.className = 'cx-cbz-img'; wrap.appendChild(c); }
-      this._containerEl.innerHTML = '';
-      this._containerEl.appendChild(wrap);
+      if (result.canvases) {
+        for (const c of result.canvases) { c.className = 'cx-cbz-img'; wrap.appendChild(c); }
+        this._containerEl.innerHTML = '';
+        this._containerEl.appendChild(wrap);
+      }
     }).catch(err => {
       if (token !== this._pdfRenderToken) return;
       console.error('[CXReader] PDF page render failed:', err);

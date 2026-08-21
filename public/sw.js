@@ -1,7 +1,7 @@
 // Codexa Service Worker
 // Caches app shell for offline use. EPUBs are cached on demand in BOOKS_CACHE.
 
-const CACHE_VERSION = 'br-v20260821038';
+const CACHE_VERSION = 'br-v20260821040';
 const BOOKS_CACHE   = 'codexa-books-v2';
 const APP_SHELL = [
   '/',
@@ -219,12 +219,29 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Intercept cover requests — serve from books cache when available
+  // Intercept cover requests — serve from books cache when available, and on a cache miss,
+  // write the network response through into the cache before returning it. This is what makes
+  // a PDF's cover (generated client-side well after the book was imported/downloaded — see
+  // reader.js's _backfillPdfCover, unlike EPUB/CBZ whose cover is extracted synchronously at
+  // import time) end up cached for offline use: downloadBook()'s CACHE_BOOK message below only
+  // snapshots whatever cover_path exists at the moment "download for offline" was clicked, with
+  // no way to notice a cover that's set later — but the very next time the library grid (or
+  // anything else) loads that cover's <img> while online, this write-through catches it.
+  // Confirmed live: a PDF downloaded for offline before its cover existed showed no cover at
+  // all when reopened offline, even though cover_path was already correctly set server-side.
   if (url.pathname.startsWith('/covers/') && url.hostname === self.location.hostname) {
     e.respondWith(
-      caches.open(BOOKS_CACHE).then(c =>
-        c.match(e.request).then(cached => cached || fetch(e.request).catch(() => Response.error()))
-      )
+      caches.open(BOOKS_CACHE).then(async c => {
+        const cached = await c.match(e.request);
+        if (cached) return cached;
+        try {
+          const res = await fetch(e.request);
+          if (res.ok) c.put(e.request, res.clone());
+          return res;
+        } catch {
+          return Response.error();
+        }
+      })
     );
     return;
   }
