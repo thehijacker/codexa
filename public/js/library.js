@@ -2152,7 +2152,7 @@ function openUploadStatusModal(fileNames) {
 }
 
 async function handleFiles(fileList) {
-  const epubs = [...fileList].filter(f => f.name.endsWith('.epub') || f.name.endsWith('.cbz') || f.name.endsWith('.cbr') || f.name.endsWith('.pdf'));
+  const epubs = [...fileList].filter(f => f.name.endsWith('.epub') || f.name.endsWith('.kepub') || f.name.endsWith('.cbz') || f.name.endsWith('.cbr') || f.name.endsWith('.pdf'));
   if (!epubs.length) { toast.error(t('library.err_not_epub')); return; }
 
   setButtonLoading(uploadBtn, true);

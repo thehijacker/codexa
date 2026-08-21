@@ -26,7 +26,14 @@ const upload = multer({
   limits: { fileSize: 300 * 1024 * 1024 }, // 300 MB
   fileFilter: (_req, file, cb) => {
     const name = file.originalname.toLowerCase();
+    // KEPUB (Kobo's EPUB variant) needs no separate handling anywhere past this filter — it's a
+    // standard EPUB/ZIP container (same META-INF/container.xml, OPF, spine) with extra inert
+    // <span> wrappers Kobo uses for its own reading-position tracking, so CXReader.open()'s
+    // existing content-sniffed EPUB detection and extractEpubMetadata already handle it
+    // unmodified. Kobo names files "X.kepub.epub" (already matches .epub below) or bare
+    // "X.kepub" (needs its own check, and has no registered browser mimetype to match on).
     const ok = file.mimetype === 'application/epub+zip'
+            || file.mimetype === 'application/x-kepub+zip'
             || file.mimetype === 'application/x-cbz'
             || file.mimetype === 'application/x-cbr'
             || file.mimetype === 'application/zip'
@@ -34,6 +41,7 @@ const upload = multer({
             || file.mimetype === 'application/x-rar-compressed'
             || file.mimetype === 'application/pdf'
             || name.endsWith('.epub')
+            || name.endsWith('.kepub')
             || name.endsWith('.cbz')
             || name.endsWith('.cbr')
             || name.endsWith('.pdf');
