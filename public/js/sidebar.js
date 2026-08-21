@@ -23,6 +23,19 @@ let _bookorbitVisible = false;
 let _bookorbitWarning = false;
 let _opdsVisible      = false;
 
+// Self-healing connectivity signal for gating actions that need the live API (settings/OPDS/
+// BookOrbit/stats panels, shelf navigation, add-shelf, logout warning). Raw navigator.onLine is
+// known-unreliable in this app (see app.js's own comment: it can get stuck reporting false after
+// a VPN toggle, adapter change, or sleep/resume, with no guaranteed matching 'online' event) — a
+// sidebar action gated on it directly could go silently, permanently dead (no error, just does
+// nothing on click) until a full page reload. app:network-restored is dispatched app-wide only
+// after library.js actually confirms the API is reachable (not just the browser's flag), so
+// trusting it here self-heals the stuck-offline case the same way app.js/reader.js already do.
+let _sidebarOnline = navigator.onLine;
+window.addEventListener('online',  () => { _sidebarOnline = true; });
+window.addEventListener('offline', () => { _sidebarOnline = false; });
+document.addEventListener('app:network-restored', () => { _sidebarOnline = true; });
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -83,7 +96,7 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
 
   // Logout
   sidebar.querySelector('#sidebar-logout-btn').addEventListener('click', () => {
-    if (!navigator.onLine) {
+    if (!_sidebarOnline) {
       confirmDialog(t('sidebar.logout_offline_warning'), () => { clearToken(); window.location.href = '/login.html'; }, t('sidebar.logout'), false);
       return;
     }
@@ -111,7 +124,7 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
 
   // Add shelf button
   sidebar.querySelector('#add-shelf-btn').addEventListener('click', () => {
-    if (!navigator.onLine) return;
+    if (!_sidebarOnline) return;
     document.dispatchEvent(new CustomEvent('sidebar:addshelf'));
   });
 
@@ -120,28 +133,28 @@ export async function initSidebar({ onShelfSelect = null, activeShelfId = 'all' 
   // Nav: Settings and OPDS panels — blocked when offline (both require live API)
   sidebar.querySelector('#nav-settings')?.addEventListener('click', e => {
     e.preventDefault();
-    if (!navigator.onLine) return;
+    if (!_sidebarOnline) return;
     showPanel('settings'); closeSidebar();
   });
   sidebar.querySelector('#nav-opds')?.addEventListener('click', e => {
     e.preventDefault();
-    if (!navigator.onLine) return;
+    if (!_sidebarOnline) return;
     showPanel('opds'); closeSidebar();
   });
   sidebar.querySelector('#nav-bookorbit')?.addEventListener('click', e => {
     e.preventDefault();
-    if (!navigator.onLine) return;
+    if (!_sidebarOnline) return;
     showPanel('bookorbit'); closeSidebar();
   });
   sidebar.querySelector('#nav-bookorbit-dash')?.addEventListener('click', e => {
     e.preventDefault();
-    if (!navigator.onLine) return;
+    if (!_sidebarOnline) return;
     showPanel('bookorbit-dash'); closeSidebar();
   });
 
   // Statistics button
   sidebar.querySelector('#sidebar-stats-btn')?.addEventListener('click', () => {
-    if (!navigator.onLine) return;
+    if (!_sidebarOnline) return;
     document.dispatchEvent(new CustomEvent('sidebar:stats'));
   });
 
@@ -416,12 +429,12 @@ function renderShelves() {
 
     item.addEventListener('click', e => {
       if (e.target.closest('.shelf-edit-btn')) return;
-      if (!navigator.onLine) return;
+      if (!_sidebarOnline) return;
       navigate(shelf.id);
     });
     item.querySelector('.shelf-edit-btn').addEventListener('click', e => {
       e.stopPropagation();
-      if (!navigator.onLine) return;
+      if (!_sidebarOnline) return;
       document.dispatchEvent(new CustomEvent('sidebar:editshelf', { detail: shelf }));
     });
 
@@ -530,7 +543,7 @@ document.addEventListener('langchange', () => {
     localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
   });
   sidebar.querySelector('#sidebar-logout-btn')?.addEventListener('click', () => {
-    if (!navigator.onLine) {
+    if (!_sidebarOnline) {
       confirmDialog(t('sidebar.logout_offline_warning'), () => { clearToken(); window.location.href = '/login.html'; }, t('sidebar.logout'), false);
       return;
     }
@@ -546,32 +559,32 @@ document.addEventListener('langchange', () => {
     e.preventDefault(); navigate('all');
   });
   sidebar.querySelector('#add-shelf-btn')?.addEventListener('click', () => {
-    if (!navigator.onLine) return;
+    if (!_sidebarOnline) return;
     document.dispatchEvent(new CustomEvent('sidebar:addshelf'));
   });
   _attachShelfEditBtn();
   sidebar.querySelector('#nav-settings')?.addEventListener('click', e => {
     e.preventDefault();
-    if (!navigator.onLine) return;
+    if (!_sidebarOnline) return;
     showPanel('settings'); closeSidebar();
   });
   sidebar.querySelector('#nav-opds')?.addEventListener('click', e => {
     e.preventDefault();
-    if (!navigator.onLine) return;
+    if (!_sidebarOnline) return;
     showPanel('opds'); closeSidebar();
   });
   sidebar.querySelector('#nav-bookorbit')?.addEventListener('click', e => {
     e.preventDefault();
-    if (!navigator.onLine) return;
+    if (!_sidebarOnline) return;
     showPanel('bookorbit'); closeSidebar();
   });
   sidebar.querySelector('#nav-bookorbit-dash')?.addEventListener('click', e => {
     e.preventDefault();
-    if (!navigator.onLine) return;
+    if (!_sidebarOnline) return;
     showPanel('bookorbit-dash'); closeSidebar();
   });
   sidebar.querySelector('#sidebar-stats-btn')?.addEventListener('click', () => {
-    if (!navigator.onLine) return;
+    if (!_sidebarOnline) return;
     document.dispatchEvent(new CustomEvent('sidebar:stats'));
   });
 });
