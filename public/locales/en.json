@@ -590,6 +590,7 @@
   "opds.stale_delete": "Delete selected",
   "opds.stale_also_in_shelves": "also in other shelves",
   "opds.stale_deleted": "{summary} Deleted: {n} stale books.",
+  "opds.stale_auto_removed": "{summary} Removed from shelf (kept in library): {n}.",
   "opds.page_prev": "Previous",
   "opds.page_next": "Next",
   "opds.page_info": "Page {page} · {count} books",

@@ -844,11 +844,14 @@ export function openSyncModal(folderUrl, folderTitle, existingShelfId = null, se
         es.close();
         reloadShelves();
         reloadLibrary();
-        const summary = msg.refreshed
+        let summary = msg.refreshed
           ? t('opds.sync_done_force', { added: msg.added, refreshed: msg.refreshed, errors: msg.errors || 0 })
           : msg.errors
             ? t('opds.sync_done_errors', { added: msg.added, skipped: msg.skipped, errors: msg.errors })
             : t('opds.sync_done', { added: msg.added, skipped: msg.skipped });
+        // Books auto-unlinked from this shelf because they're still present on another one
+        // (e.g. moved to a different linked shelf) — no dialog needed, just note it happened.
+        if (msg.autoRemoved) summary += ' ' + t('opds.stale_auto_removed', { n: msg.autoRemoved });
         if (msg.staleBooks && msg.staleBooks.length > 0) {
           const stale = msg.staleBooks;
           close();

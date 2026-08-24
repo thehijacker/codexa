@@ -590,6 +590,7 @@
   "opds.stale_delete": "Eliminar seleccionados",
   "opds.stale_also_in_shelves": "también en otras estanterías",
   "opds.stale_deleted": "{summary} Eliminados: {n} libros obsoletos.",
+  "opds.stale_auto_removed": "{summary} Eliminados de la estantería (conservados en la biblioteca): {n}.",
   "opds.page_prev": "Anterior",
   "opds.page_next": "Siguiente",
   "opds.page_info": "Página {page} · {count} libros",

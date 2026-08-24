@@ -590,6 +590,7 @@
   "opds.stale_delete": "Ausgewählte löschen",
   "opds.stale_also_in_shelves": "auch in anderen Regalen",
   "opds.stale_deleted": "{summary} Gelöscht: {n} veraltete Bücher.",
+  "opds.stale_auto_removed": "{summary} Vom Regal entfernt (in der Bibliothek behalten): {n}.",
   "opds.page_prev": "Vorherige",
   "opds.page_next": "Nächste",
   "opds.page_info": "Seite {page} · {count} Bücher",

@@ -590,6 +590,7 @@
   "opds.stale_delete": "Izbriši označene",
   "opds.stale_also_in_shelves": "tudi na drugih policah",
   "opds.stale_deleted": "{summary} Izbrisano: {n} zastarelih knjig.",
+  "opds.stale_auto_removed": "{summary} Odstranjeno s police (ohranjeno v knjižnici): {n}.",
   "opds.page_prev": "Prejšnja",
   "opds.page_next": "Naslednja",
   "opds.page_info": "Stran {page} · {count} knjig",

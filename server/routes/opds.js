@@ -273,7 +273,9 @@ router.get('/sync-sse', async (req, res) => {
     // Detect stale books: in shelf before sync but NOT touched by this sync.
     // Skipped for silent (background) syncs — only shown on manual sync.
     const staleBooks = [];
+    let autoRemoved = 0;
     if (!silent && preExistingBookIds.size > 0) {
+      const unlinkFromShelf = db.prepare('DELETE FROM book_shelves WHERE shelf_id = ? AND book_id = ?');
       for (const bookId of preExistingBookIds) {
         if (syncedBookIds.has(bookId)) continue;
         // Fallback: check if any known acq_href for this book is in the current feed
@@ -281,16 +283,24 @@ router.get('/sync-sse', async (req, res) => {
         const appearsInFeed = sources.some(s => feedAcqHrefs.has(s.acq_href));
         if (appearsInFeed) continue;
         const b = db.prepare('SELECT id, title, author FROM books WHERE id = ?').get(bookId);
-        if (b) {
-          const { cnt: otherShelfCount } = db.prepare(
-            'SELECT COUNT(*) AS cnt FROM book_shelves WHERE book_id = ? AND shelf_id != ?'
-          ).get(bookId, shelf.id) || { cnt: 0 };
-          staleBooks.push({ ...b, otherShelfCount });
+        if (!b) continue;
+        const { cnt: otherShelfCount } = db.prepare(
+          'SELECT COUNT(*) AS cnt FROM book_shelves WHERE book_id = ? AND shelf_id != ?'
+        ).get(bookId, shelf.id) || { cnt: 0 };
+        if (otherShelfCount > 0) {
+          // Still present on at least one other shelf — unlinking from just THIS shelf is always
+          // safe (nothing is lost), so do it automatically instead of making the user click
+          // through a "Delete" dialog for a book they may still be actively reading elsewhere.
+          // See the identical fix + rationale in server/routes/bookorbit.js's own sync-sse.
+          unlinkFromShelf.run(shelf.id, bookId);
+          autoRemoved++;
+          continue;
         }
+        staleBooks.push({ ...b, otherShelfCount });
       }
     }
 
-    done({ type: 'done', added, skipped, refreshed, errors, shelfId: shelf.id, staleBooks });
+    done({ type: 'done', added, skipped, refreshed, errors, shelfId: shelf.id, staleBooks, autoRemoved });
   } catch (err) {
     console.error('[opds] sync-sse error:', err.message);
     done({ type: 'error', message: err.message });

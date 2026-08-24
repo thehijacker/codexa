@@ -590,6 +590,7 @@
   "opds.stale_delete": "Elimina selezionati",
   "opds.stale_also_in_shelves": "anche in altri scaffali",
   "opds.stale_deleted": "{summary} Eliminati: {n} libri obsoleti.",
+  "opds.stale_auto_removed": "{summary} Rimossi dallo scaffale (mantenuti in biblioteca): {n}.",
   "opds.page_prev": "Precedente",
   "opds.page_next": "Successiva",
   "opds.page_info": "Pagina {page} · {count} libri",

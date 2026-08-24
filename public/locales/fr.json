@@ -590,6 +590,7 @@
   "opds.stale_delete": "Supprimer la sélection",
   "opds.stale_also_in_shelves": "également dans d'autres étagères",
   "opds.stale_deleted": "{summary} Supprimés : {n} livres obsolètes.",
+  "opds.stale_auto_removed": "{summary} Retirés de l'étagère (conservés dans la bibliothèque) : {n}.",
   "opds.page_prev": "Précédente",
   "opds.page_next": "Suivante",
   "opds.page_info": "Page {page} · {count} livres",

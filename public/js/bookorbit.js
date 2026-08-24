@@ -941,9 +941,13 @@ export function openBookorbitSyncModal(source, id, name, existingShelfId = null)
         es.close();
         reloadShelves();
         reloadLibrary();
-        const summary = msg.errors
+        let summary = msg.errors
           ? t('opds.sync_done_errors', { added: msg.added, skipped: msg.skipped, errors: msg.errors })
           : t('opds.sync_done', { added: msg.added, skipped: msg.skipped });
+        // Books auto-unlinked from this shelf because they're still present on another one
+        // (e.g. moved to a different linked collection/smart scope) — no dialog needed, just
+        // note it happened.
+        if (msg.autoRemoved) summary += ' ' + t('opds.stale_auto_removed', { n: msg.autoRemoved });
         if (msg.staleBooks && msg.staleBooks.length > 0) {
           const stale = msg.staleBooks;
           close();

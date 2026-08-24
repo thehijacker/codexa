@@ -772,23 +772,36 @@ router.get('/sync-sse', async (req, res) => {
     // a book might still genuinely be in the source but beyond the limited slice — check its
     // bo_book_id against the FULL unlimited listing (allBooks) before calling it stale.
     const staleBooks = [];
+    let autoRemoved = 0;
     if (preExistingBookIds.size > 0) {
       const allBoIds = new Set(allBooks.map(b => b.id));
+      const unlinkFromShelf = db.prepare('DELETE FROM book_shelves WHERE shelf_id = ? AND book_id = ?');
       for (const bookId of preExistingBookIds) {
         if (syncedBookIds.has(bookId)) continue;
         const state = db.prepare('SELECT bo_book_id FROM bookorbit_sync_state WHERE user_id = ? AND book_id = ?').get(req.user.id, bookId);
         if (state?.bo_book_id != null && allBoIds.has(state.bo_book_id)) continue;
         const bk = db.prepare('SELECT id, title, author FROM books WHERE id = ?').get(bookId);
-        if (bk) {
-          const { cnt: otherShelfCount } = db.prepare(
-            'SELECT COUNT(*) AS cnt FROM book_shelves WHERE book_id = ? AND shelf_id != ?'
-          ).get(bookId, shelf.id) || { cnt: 0 };
-          staleBooks.push({ ...bk, otherShelfCount });
+        if (!bk) continue;
+        const { cnt: otherShelfCount } = db.prepare(
+          'SELECT COUNT(*) AS cnt FROM book_shelves WHERE book_id = ? AND shelf_id != ?'
+        ).get(bookId, shelf.id) || { cnt: 0 };
+        if (otherShelfCount > 0) {
+          // Still present on at least one other shelf (e.g. moved to a different linked
+          // collection/smart scope upstream, like BookOrbit's own "want to read" -> "currently
+          // reading") — unlinking from just THIS shelf is always safe, nothing is lost, so do it
+          // automatically rather than making the user click through a "Delete" dialog for a book
+          // they're still actively reading elsewhere. Confirmed live: that dialog's own "delete"
+          // action already only unlinked in this case (see openBookorbitStaleDialog client-side),
+          // but the red "Delete" wording/styling was needlessly alarming for something this safe.
+          unlinkFromShelf.run(shelf.id, bookId);
+          autoRemoved++;
+          continue;
         }
+        staleBooks.push({ ...bk, otherShelfCount });
       }
     }
 
-    done({ type: 'done', added, skipped, errors, shelfId: shelf.id, staleBooks });
+    done({ type: 'done', added, skipped, errors, shelfId: shelf.id, staleBooks, autoRemoved });
   } catch (err) {
     console.error('[bookorbit] sync-sse error:', err.message);
     done({ type: 'error', message: err.message });
