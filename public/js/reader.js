@@ -8044,6 +8044,28 @@ async function init() {
     }
     bookTitleEl.textContent = currentBook.title;
     document.title = `${currentBook.title} — Codexa`;
+    // Comics/PDFs default to Continuous mode with a real margin (not full-bleed) the FIRST
+    // time a given book is opened — full-width paginated reads badly on a large screen and
+    // isn't a great first impression. This is deliberately NOT a new global default: 'spread'
+    // and 'margin' are already PER_BOOK_KEYS (see loadBookPrefs/saveBookPrefs above), so this
+    // only seeds the starting values for a book with no saved override of its own — it must run
+    // BEFORE loadBookPrefs() so any real per-book override (including the user deliberately
+    // choosing full-bleed/paginated) still wins. The moment the user changes anything while
+    // reading this book, saveBookPrefs records that per book and this seed never applies again,
+    // and it never leaks into any other book since it's derived fresh from this book's own
+    // format/hasBookPrefs state, not written into the shared global prefs blob.
+    const _cpFmt = currentBook.format
+      || (currentBook.filename?.endsWith('.pdf') ? 'pdf' : currentBook.filename?.endsWith('.cbz') ? 'cbz' : '');
+    if ((_cpFmt === 'cbz' || _cpFmt === 'pdf') && !hasBookPrefs(currentBook.id)) {
+      prefs.spread = 'continuous';
+      prefs.margin = 80;
+      // initSettingsUi() already ran (earlier in init(), before currentBook was known) and set
+      // the --cx-comic-margin CSS var from whatever prefs.margin held at the time — refresh it
+      // now that we've just changed prefs.margin, or continuous mode's margin (CSS-driven,
+      // unlike paginated mode's columnGap which setLayout() below picks up fresh) would still
+      // render with the stale value.
+      applyComicMargin();
+    }
     loadBookPrefs(currentBook.id);
     syncSettingsUi();
   } catch (err) {
