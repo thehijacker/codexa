@@ -813,12 +813,19 @@ body.page-gap-shadow-on #settings-panel {
 }
 
 /* KOSync tap hot zones */
+/* z-index 22: must beat #footer-sensor (z:19, pointer-events:auto in .comic-mode — the
+   bottom-edge hover/tap sensor that reveals the status bars) and .header-peek's revealed
+   header (z:21), both siblings of .reader-main further up the DOM. .reader-main itself
+   establishes no stacking context of its own (position:relative with no z-index), so these
+   hotzones stack purely by z-index against those outer siblings regardless of nesting depth —
+   without this they sit visually on top but the sensor still eats the click underneath,
+   exactly when a user reveals the status bar and then taps the corner to sync. */
 .kosync-hotzone {
   position: absolute;
   bottom: 0;
   width: 56px;
   height: 40px;
-  z-index: 6;
+  z-index: 22;
   cursor: pointer;
 }
 .kosync-hotzone-bl { left:  0; }
