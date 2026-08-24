@@ -24,6 +24,12 @@ const { getDb } = require('../db');
 const { runWithUser } = require('../utils/logger');
 
 const TIMEOUT_MS = 15000;
+// Idle timeout for fetchAssetStream's book-file download only — a large comic/PDF can
+// legitimately take well over TIMEOUT_MS to fully transfer, so that fixed deadline (fine for
+// the quick metadata/API calls above) isn't reused there. This is reset on every chunk
+// received instead, so it only fires on a genuinely stalled connection, not a slow-but-steady
+// large download.
+const STREAM_IDLE_TIMEOUT_MS = 30000;
 const PACE_MS = 150;        // min spacing between API calls (be gentle on the throttler)
 const MAX_429_RETRIES = 4;  // back off and retry when rate-limited
 
@@ -647,20 +653,29 @@ async function fetchAssetStream(userId, ctx, path, onProgress) {
   if (!tokens.has(userId)) {
     try { await login(userId, ctx); } catch { return { ok: false }; }
   }
+  // An idle timeout (armed here, re-armed on every chunk below), not AbortSignal.timeout's
+  // fixed deadline — see STREAM_IDLE_TIMEOUT_MS above for why.
+  const controller = new AbortController();
+  let idleTimer;
+  const armIdleTimer = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => controller.abort(), STREAM_IDLE_TIMEOUT_MS);
+  };
   const doFetch = () => {
     const tok = tokens.get(userId);
+    armIdleTimer();
     return fetch(`${ctx.webBase}${path}`, {
       headers: { authorization: `Bearer ${tok.access}` },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: controller.signal,
     });
   };
   let res;
-  try { res = await doFetch(); } catch { return { ok: false }; }
+  try { res = await doFetch(); } catch { clearTimeout(idleTimer); return { ok: false }; }
   if (res.status === 401) {
-    try { await refresh(userId, ctx); } catch { return { ok: false }; }
-    try { res = await doFetch(); } catch { return { ok: false }; }
+    try { await refresh(userId, ctx); } catch { clearTimeout(idleTimer); return { ok: false }; }
+    try { res = await doFetch(); } catch { clearTimeout(idleTimer); return { ok: false }; }
   }
-  if (!res.ok) return { ok: false, status: res.status };
+  if (!res.ok) { clearTimeout(idleTimer); return { ok: false, status: res.status }; }
 
   const total = Number(res.headers.get('content-length')) || 0;
   const contentType = res.headers.get('content-type') || 'application/octet-stream';
@@ -668,6 +683,7 @@ async function fetchAssetStream(userId, ctx, path, onProgress) {
   if (!res.body?.getReader) {
     // No streamable body (shouldn't happen with Node's fetch) — fall back to buffering whole.
     const buffer = Buffer.from(await res.arrayBuffer());
+    clearTimeout(idleTimer);
     onProgress?.(buffer.length, total || buffer.length);
     return { ok: true, contentType, buffer };
   }
@@ -675,12 +691,19 @@ async function fetchAssetStream(userId, ctx, path, onProgress) {
   const reader = res.body.getReader();
   const chunks = [];
   let loaded = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    loaded += value.length;
-    onProgress?.(loaded, total);
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      armIdleTimer(); // got data — connection is alive, push the deadline back out
+      chunks.push(value);
+      loaded += value.length;
+      onProgress?.(loaded, total);
+    }
+  } catch {
+    return { ok: false }; // stalled connection (idle timeout) or other stream error
+  } finally {
+    clearTimeout(idleTimer);
   }
   return { ok: true, contentType, buffer: Buffer.concat(chunks.map(c => Buffer.from(c))) };
 }
