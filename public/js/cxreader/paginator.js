@@ -65,12 +65,17 @@ export class Paginator {
 
   // Navigate to the page whose start offset is ≤ bodyY (natural document y-coordinate).
   goToBodyY(bodyY) {
-    if (!this._pageBreaks?.length) return this.goToPage(1);
+    return this.goToPage(this._pageForBodyY(bodyY));
+  }
+
+  // Pure lookup shared by goToBodyY (navigates) and pageForElement (doesn't).
+  _pageForBodyY(bodyY) {
+    if (!this._pageBreaks?.length) return 1;
     let page = 1;
     for (let i = this._pageBreaks.length - 1; i >= 0; i--) {
       if (this._pageBreaks[i] <= bodyY) { page = i + 1; break; }
     }
-    return this.goToPage(page);
+    return page;
   }
 
   // Navigate to the page containing el (used for annotation/footnote jumps). Uniform with
@@ -78,6 +83,22 @@ export class Paginator {
   goToElement(el) {
     if (!el) return this.goToPage(1);
     return this.goToBodyY(el.getBoundingClientRect().top);
+  }
+
+  // Pure calculation of which page el is currently on — does NOT navigate. Used to disambiguate
+  // active TOC entries when several share one spine file (see reader.js's updateActiveTocItem).
+  // Transform is reset to identity for the measurement (same "reset before measuring" idiom as
+  // init() itself), since getBoundingClientRect() would otherwise reflect whichever page is
+  // currently shown on screen, not el's real position in the document.
+  pageForElement(el) {
+    if (!el) return null;
+    const body = this._iframe?.contentDocument?.body;
+    if (!body) return null;
+    const prevTransform = body.style.transform;
+    body.style.transform = '';
+    const top = el.getBoundingClientRect().top;
+    body.style.transform = prevTransform;
+    return this._pageForBodyY(top);
   }
 
   // Returns true if advanced, false if already at boundary (caller handles chapter change)

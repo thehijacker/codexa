@@ -3205,24 +3205,43 @@ function buildChapterMarkers() {
   const cxSpine    = _cxReader?._book?.spine;
   const spineTotal = cxSpine?.length || 1;
 
-  topLevel.forEach(({ href }, i) => {
+  // Resolve each entry's spine index once, up front — several entries can share one index (a
+  // book that packs many chapters as anchors inside one shared physical file rather than one
+  // file per chapter; see resolveActiveTocEntry). Without this, every one of them collapsed
+  // onto the exact same marker position (the file's own boundary), confirmed live as a book
+  // with ~30 such chapters showing no distinguishable markers for any of them beyond that one
+  // shared tick. Anchor precision isn't available here (that needs the chapter actually
+  // rendered — see pageForAnchor — which markers, built once up front for the whole book,
+  // can't afford for every chapter), so entries sharing a file are spread evenly across that
+  // file's own pct span instead — an approximation, but far better than one shared tick.
+  const idxOf = ({ href }) => {
+    if (!cxSpine?.length) return -1;
+    const hrefLow  = (href || '').split('#')[0].toLowerCase();
+    const hrefFile = hrefLow.split('/').pop();
+    return cxSpine.findIndex(s => {
+      // Prefer absPath (fully resolved) for matching; fall back to raw href
+      const sh = (s.absPath || s.href || '').split('#')[0].toLowerCase();
+      return sh === hrefLow || sh.split('/').pop() === hrefFile;
+    });
+  };
+  const idxs = topLevel.map(idxOf);
+  const groups = new Map(); // spine idx -> topLevel positions sharing it, in document order
+  idxs.forEach((idx, i) => {
+    if (idx <= 0) return;
+    if (!groups.has(idx)) groups.set(idx, []);
+    groups.get(idx).push(i);
+  });
+
+  topLevel.forEach((_, i) => {
     if (i === 0) return; // first chapter starts at 0% — no marker needed
-    const hrefBase = (href || '').split('#')[0];
-    let pct = null;
-
-    // Spine-index ratio from the CXReader spine.
-    if (cxSpine?.length) {
-      const hrefLow  = hrefBase.toLowerCase();
-      const hrefFile = hrefLow.split('/').pop();
-      const idx = cxSpine.findIndex(s => {
-        // Prefer absPath (fully resolved) for matching; fall back to raw href
-        const sh = (s.absPath || s.href || '').split('#')[0].toLowerCase();
-        return sh === hrefLow || sh.split('/').pop() === hrefFile;
-      });
-      if (idx > 0) pct = idx / spineTotal;
-    }
-
-    if (pct == null || pct <= 0.001 || pct >= 0.999) return;
+    const idx = idxs[i];
+    if (idx <= 0) return;
+    const group = groups.get(idx) || [i];
+    const k = group.indexOf(i);
+    const spanStart = idx / spineTotal;
+    const spanEnd   = (idx + 1) / spineTotal;
+    const pct = spanStart + (k / group.length) * (spanEnd - spanStart);
+    if (pct <= 0.001 || pct >= 0.999) return;
     const marker = document.createElement('div');
     marker.className = 'sb-chap-marker';
     marker.style.left = (pct * 100).toFixed(2) + '%';
@@ -3394,16 +3413,37 @@ function buildTocRecursive(toc, depth, fragment) {
         const [hrefBase, anchor] = (item.href || '').split('#');
         // Resolve via spine — findSpineItemForHref handles path-prefix mismatches
         const spineItem = findSpineItemForHref(hrefBase);
-        // For chapter-level entries (depth <= 1), use spineItem.href without anchor so
-        // epub.js navigates to the start of the chapter file. display(spineIndex) would
-        // restore the last-cached position (which can be mid-chapter from a previous visit),
-        // while display(href) without a fragment always goes to the beginning.
-        // Sub-section entries (depth > 1) keep their anchors for precise positioning.
+        // Keep the anchor regardless of depth — CXReader's goToHref resolves a fragment to the
+        // exact page of that element (see cxreader/index.js's goToSpineItem anchor-jump), it
+        // doesn't just land on the chapter's first page, so there's no reason to drop it for top-level
+        // entries. This used to be depth-gated (a leftover from the old epub.js engine, where a
+        // bare display(href) reliably went to page 1 but a fragment could resurrect a stale
+        // cached location) — but for a book that packs several chapters as anchors inside one
+        // shared spine file, dropping the anchor at depth<=1 meant every one of those chapters'
+        // TOC entries landed on page 1 of that shared file, confirmed live as "chapter 30 opens
+        // the file, chapter 34 opens the same file, chapter 50 opens back to chapter 34" — all
+        // three names for the one physical page CXReader could actually reach without it.
         const displayTarget = spineItem?.index != null
-          ? (anchor && depth > 1 ? `${spineItem.href}#${anchor}` : spineItem.href)
+          ? (anchor ? `${spineItem.href}#${anchor}` : spineItem.href)
           : item.href;
         log(`[nav] TOC | depth=${depth} anchor="${anchor||''}" target=${JSON.stringify(displayTarget)}`);
-        if (_cxReader) await _cxReader.goToHref(displayTarget || item.href);
+        if (_cxReader) {
+          // Hard-hide (no transition — must be instant, not faded) while the target chapter
+          // renders and, for a mid-file anchor, jumps to its real page. TOC clicks don't go
+          // through the regular page-turn fade (_pageExit/_pageEnter), and that fade wouldn't
+          // fully cover this anyway — it only masks part of the render, which is unnoticeable
+          // for an ordinary forward page-turn (the visible interim state already IS page 1, the
+          // destination) but not here: a mid-file anchor's interim state (the file's own natural
+          // top, mid-render) is NOT the destination, so any visibility during the render shows
+          // the wrong page. Confirmed live: clicking a mid-file TOC chapter briefly flashed the
+          // file's own top before landing on the right page.
+          epubViewer.style.visibility = 'hidden';
+          try {
+            await _cxReader.goToHref(displayTarget || item.href);
+          } finally {
+            epubViewer.style.visibility = '';
+          }
+        }
       }, 80);
     });
 
@@ -3429,27 +3469,70 @@ function buildToc(toc) {
   });
 }
 
-function updateActiveTocItem(href) {
-  if (!href) return;
-  // Strip _split_NNN suffix — epub.js splits large chapters but TOC only lists _split_000
-  const norm  = h => (h || '').split('#')[0].replace(/_split_\d+(\.\w+)$/, '$1').toLowerCase();
-  const base  = norm(href).split('/').pop();
+// Strip _split_NNN suffix — epub.js splits large chapters but TOC only lists _split_000
+function _tocNormBase(h) {
+  return (h || '').split('#')[0].replace(/_split_\d+(\.\w+)$/, '$1').toLowerCase().split('/').pop();
+}
+
+// Resolve which TOC entry is "active" for spine href at page curPage, AND the page range (in
+// the current paginator's own page units) it actually spans within the file — the anchor's own
+// page through just before the next entry's anchor, or the end of the file if it's the last
+// one there. Shared by updateActiveTocItem (which entry to highlight) and _cxRelocatedHandler
+// (which scopes "pages left in chapter" to this virtual sub-chapter instead of the whole
+// physical file — see that call site's own comment for why).
+//
+// Several TOC entries can share one physical spine file — a book that packs many chapters as
+// anchors inside a couple of shared HTML files rather than one file per chapter (see
+// cxreader/index.js's goToSpineItem anchor-jump for why that's navigable at all now). Returns
+// null only when NOTHING matches this href by filename at all (falls back to _cxRangeActiveToc).
+function resolveActiveTocEntry(href, curPage, fileTotalPages) {
+  if (!href || !tocFlatItems.length) return null;
+  const base = _tocNormBase(href);
   // CBZ/PDF spine hrefs ("page-N") need an EXACT match — the substring fuzzy-match below exists
   // to tolerate EPUB filename variants (e.g. a resolved path vs. a raw href), but on page-N it's
   // actively wrong: "page-1" is a substring of "page-10"/"page-100"/... and vice versa, so on a
   // real multi-page PDF it lit up every TOC entry whose page number shared a numeric prefix with
   // the current page — confirmed live.
   const isPageHref = /^page-\d+$/.test(base);
-  let anyActive = false;
-  tocFlatItems.forEach(({ href: ih, button }) => {
-    const ib     = norm(ih || '').split('/').pop();
-    const active = isPageHref
-      ? base === ib
-      : !!(base && ib && (base === ib || base.includes(ib) || ib.includes(base)));
-    button.classList.toggle('active', active);
-    if (active) anyActive = true;
+  const matches = tocFlatItems.filter(item => {
+    const ib = _tocNormBase(item.href);
+    return isPageHref ? base === ib : !!(base && ib && (base === ib || base.includes(ib) || ib.includes(base)));
   });
-  if (!anyActive) {
+  if (!matches.length) return null;
+  if (matches.length === 1 || !_cxReader?.pageForAnchor) {
+    return { winner: matches[0], startPage: 1, endPage: fileTotalPages };
+  }
+  // Resolve each match's own start page — a bare entry with no fragment at all means "the
+  // start of the file" (page 1). Sorted ascending by page, shallower-first on a tie so the
+  // scan below can prefer the deeper (more specific) one when it reaches that tie.
+  const resolved = matches
+    .map(m => ({ item: m, page: (m.href || '').split('#')[1] ? _cxReader.pageForAnchor(m.href.split('#')[1]) : 1 }))
+    .filter(r => r.page != null)
+    .sort((a, b) => a.page - b.page || a.item.depth - b.item.depth);
+  if (!resolved.length) return { winner: matches[0], startPage: 1, endPage: fileTotalPages };
+
+  // Pick the entry whose page is the closest at-or-before curPage. A depth-0 "container" entry
+  // with no anchor of its own is hardcoded to page 1, which makes it a permanently-valid
+  // candidate at every page of the file — without the depth tie-break below it would win over
+  // an anchored child sitting on that very same first page forever (confirmed live: a book's
+  // first sub-chapter, starting right at its file's top with no anchor of its own to distinguish
+  // it, stayed stuck showing its PARENT entry as active through the whole sub-chapter).
+  let winner = resolved[0];
+  for (const r of resolved) {
+    if (r.page > curPage) break; // ascending order — nothing further can still qualify
+    if (r.page > winner.page || (r.page === winner.page && r.item.depth >= winner.item.depth)) winner = r;
+  }
+  const next = resolved[resolved.indexOf(winner) + 1];
+  return { winner: winner.item, startPage: winner.page, endPage: next ? next.page - 1 : fileTotalPages };
+}
+
+function updateActiveTocItem(href) {
+  if (!href) return;
+  const curPage  = _cxReader?._paginator?.currentPage ?? 1;
+  const total    = _cxReader?._paginator?.pageCount ?? curPage;
+  const resolved = resolveActiveTocEntry(href, curPage, total);
+  tocFlatItems.forEach(item => item.button.classList.toggle('active', !!resolved && item === resolved.winner));
+  if (!resolved) {
     // CXReader range fallback: activate the last TOC entry whose spine index ≤ currentSpineIndex
     if (_cxReader) {
       const rangeItem = _cxRangeActiveToc();
@@ -3466,7 +3549,7 @@ function updateActiveTocItem(href) {
     // every page turn of an entirely TOC-less comic.
     if (tocFlatItems.length) {
       warn('[toc-debug] NO MATCH for spine href:', href,
-        '| base:', base,
+        '| base:', _tocNormBase(href),
         '\nTOC hrefs:', tocFlatItems.map(t => t.href).join(' | '));
     }
   }
@@ -3536,7 +3619,15 @@ function _cxRangeActiveToc() {
   let bestIdx = -1;
   for (const item of tocFlatItems) {
     const si = _cxTocToSpineIdx(item.href);
-    if (si >= 0 && si <= currentSpineIndex && si > bestIdx) {
+    // >= (not >): several TOC entries can resolve to the SAME spine index — anchors into one
+    // shared file (see resolveActiveTocEntry above) — and when the fallback here is needed
+    // (an untitled spine item further along with no TOC entry of its own at all, e.g. a chapter
+    // an EPUB producer split across an extra physical file mid-story), the LAST of those tied
+    // entries in document order is the more specific/more recent one and should win, not
+    // whichever happened to be listed first. Confirmed live: a book whose last real chapter
+    // ("Črna orhideja") shared its spine index with an earlier sub-chapter of the same file
+    // fell back to that earlier one instead once the untitled continuation file was reached.
+    if (si >= 0 && si <= currentSpineIndex && si >= bestIdx) {
       bestIdx = si;
       best = item;
     }
@@ -5786,6 +5877,23 @@ function _cxRelocatedHandler(e) {
   }
   // Feed the chapter page-count cache so bookPage / timeLeftBook estimates improve over time
   if (pageCount > 0) chapPageCache[spineIndex] = pageCount;
+  // Scope currentChapPage/currentChapTotal/currentEndPage to the virtual TOC sub-chapter
+  // (its own anchor through just before the next TOC entry's anchor) instead of the whole
+  // physical spine file — same reason updateActiveTocItem() below needs to pick just ONE TOC
+  // entry active: a book that packs several chapters into one file otherwise always showed the
+  // WHOLE file's page count as "pages left in chapter", no matter which of its sub-chapters was
+  // actually open (confirmed live). chapPageCache above is deliberately left alone — it drives
+  // the whole-BOOK page/time-left estimate from real per-file page counts, and must keep
+  // reflecting the whole file regardless of this scoping.
+  if (_cxReader && !isImmersivePageMode()) {
+    const range = resolveActiveTocEntry(href, page, pageCount);
+    if (range && (range.startPage > 1 || range.endPage < pageCount)) {
+      const span = Math.max(1, range.endPage - range.startPage + 1);
+      currentChapPage  = Math.min(span, Math.max(1, page - range.startPage + 1));
+      currentEndPage   = endPage ? Math.min(span, Math.max(1, endPage - range.startPage + 1)) : currentChapPage;
+      currentChapTotal = span;
+    }
+  }
   log(`[CXReader] relocated spine=${spineIndex} page=${page}/${pageCount} pct=${(currentPct*100).toFixed(1)}%`);
   trackReadingSpeed();
   renderStatusSlots();

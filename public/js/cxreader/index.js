@@ -436,7 +436,14 @@ export class CXReader {
   }
 
   // Navigate to a specific spine item, optionally at a given page (1-based).
-  async goToSpineItem(spineIdx, page = 1) {
+  // `anchor`, if given, resolves to its real page and jumps straight there in the SAME
+  // synchronous block as the initial pagination — before goToHref used to separately call
+  // scrollToAnchor afterward, which fired a second _fireRelocated() and, worse, visibly
+  // painted page 1 of the file for a moment before the jump landed (confirmed live: clicking a
+  // mid-file TOC chapter briefly showed the file's own first page before jumping down to the
+  // right one). Doing it here instead means the paginator never settles on page 1 for a
+  // rendered frame at all when an anchor is given — it goes straight to the real page.
+  async goToSpineItem(spineIdx, page = 1, anchor = null) {
     if (!this._book || !this._containerEl) return;
     const idx = Math.max(0, Math.min(spineIdx, this._book.spine.length - 1));
     this._spineIdx = idx;
@@ -479,7 +486,9 @@ export class CXReader {
     this._initPaginator(iframe);
     this._continuousLoadedUpTo = idx; // fresh document — nothing appended yet
     this._continuousRenderToken++;
-    if (page > 1) this._paginator.goToPage(page);
+    const anchorEl = anchor ? this._findAnchorEl(anchor) : null;
+    if (anchorEl) this._paginator.goToElement(anchorEl);
+    else if (page > 1) this._paginator.goToPage(page);
     if (this._continuous) {
       this._syncContinuousSpineIdx(); // seed chapter-relative paging before the first fire
       void this._maybeAppendNextChapter(); // pre-fill if this chapter alone doesn't fill the screen
@@ -487,11 +496,40 @@ export class CXReader {
     this._fireRelocated();
   }
 
-  // Navigate to chapter containing href (path with optional #fragment — fragment ignored).
+  // Navigate to chapter containing href (path with optional #fragment). A fragment resolves to
+  // the exact page of the element it names — not just the chapter start — passed straight
+  // through to goToSpineItem so the jump happens atomically with the initial render (see its
+  // own comment for why that matters). Needed for EPUBs that pack several TOC-level chapters
+  // into one physical spine file, addressed by anchor id rather than one file per chapter:
+  // confirmed live on a real book where every TOC entry pointing into one of those shared files
+  // landed on page 1 of that file regardless of which specific chapter was clicked, because the
+  // fragment used to be dropped outright here.
   async goToHref(href, page = 1) {
     if (!this._book || !this._containerEl) return;
-    const idx = this._spineIndexForHref((href || '').split('#')[0]);
-    if (idx >= 0) await this.goToSpineItem(idx, page);
+    const [hrefBase, anchor] = (href || '').split('#');
+    const idx = this._spineIndexForHref(hrefBase);
+    if (idx < 0) return;
+    await this.goToSpineItem(idx, page, anchor || null);
+  }
+
+  // Shared by goToSpineItem's anchor jump and pageForAnchor below. Looks up an id="..." (or
+  // legacy name="...") element within the chapter that's CURRENTLY rendered.
+  _findAnchorEl(anchorId) {
+    const doc = this._renderer?.iframe?.contentDocument;
+    if (!doc) return null;
+    const id = CSS.escape(String(anchorId));
+    return doc.querySelector(`[id="${id}"], a[name="${id}"]`);
+  }
+
+  // Resolves an anchor id to the page it's actually on within the CURRENTLY rendered chapter,
+  // without navigating there. Null if not found (or no paginator geometry support, e.g.
+  // CBZ/PDF's FixedPagePaginator). Used by reader.js's updateActiveTocItem to work out which
+  // TOC entry is really "active" when several share one physical spine file — see
+  // goToSpineItem's own anchor-jump comment for that scenario.
+  pageForAnchor(anchorId) {
+    if (!this._paginator?.pageForElement) return null;
+    const el = this._findAnchorEl(anchorId);
+    return el ? this._paginator.pageForElement(el) : null;
   }
 
   // Navigate to spine item identified by an epubcfi string (spine component only).

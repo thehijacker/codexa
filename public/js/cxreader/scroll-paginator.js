@@ -143,6 +143,17 @@ export class ScrollPaginator {
     return this._currentPage;
   }
 
+  // Pure calculation of which "page" (viewport-height of scroll — see the file header comment)
+  // el is currently on — does NOT scroll. No transform involved here (real native scroll, not
+  // paginated mode's translateX/Y trick), so getBoundingClientRect() is already safe to read
+  // regardless of current scroll position. Used to disambiguate active TOC entries when several
+  // share one spine file (see reader.js's updateActiveTocItem).
+  pageForElement(el) {
+    if (!el || !this._scrollEl || !this._viewportH) return null;
+    const bodyY = this._bodyY(el.getBoundingClientRect().top);
+    return Math.max(1, Math.min(Math.floor(bodyY / this._viewportH) + 1, this._pageCount));
+  }
+
   destroy() { this._cleanup(); }
 
   // ── Private ───────────────────────────────────────────────────────────────────

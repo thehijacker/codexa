@@ -15,4 +15,5 @@ export class FixedPagePaginator {
   goToLastPage()    {}
   goToElement()     {}
   goToRange()       {}
+  pageForElement()  { return null; } // no anchor concept for CBZ/PDF pages
 }

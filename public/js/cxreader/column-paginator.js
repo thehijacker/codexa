@@ -190,6 +190,24 @@ export class ColumnPaginator {
     return this.goToPage(Math.max(0, col) + 1);
   }
 
+  // Pure calculation of which page el is currently on — does NOT navigate, and (unlike
+  // goToElement above) works from any spread, not just spread 0: transform is reset to
+  // identity for the measurement (same idiom init() itself uses before measuring), since
+  // rect.left would otherwise reflect whatever spread is currently shown, not el's real
+  // position. Used to disambiguate active TOC entries when several share one spine file (see
+  // reader.js's updateActiveTocItem).
+  pageForElement(el) {
+    if (!el) return null;
+    const body = this._iframe?.contentDocument?.body;
+    if (!body) return null;
+    const prevTransform = body.style.transform;
+    body.style.transform = '';
+    const x = el.getBoundingClientRect().left;
+    body.style.transform = prevTransform;
+    const col = Math.round((x - this._padL) / this._colAdvance);
+    return Math.max(0, col) + 1;
+  }
+
   // Navigate to the spread containing range (used for search result jumps).
   // Uses the first client rect of the range so the position is character-exact — precise even
   // for a long paragraph that spans many pages (goToElement would only find the paragraph start).
