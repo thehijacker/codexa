@@ -1,7 +1,7 @@
 // Codexa Service Worker
 // Caches app shell for offline use. EPUBs are cached on demand in BOOKS_CACHE.
 
-const CACHE_VERSION = 'br-v20260821042';
+const CACHE_VERSION = 'br-v20260822002';
 const BOOKS_CACHE   = 'codexa-books-v2';
 const APP_SHELL = [
   '/',
@@ -256,8 +256,11 @@ self.addEventListener('fetch', (e) => {
         if (response.ok) {
           const clone = response.clone();
           caches.open(BOOKS_CACHE).then(c => c.put(e.request, clone));
+          return response;
         }
-        return response;
+        // Non-ok (e.g. a proxy's own error page when the origin server is down) is a
+        // resolved fetch(), not a rejection — fall back to cache same as a real failure.
+        return caches.open(BOOKS_CACHE).then(c => c.match(e.request)).then(r => r || response);
       }).catch(() => caches.open(BOOKS_CACHE).then(c => c.match(e.request)).then(r => r || Response.error()))
     );
     return;
@@ -298,8 +301,17 @@ self.addEventListener('fetch', (e) => {
         if (response.ok && e.request.method === 'GET') {
           const clone = response.clone();
           caches.open(CACHE_VERSION).then(cache => cache.put(e.request, clone));
+          return response;
         }
-        return response;
+        // A non-ok response is still a *successful* fetch() as far as the browser is
+        // concerned — it does NOT reject, so the .catch() below never runs. Confirmed live:
+        // when the whole physical server (not just the app) is down, Cloudflare answers
+        // navigations itself with a real HTTP response (a 521/522/523 "origin unreachable"
+        // page) instead of the connection failing outright. Passing that straight through
+        // showed Cloudflare's own error page instead of the fully offline-capable, already
+        // cached app shell sitting right there unused. Treat it the same as a network
+        // failure and fall back to cache.
+        return cached || response;
       }).catch(() => cached || Response.error());
       return cached || networkFetch;
     })
