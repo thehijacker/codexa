@@ -1149,6 +1149,11 @@ async function restoreResumeState() {
       b.classList.toggle('active', Number(b.dataset.id) === Number(state.itemId));
     });
     loadBooks(state.page || 0);
+    // Mirrors selectItem()'s closeDrawer() — we're restoring straight to an already-picked
+    // item (returning from a peek in the reader), so the mobile drawer that init's openDrawer()
+    // forces open by default should stay closed instead of re-covering the book grid we're
+    // landing back on.
+    closeDrawer();
   }
   return true;
 }

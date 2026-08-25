@@ -1114,8 +1114,12 @@ export async function initOpds() {
   drawerOverlay.addEventListener('click', closeDrawer);
 
   await loadServers();
-  if (!(await restoreResumeState()) && servers.length > 0) {
-    await openServer(servers[0]);
+  const restored = await restoreResumeState();
+  if (!restored) {
+    if (servers.length > 0) await openServer(servers[0]);
+    // Start open on mobile — nothing to browse yet until a server/folder is picked. Skipped on a
+    // successful resume (returning from a peek in the reader): we're already landing on a
+    // specific folder, so re-opening the drawer would just cover the results we're returning to.
+    openDrawer();
   }
-  openDrawer(); // start open on mobile — nothing to browse yet until a server/folder is picked
 }
