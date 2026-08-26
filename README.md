@@ -6,14 +6,16 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 
 > 📜 Licensed under **AGPL-3.0** · 🐳 One-container Docker deploy · 🔒 No cloud, no tracking — your books stay on your server.
 
+> 🤖 The Android app is approved for production on Google Play and will be available soon at [play.google.com/store/apps/details?id=com.codexa.reader](https://play.google.com/store/apps/details?id=com.codexa.reader).
+
 ---
 
 ## Why Codexa?
 
 - **🛠️ Its own rendering engine (CXReader).** Codexa doesn't rely on a generic third-party EPUB library. CXReader is purpose-built for reliability, faithful typography, and rock-solid behaviour on slow **e-ink** screens — so awkward real-world EPUBs, fixed-layout manga, and CBZ/CBR comics all render with the same care.
-- **📚 Books _and_ comics in one library.** First-class EPUB, fixed-layout EPUB, **CBZ & CBR** — no separate apps.
+- **📚 Books _and_ comics in one library.** First-class EPUB (including Kobo's **KEPUB**), fixed-layout EPUB, **CBZ & CBR**, and **PDF** — no separate apps.
 - **🔄 Real two-way KOReader sync.** A built-in KOSync-compatible server keeps your e-reader and your phone on the same page — no extra software, no cloud.
-- **🖥️ Truly works everywhere.** Desktop browsers, mobile PWA, Android APK, and iOS IPA, with a one-tap **Display size** control that scales the UI on everything from phones to big e-ink tablets to desktop monitors.
+- **🖥️ Truly works everywhere.** Desktop browsers, mobile PWA, Android (Google Play or sideloaded APK), and iOS IPA, with a one-tap **Display size** control that scales the UI on everything from phones to big e-ink tablets to desktop monitors.
 - **🔌 Plays well with your stack.** Browse and download from any OPDS catalogue (Calibre-Web, Komga, Kavita, Ubooquity…) and sync whole folders into shelves.
 - **🛰️ Deep BookOrbit integration.** Native library browser, peek books before downloading them, and optional two-way sync of highlights, reading sessions, progress, and status/rating with a self-hosted BookOrbit server.
 - **🏠 Self-hosted and private.** Multi-user, JWT-authenticated, and everything — books, covers, highlights, positions — lives on **your** server.
@@ -41,8 +43,9 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 ## Features
 
 ### Reading
-- **CXReader** — Codexa's own custom-built EPUB engine; replaces epub.js for better reliability and e-ink compatibility
+- **CXReader** — Codexa's own custom-built EPUB engine; replaces epub.js for better reliability and e-ink compatibility; also reads Kobo's **KEPUB** files
 - **CBZ & CBR comic books** — read comic archives directly; two-page spread on desktop; automatic CBR→CBZ conversion; ComicInfo.xml metadata
+- **PDF documents** — read PDFs with the same paginated, two-page-spread, and continuous-scroll engine as comics, including offline caching (no text layer/search — PDFs are treated as page images, like a comic)
 - **Fixed-layout EPUB** — manga, children's books, and art books rendered at pixel-accurate dimensions via CSS transform scaling
 - **Exact position restore** — saves the page number per chapter; reopens on the precise page (not just approximate %)
 - **Peek mode** — open any book read-only without saving your position, including books not yet downloaded from a connected BookOrbit server or OPDS catalogue
@@ -78,7 +81,7 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 ### Offline & Mobile
 - **Offline reading** — download any book to the device; read without internet
 - **PWA** — installable on desktop and mobile; safe-area and notch handling for iOS/Android
-- **Android app** — volume-key page navigation, portrait lock, screen-on toggle, hardware e-ink mode toggle
+- **Android app** — available on [Google Play](https://play.google.com/store/apps/details?id=com.codexa.reader) (coming soon) or as a sideloadable APK; volume-key page navigation, portrait lock, screen-on toggle, hardware e-ink mode toggle, custom HTTP headers on the server connection with SSO login staying inside the app
 - **iOS app** — sideload or install via TestFlight
 - **Responsive layout** — works on phones, tablets, and desktops
 

@@ -44,7 +44,7 @@
 <a data-section="mobile" href="#mobile">Mobile Apps</a>
 <ul class="nav-sub">
 <li><a data-scroll="mobile-pwa" data-section="mobile" href="#mobile-pwa">PWA</a></li>
-<li><a data-scroll="mobile-android" data-section="mobile" href="#mobile-android">Android APK</a></li>
+<li><a data-scroll="mobile-android" data-section="mobile" href="#mobile-android">Android App</a></li>
 <li><a data-scroll="mobile-ios" data-section="mobile" href="#mobile-ios">iOS App</a></li>
 </ul>
 </li><li>
@@ -255,6 +255,12 @@
         browser, install it as a Progressive Web App, or use the dedicated Android and iOS apps. Pick
         up exactly where you left off, on any of them.
       </p>
+<div class="callout">
+<strong>📱 Coming soon to Google Play</strong>
+        The Android app has been approved for production and will soon be available at
+        <a href="https://play.google.com/store/apps/details?id=com.codexa.reader" rel="noopener" target="_blank">play.google.com/store/apps/details?id=com.codexa.reader</a>.
+        Until then, see <a data-section="mobile" data-scroll="mobile-android" href="#mobile-android">Android APK</a> for a sideloadable build.
+      </div>
 <p>
         What sets Codexa apart is <strong>CXReader</strong>, its own purpose-built rendering engine.
         Instead of leaning on a generic third-party EPUB library, Codexa renders books with code
@@ -285,10 +291,10 @@
 <li><strong>Multi-user with JWT authentication</strong> — per-user libraries</li>
 <li><strong>Full offline reading</strong> — via a Service Worker cache</li>
 <li><strong>CXReader</strong> — Codexa's own custom-built EPUB engine for reliable rendering</li>
-<li><strong>Comic book support</strong> — read CBZ and CBR files alongside your EPUB library</li>
+<li><strong>Comic book and PDF support</strong> — read CBZ, CBR, and PDF files alongside your EPUB (and Kobo KEPUB) library</li>
 <li><strong>Built-in KOSync-compatible server</strong> — connect KOReader devices without extra software</li>
 <li><strong>OPDS catalog browser</strong> — for Calibre-Web, Book Orbit, Booklore Komga, Kavita, and others; downloads books directly</li>
-<li><strong>Works on any device</strong> — desktop browsers, mobile PWA, Android APK, iOS IPA</li>
+<li><strong>Works on any device</strong> — desktop browsers, mobile PWA, Android (Google Play or APK), iOS IPA</li>
 <li><strong>Optimised for e-ink displays</strong> — BOOX, Kobo, and similar</li>
 </ul>
 <a class="back-top" href="#about">↑ Top</a>
@@ -301,8 +307,9 @@
 <div class="feature-card">
 <h3>📖 Reading</h3>
 <ul>
-<li><strong>CXReader</strong> — Codexa's own EPUB engine; reflowable, fixed-layout, and comic book formats</li>
+<li><strong>CXReader</strong> — Codexa's own EPUB engine; reflowable, fixed-layout, comic, and PDF formats; also reads Kobo's KEPUB files</li>
 <li><strong>CBZ &amp; CBR comic books</strong> — two-page spread on desktop, ComicInfo.xml metadata, theme-aware background</li>
+<li><strong>PDF documents</strong> — same paginated/two-page-spread/continuous-scroll engine as comics, with offline caching</li>
 <li><strong>Fixed-layout EPUB</strong> — manga, children's books, and art books at pixel-accurate dimensions</li>
 <li><strong>Paginated layout</strong> — with configurable margins and columns</li>
 <li><strong>Exact position restore</strong> — reopens at the precise page, not just an approximate percentage</li>
@@ -349,7 +356,7 @@
 <ul>
 <li><strong>Download any book for offline reading</strong> — via Service Worker cache</li>
 <li><strong>PWA</strong> — installable on desktop and mobile</li>
-<li><strong>Android app</strong> — with volume-key navigation, portrait lock, hardware e-ink toggle</li>
+<li><strong>Android app</strong> — on Google Play (coming soon) or sideloadable APK, with volume-key navigation, portrait lock, hardware e-ink toggle, and custom HTTP headers with in-app SSO login</li>
 <li><strong>iOS app</strong> — IPA file sideload (work in progress)</li>
 <li><strong>Responsive layout</strong> — for phones, tablets, and desktops</li>
 </ul>
@@ -602,12 +609,18 @@ npm start</code></pre>
 <figcaption>Mobile reader</figcaption>
 </figure>
 </div>
-<h2 id="mobile-android">Android APK</h2>
+<h2 id="mobile-android">Android App</h2>
 <p>
-        The Android APK is a native wrapper that integrates Codexa with hardware features not
+        The Android app is a native wrapper that integrates Codexa with hardware features not
         available in a browser.
       </p>
-<h3>Installation</h3>
+<div class="callout">
+<strong>📱 Coming soon to Google Play</strong>
+        The app has been approved for production and will soon be available at
+        <a href="https://play.google.com/store/apps/details?id=com.codexa.reader" rel="noopener" target="_blank">play.google.com/store/apps/details?id=com.codexa.reader</a>.
+        Until then, use the sideloadable APK below.
+      </div>
+<h3>Installation (Sideload)</h3>
 <ol class="steps">
 <li>Download the APK from the <a href="https://codeberg.org/thj/codexa/releases" id="dyn-releases-link" rel="noopener" target="_blank">Codeberg Releases</a> page.</li>
 <li>On your Android device, go to <strong>Settings → Security</strong> (or <em>Apps → Special app access</em>) and enable <strong>Install from unknown sources</strong> for your browser or file manager.</li>
@@ -624,6 +637,14 @@ npm start</code></pre>
         The URL input screen has an <strong>E-ink mode</strong> toggle. When enabled, Codexa
         applies a grayscale colour filter system-wide, increases contrast, and disables animations.
         This setting is saved across restarts.
+      </p>
+<h3>Custom HTTP Headers</h3>
+<p>
+        The server selection screen also lets you add custom HTTP headers to every request the
+        app makes — useful behind a reverse proxy or SSO gateway that requires an extra header
+        (e.g. an API key or a trusted-header auth scheme). If your server uses OIDC/SSO login,
+        the whole login flow stays inside the app's own WebView instead of escaping to the system
+        browser, so those custom headers still apply throughout.
       </p>
 <h3>Hardware Features</h3>
 <ul>
@@ -2604,8 +2625,10 @@ staticPasswords:
 <p class="section-subtitle">Codexa's own custom-built EPUB and comic rendering library</p>
 <p>
         CXReader is the EPUB reading engine built entirely within Codexa. It is responsible for
-        parsing, rendering, and paginating every book — reflowable EPUBs, fixed-layout EPUBs, and
-        CBZ/CBR comics — with <strong>zero external dependencies</strong>.
+        parsing, rendering, and paginating every book — reflowable EPUBs (including Kobo's KEPUB
+        variant), fixed-layout EPUBs, CBZ/CBR comics, and PDFs — with
+        <strong>zero external dependencies</strong> (PDF.js is the one exception, used purely for
+        page rendering).
       </p>
 <h2 id="cxreader-why">Why We Built It</h2>
 <p>
@@ -2619,9 +2642,9 @@ staticPasswords:
       </p>
 <p>
         Building our own engine also let Codexa support things a generic EPUB renderer does not:
-        <strong>CBZ/CBR comic books</strong>, pixel-accurate <strong>fixed-layout EPUBs</strong>,
-        exact per-page position restore, and precise CFI annotations — all handled directly inside
-        CXReader.
+        <strong>CBZ/CBR comic books</strong>, <strong>PDF documents</strong>, pixel-accurate
+        <strong>fixed-layout EPUBs</strong>, exact per-page position restore, and precise CFI
+        annotations — all handled directly inside CXReader.
       </p>
 <h2 id="cxreader-features">Engine Highlights</h2>
 <div class="table-wrap">
@@ -2647,6 +2670,14 @@ staticPasswords:
 <tr>
 <td><strong>Comic books (CBZ/CBR)</strong></td>
 <td>Full support: image-only ZIP/RAR archives rendered full-screen, with a two-page spread on desktop</td>
+</tr>
+<tr>
+<td><strong>PDF documents</strong></td>
+<td>Pages rendered via PDF.js into the same paginated/two-page-spread/continuous-scroll pipeline as comics; treated as page images (no text layer or in-PDF search)</td>
+</tr>
+<tr>
+<td><strong>KEPUB</strong></td>
+<td>Kobo's EPUB variant opens directly — no separate handling needed, it's a standard EPUB under the hood</td>
 </tr>
 <tr>
 <td><strong>Annotation CFI precision</strong></td>
