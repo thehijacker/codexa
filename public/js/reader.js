@@ -6559,8 +6559,15 @@ function goNext() {
   // (see CXReader.next() in cxreader/index.js). Re-show the "book finished" overlay (with its
   // own "return to library" option) instead of doing nothing, since the automatic one-time
   // overlay from _cxRelocatedHandler may already have been dismissed by now.
+  // Must use _cxReader's own raw page/pageCount here, NOT currentChapPage/currentChapTotal —
+  // those get rescoped to the virtual TOC sub-chapter span when several chapters share one
+  // physical spine file (see _cxRelocatedHandler's resolveActiveTocEntry call). On a book whose
+  // LAST spine file packs many anchor-based chapters together, that made finishing just the
+  // first sub-chapter in that file look like "the true end of book" — confirmed live.
   const spineTotal = _cxReader?.spine?.length || 0;
-  const atBookEnd = currentChapTotal > 0 && currentChapPage >= currentChapTotal
+  const physPage = _cxReader?.page ?? 1;
+  const physPageCount = _cxReader?.pageCount ?? 1;
+  const atBookEnd = physPageCount > 0 && physPage >= physPageCount
     && spineTotal > 0 && currentSpineIndex === spineTotal - 1;
   if (atBookEnd) { showBookFinishedOverlay(); return; }
   _pageExit('next');
