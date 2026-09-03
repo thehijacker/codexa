@@ -48,6 +48,8 @@
   "sidebar.logout": "Odjava",
   "sidebar.github": "Codexa na GitHubu",
   "sidebar.logout_offline_warning": "Brez interneta se ne boste mogli znova prijaviti. Se vseeno odjavite?",
+  "sidebar.check_update_confirm": "Znova naložim aplikacijo za preverjanje nove različice? Prenesene knjige in nastavitve branja ne bodo prizadete.",
+  "sidebar.check_update_reload": "Znova naloži",
   "sidebar.appearance": "Videz",
   "sidebar.theme_day": "Svetlo",
   "sidebar.theme_night": "Temno",

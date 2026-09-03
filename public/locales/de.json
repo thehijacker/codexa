@@ -48,6 +48,8 @@
   "sidebar.logout": "Abmelden",
   "sidebar.github": "Codexa auf GitHub",
   "sidebar.logout_offline_warning": "Sie sind offline. Sie benötigen Internet, um sich erneut anzumelden. Trotzdem abmelden?",
+  "sidebar.check_update_confirm": "App neu laden, um nach einer neuen Version zu suchen? Ihre heruntergeladenen Bücher und Leseeinstellungen bleiben unberührt.",
+  "sidebar.check_update_reload": "Neu laden",
   "sidebar.appearance": "Erscheinungsbild",
   "sidebar.theme_day": "Hell",
   "sidebar.theme_night": "Dunkel",

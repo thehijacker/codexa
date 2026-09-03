@@ -649,13 +649,23 @@ async function fetchAsset(userId, ctx, path) {
 // client wants a real byte progress bar (see server/routes/bookorbit.js's import-sse route).
 // fetchAsset itself stays untouched (still used for small, progress-irrelevant assets like
 // cover thumbnails) rather than growing an optional-callback parameter everywhere.
-async function fetchAssetStream(userId, ctx, path, onProgress) {
+//
+// `abandonSignal` is optional: the caller's own "client went away" signal (e.g. the import-sse
+// route's req.on('close')). Wiring it into the same controller that drives the idle timeout
+// means a client disconnect stops this download immediately, instead of it running to
+// completion in the background against nobody — which was the root cause of a real crash (see
+// import-sse's own comment).
+async function fetchAssetStream(userId, ctx, path, onProgress, abandonSignal) {
   if (!tokens.has(userId)) {
     try { await login(userId, ctx); } catch { return { ok: false }; }
   }
   // An idle timeout (armed here, re-armed on every chunk below), not AbortSignal.timeout's
   // fixed deadline — see STREAM_IDLE_TIMEOUT_MS above for why.
   const controller = new AbortController();
+  if (abandonSignal) {
+    if (abandonSignal.aborted) controller.abort();
+    else abandonSignal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
   let idleTimer;
   const armIdleTimer = () => {
     clearTimeout(idleTimer);

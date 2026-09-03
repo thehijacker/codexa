@@ -48,6 +48,8 @@
   "sidebar.logout": "Cerrar sesión",
   "sidebar.github": "Codexa en GitHub",
   "sidebar.logout_offline_warning": "Estás sin conexión. Necesitarás internet para volver a iniciar sesión. ¿Cerrar sesión de todos modos?",
+  "sidebar.check_update_confirm": "¿Recargar la aplicación para buscar una nueva versión? Tus libros descargados y ajustes de lectura no se verán afectados.",
+  "sidebar.check_update_reload": "Recargar",
   "sidebar.appearance": "Apariencia",
   "sidebar.theme_day": "Claro",
   "sidebar.theme_night": "Oscuro",

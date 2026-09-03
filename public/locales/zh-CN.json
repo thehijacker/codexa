@@ -48,6 +48,8 @@
   "sidebar.logout": "退出登录",
   "sidebar.github": "GitHub 上的 Codexa",
   "sidebar.logout_offline_warning": "您处于离线状态。重新登录需要网络连接。确定要退出吗？",
+  "sidebar.check_update_confirm": "重新加载应用以检查新版本？已下载的书籍和阅读设置不会受到影响。",
+  "sidebar.check_update_reload": "重新加载",
   "sidebar.appearance": "外观",
   "sidebar.theme_day": "浅色",
   "sidebar.theme_night": "深色",

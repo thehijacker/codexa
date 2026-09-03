@@ -8,7 +8,7 @@ import { stripImageWhiteBackgrounds } from './img-bg-fix.js';
 import { createComicViewer } from './comic-viewer.js';
 import { renderPdfCoverBlob, uploadPdfCover } from './pdf-cover.js';
 
-const READER_BUILD = 'br-v89-cxreader-only';
+const READER_BUILD = 'br-v93-bookfinished-twocol-fix';
 const _i18nReady = initI18n();
 log('[codexa] reader build', READER_BUILD);
 
@@ -5953,8 +5953,14 @@ function _cxRelocatedHandler(e) {
     // True end of book — CXReader's pct is a page-fraction that never actually reaches 1.0
     // (see server/utils/bookCompletion.js), so detect the real last page directly instead:
     // last page of the last spine item. Not shown in peek mode (peek never saves progress).
+    // In two-column mode `page` is only the LEFT page of the current spread — on a book whose
+    // last spread starts at an odd page and pageCount is even (e.g. page=191/pageCount=192),
+    // `page` alone never reaches pageCount even though the spread's right-hand page (endPage)
+    // is the actual last page on screen. Confirmed live: this silently ate the "book finished"
+    // notification on a two-column read. endPage is 0 in single-column mode, hence the `||`.
     const spineTotal = _cxReader?.spine?.length || 0;
-    const atBookEnd = pageCount > 0 && page >= pageCount && spineTotal > 0 && spineIndex === spineTotal - 1;
+    const lastVisiblePage = Math.max(page, endPage || 0);
+    const atBookEnd = pageCount > 0 && lastVisiblePage >= pageCount && spineTotal > 0 && spineIndex === spineTotal - 1;
     if (atBookEnd && !_finishedMessageShown && !isPeekMode) {
       _finishedMessageShown = true;
       saveProgress({ forceRemote: true }).catch(() => {});
@@ -6287,7 +6293,7 @@ async function startCXRendition(displayCfi = null) {
     // has no query string of its own otherwise, so it can go stale independently of reader.js
     // (browser/SW cache keys purely on URL) even when reader.js itself is freshly fetched.
     // Bump this alongside reader.html's ?v= whenever cxreader/index.js changes.
-    const { CXReader } = await import('./cxreader/index.js?v=br-v116');
+    const { CXReader } = await import('./cxreader/index.js?v=br-v120');
     _cxReader = new CXReader();
     _cxReader.onBeforePaginate = (iframe) => { _cxApplyIframeInset(iframe); _cxApplyHooks(iframe); };
 
@@ -6564,8 +6570,10 @@ function goNext() {
   // physical spine file (see _cxRelocatedHandler's resolveActiveTocEntry call). On a book whose
   // LAST spine file packs many anchor-based chapters together, that made finishing just the
   // first sub-chapter in that file look like "the true end of book" — confirmed live.
+  // Same two-column spread caveat as _cxRelocatedHandler's atBookEnd check above: `page` alone
+  // is only the spread's left page, so use whichever of page/endPage is further along.
   const spineTotal = _cxReader?.spine?.length || 0;
-  const physPage = _cxReader?.page ?? 1;
+  const physPage = Math.max(_cxReader?.page ?? 1, _cxReader?.endPage || 0);
   const physPageCount = _cxReader?.pageCount ?? 1;
   const atBookEnd = physPageCount > 0 && physPage >= physPageCount
     && spineTotal > 0 && currentSpineIndex === spineTotal - 1;

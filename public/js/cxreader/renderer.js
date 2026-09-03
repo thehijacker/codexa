@@ -73,6 +73,7 @@ export class ChapterRenderer {
 
     const raw = await fetch(spineItem.blobUrl).then(r => r.text());
     const frag = new DOMParser().parseFromString(this._xhtmlToHtml(raw), 'text/html');
+    this._sanitizeDoc(frag);
     frag.querySelectorAll('base').forEach(el => el.remove());
 
     const chapterBase = spineItem.absPath.includes('/')
@@ -108,6 +109,29 @@ export class ChapterRenderer {
     if (this._srcBlobUrl) { URL.revokeObjectURL(this._srcBlobUrl); this._srcBlobUrl = null; }
   }
 
+  // Book content is untrusted input (any EPUB/CBZ a user uploads, imports via OPDS, or shares
+  // with family members) rendered into an iframe with `allow-same-origin allow-scripts` (needed
+  // so our own link-intercept script and CSS can run/apply — see below). That combination means
+  // anything left in the book's own HTML that can execute — a <script>, an on* handler, a
+  // javascript: URL, a nested <iframe>/<object>/<embed>, a <form> posting somewhere — would run
+  // with full access to this page (window.parent), including the logged-in user's auth token.
+  // Real books never legitimately need any of these for reading, so they're stripped outright
+  // rather than sanitized-in-place. Called on every fresh parse, before anything else touches
+  // the document (including the e-ink pre-render pass below, which only needs layout/CSS).
+  _sanitizeDoc(doc) {
+    doc.querySelectorAll('script, iframe, object, embed, form').forEach(el => el.remove());
+    doc.querySelectorAll('*').forEach(el => {
+      for (const attr of [...el.attributes]) {
+        const name = attr.name.toLowerCase();
+        if (name.startsWith('on')) { el.removeAttribute(attr.name); continue; }
+        if ((name === 'href' || name === 'src' || name === 'xlink:href' || name === 'action')
+            && /^\s*javascript:/i.test(attr.value)) {
+          el.removeAttribute(attr.name);
+        }
+      }
+    });
+  }
+
   async _buildHtml(spineItem, readerCss, fixedLayout = null) {
     // Fetch chapter source via blob URL
     const raw = await fetch(spineItem.blobUrl).then(r => r.text());
@@ -115,6 +139,7 @@ export class ChapterRenderer {
     // Parse as HTML (handles both HTML5 and XHTML spine items). Reassigned below (e-ink
     // only) to a live document if the pre-render white-background pass runs.
     let doc = new DOMParser().parseFromString(this._xhtmlToHtml(raw), 'text/html');
+    this._sanitizeDoc(doc);
 
     // Remove any <base> tags — we resolve URLs ourselves
     doc.querySelectorAll('base').forEach(el => el.remove());
@@ -197,15 +222,13 @@ export class ChapterRenderer {
     // Intercept in-book link clicks — post href to parent so CXReader can navigate.
     // Without this, clicking <a href="chapter.xhtml"> navigates the iframe to a
     // blob-unresolvable URL and the browser blocks it with about:blank#blocked.
+    // Loaded as an external, same-origin <script src> rather than inlined here: the app's
+    // Content-Security-Policy (script-src 'self') only allows same-origin script FILES inside
+    // book content, deliberately with no exception for inline/nonce'd scripts there (unlike the
+    // app's own top-level pages) — book HTML is untrusted (see _sanitizeDoc), so nothing about
+    // rendering it should require carving out an inline-script allowance.
     const linkScript = doc.createElement('script');
-    linkScript.textContent = `document.addEventListener('click',function(e){
-  var a=e.target&&e.target.closest&&e.target.closest('a[href]');
-  if(!a)return;
-  var h=a.getAttribute('href');
-  if(!h||h.charAt(0)==='#'||h.indexOf('javascript:')===0)return;
-  e.preventDefault();e.stopPropagation();
-  try{window.parent.postMessage({type:'cx-link',href:h},'*');}catch(ex){}
-},true);`;
+    linkScript.src = '/js/cxreader/link-intercept.js';
     doc.body.appendChild(linkScript);
 
     const html = '<!DOCTYPE html>' + doc.documentElement.outerHTML;

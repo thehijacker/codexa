@@ -338,13 +338,13 @@ router.delete('/books/:boBookId/collections/:collectionId', async (req, res) => 
 // collection/smart-scope sync route below — never writes to `res` itself, just returns a result.
 const SUPPORTED_FORMATS = new Set(['epub', 'cbz', 'cbr', 'pdf']);
 
-async function importBookOrbitFile(userId, ctx, { boBookId, fileId, format, title, author, seriesName, seriesIndex, language, onProgress }) {
+async function importBookOrbitFile(userId, ctx, { boBookId, fileId, format, title, author, seriesName, seriesIndex, language, onProgress, abandonSignal }) {
   const clientFormat = String(format || '').toLowerCase();
   if (clientFormat && !SUPPORTED_FORMATS.has(clientFormat)) {
     return { ok: false, status: 400, error: 'error.epub_required' };
   }
 
-  const asset = await bookorbit.fetchAssetStream(userId, ctx, `/books/files/${fileId}/download`, onProgress);
+  const asset = await bookorbit.fetchAssetStream(userId, ctx, `/books/files/${fileId}/download`, onProgress, abandonSignal);
   if (!asset.ok) return { ok: false, status: 502, error: 'error.bookorbit_unreachable' };
 
   const buf = asset.buffer;
@@ -439,13 +439,19 @@ router.post('/books/:boBookId/import', async (req, res) => {
   const { fileId, format, title, author, seriesName, seriesIndex, language } = req.body || {};
   if (!fileId) return res.status(400).json({ error: 'error.file_id_required' });
 
+  // Same client-disconnect handling as import-sse below: stop the (potentially large)
+  // background download rather than let it run to completion for a client that already left.
+  const abortController = new AbortController();
+  req.on('close', () => abortController.abort());
+
   try {
-    const result = await importBookOrbitFile(req.user.id, ctx, { boBookId, fileId, format, title, author, seriesName, seriesIndex, language });
+    const result = await importBookOrbitFile(req.user.id, ctx, { boBookId, fileId, format, title, author, seriesName, seriesIndex, language, abandonSignal: abortController.signal });
+    if (res.writableEnded) return; // client already gone — nothing left to respond to
     if (!result.ok) return res.status(result.status || 500).json({ error: result.error, id: result.id });
     res.status(201).json({ id: result.id, title: result.title, author: result.author });
   } catch (err) {
     console.error('[bookorbit] import error:', err.message);
-    res.status(500).json({ error: err.message });
+    if (!res.writableEnded) res.status(500).json({ error: err.message });
   }
 });
 
@@ -471,11 +477,28 @@ router.get('/books/:boBookId/import-sse', async (req, res) => {
     'X-Accel-Buffering': 'no', // defeat nginx/reverse-proxy response buffering if present
   });
   res.flushHeaders();
-  const send = (obj) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(obj)}\n\n`); };
+
+  // Track the client going away (e.g. the phone loses connection mid-download) so this
+  // request stops both writing to a dead socket AND downloading in the background for
+  // nobody. Without this, a disconnect-then-retry left the original download running to
+  // completion unseen, then crashed the whole process trying to report back to a closed
+  // connection — see server/index.js's uncaughtException handler comment for the full story.
+  let clientGone = false;
+  const abortController = new AbortController();
+  req.on('close', () => { clientGone = true; abortController.abort(); });
+  // Belt-and-suspenders: if a write below still somehow throws (e.g. a disconnect that lands
+  // in the narrow window between the writableEnded check and the write itself), swallow it
+  // here rather than let it become an unhandled 'error' event.
+  res.on('error', () => {});
+  const send = (obj) => {
+    if (clientGone || res.writableEnded) return;
+    try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch { /* client gone mid-write */ }
+  };
 
   try {
     const result = await importBookOrbitFile(req.user.id, ctx, {
       boBookId, fileId, format, title, author, seriesName, seriesIndex, language,
+      abandonSignal: abortController.signal,
       onProgress: (loaded, total) => send({ type: 'progress', loaded, total }),
     });
     if (!result.ok) {
@@ -487,7 +510,7 @@ router.get('/books/:boBookId/import-sse', async (req, res) => {
     console.error('[bookorbit] import-sse error:', err.message);
     send({ type: 'error', message: err.message });
   } finally {
-    if (!res.writableEnded) res.end();
+    if (!clientGone && !res.writableEnded) res.end();
   }
 });
 

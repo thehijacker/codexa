@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const cors = require('cors');
 const compression = require('compression');
 const { initDb, closeDb, DATA_DIR } = require('./db');
@@ -25,6 +26,23 @@ const { installConsolePrefix } = require('./utils/logger');
 
 // Prefix every log line with a local timestamp + the current user (when known).
 installConsolePrefix();
+
+// Last-resort safety net. Without this, ANY unhandled error anywhere in the app (a stray
+// write to a socket the client already closed, a rejected promise nobody attached a .catch
+// to, etc.) crashes this entire process — and since this process is the whole container,
+// that means every user's session dies too, not just the one request that went wrong.
+// Confirmed live cause of a real "container exited with code 132" crash: /api/bookorbit's
+// import-sse route (server/routes/bookorbit.js) writing an SSE progress event to a response
+// whose client had already disconnected, with nothing listening for the resulting error.
+// That specific case is now also fixed at the source (req.on('close') there), but this stays
+// as the backstop for the next unforeseen one — log loudly and keep serving everyone else,
+// rather than let one bad request take the whole app down.
+process.on('uncaughtException', (err) => {
+  console.error('[fatal] uncaughtException (process kept alive):', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal] unhandledRejection (process kept alive):', reason);
+});
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -77,6 +95,17 @@ if (process.env.CORS_ORIGIN) {
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false }));
 
+// ── Baseline security headers (every response) ─────────────────────────────────
+// The heavier, nonce-bearing Content-Security-Policy is set per-HTML-page below (it needs a
+// fresh nonce per request); these three are cheap, meaningful on every response type (not just
+// HTML), and never need per-request state.
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');           // blocks MIME-sniffing a served file into something executable
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');                // legacy clickjacking guard, belt-and-suspenders with frame-ancestors below
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
 // ── Browser-friendly module fallback for vendored Flow imports
 app.use((req, res, next) => {
   if (req.method !== 'GET') return next();
@@ -118,22 +147,69 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── Debug flag injection ──────────────────────────────────────────────────────
+// ── Debug flag injection + per-page Content-Security-Policy ────────────────────
 // Injects the DEBUG flag into HTML files (window.__DEBUG) and sw.js (__DEBUG).
 // Set DEBUG=true in .env to enable verbose frontend console logging.
 const CLIENT_DEBUG = process.env.DEBUG === 'true';
-const _htmlSnippet = `<script>window.__DEBUG=${CLIENT_DEBUG};</script>`;
 const _swSnippet   = `const __DEBUG=${CLIENT_DEBUG};\n`;
 
+// Matches every <script> tag that has no src= attribute — i.e. every inline script block in
+// our own HTML shells (a handful of small first-party snippets per page: the anti-FOUC
+// visibility toggle, feature detection, the debug flag, etc.) so each can be tagged with the
+// per-request nonce below. <script src="..."> tags are left alone — same-origin script FILES
+// are already covered by script-src 'self', nonce or not.
+const INLINE_SCRIPT_RE = /<script(?![^>]*\bsrc=)([^>]*)>/gi;
+
+// Every external origin this app's own pages legitimately talk to. Everything else (including
+// book content, rendered separately into a sandboxed iframe — see cxreader/renderer.js's
+// _sanitizeDoc for that side of the defense) has no reason to run script, load a stylesheet
+// from, or connect out to anywhere but this server itself.
+const GITHUB_API = 'https://api.github.com';
+
+function buildCsp(nonce) {
+  return [
+    `default-src 'self'`,
+    `script-src 'self' 'nonce-${nonce}'`,
+    // Inline STYLE is left permissive: reader themes/fonts are applied via JS-created <style>
+    // elements with no server-issued nonce to give them, and CSS-only injection is a far
+    // narrower, lower-value attack surface than script — not worth the functional risk here.
+    `style-src 'self' 'unsafe-inline'`,
+    `img-src 'self' data: blob:`,
+    `font-src 'self' data: blob:`,
+    `media-src 'self' blob:`,   // some EPUBs embed <audio>/<video>, rewritten to blob: URLs too
+    // blob: is required here (not just in frame-src below): the EPUB/CBZ parser fetch()es
+    // each resource — chapter HTML, images, stylesheets — from blob: URLs it created via
+    // URL.createObjectURL, from the top-level page's own JS, not from inside the book iframe.
+    `connect-src 'self' blob: ${GITHUB_API}`,
+    `frame-src 'self' blob:`,   // book content renders into a blob: iframe (cxreader/renderer.js)
+    `worker-src 'self'`,        // pdf.js's worker is a same-origin vendored file
+    `object-src 'none'`,
+    `base-uri 'self'`,
+    `form-action 'self'`,
+    `frame-ancestors 'self'`,
+  ].join('; ');
+}
+
 app.use((req, res, next) => {
-  const filePath = path.resolve(SERVE_DIR, '.' + req.path);
+  // express.static resolves a bare directory request ("/") to its index.html itself, which
+  // would otherwise skip this middleware entirely (req.path stays "/", which is neither
+  // *.html nor /sw.js below) — meaning the app's actual entry page would ship with no CSP
+  // and no debug-flag injection. Map it to the real file explicitly instead.
+  const reqPath  = req.path.endsWith('/') ? req.path + 'index.html' : req.path;
+  const filePath = path.resolve(SERVE_DIR, '.' + reqPath);
   if (!filePath.startsWith(SERVE_DIR) || !fs.existsSync(filePath)) return next();
 
-  if (req.path.endsWith('.html')) {
-    const html = fs.readFileSync(filePath, 'utf8').replace('<head>', '<head>\n  ' + _htmlSnippet);
+  if (reqPath.endsWith('.html')) {
+    const nonce = crypto.randomBytes(16).toString('base64');
+    // Insert the debug snippet plain (no nonce of its own) — the blanket replace just below
+    // tags EVERY inline script, this one included, exactly once, from one code path.
+    let html = fs.readFileSync(filePath, 'utf8')
+      .replace('<head>', `<head>\n  <script>window.__DEBUG=${CLIENT_DEBUG};</script>`);
+    html = html.replace(INLINE_SCRIPT_RE, (_m, attrs) => `<script nonce="${nonce}"${attrs}>`);
+    res.setHeader('Content-Security-Policy', buildCsp(nonce));
     return res.type('html').send(html);
   }
-  if (req.path === '/sw.js') {
+  if (reqPath === '/sw.js') {
     const js = fs.readFileSync(filePath, 'utf8');
     return res.type('js').send(_swSnippet + js);
   }

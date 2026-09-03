@@ -48,6 +48,8 @@
   "sidebar.logout": "Sign out",
   "sidebar.github": "Codexa on GitHub",
   "sidebar.logout_offline_warning": "You are offline. You will need internet to log back in. Sign out anyway?",
+  "sidebar.check_update_confirm": "Reload the app to check for a new version? Your downloaded books and reading settings won't be affected.",
+  "sidebar.check_update_reload": "Reload",
   "sidebar.appearance": "Appearance",
   "sidebar.theme_day": "Light",
   "sidebar.theme_night": "Dark",

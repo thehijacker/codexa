@@ -90,6 +90,28 @@ export class CXReader {
     this._continuousRenderToken = 0;
     // Called with (iframe) before paginator.init() — use to inject bionic/annotations
     this.onBeforePaginate = null;
+    // Exact round-trip position memory for setLayout's resize/rotate handling — see
+    // _computeSig/setLayout's own comment for why this exists alongside the anchor-element
+    // fallback. Keyed by a string signature of (spine item, viewport size, column/gap/continuous
+    // settings); value is the paginator's currentPage the LAST time that exact geometry was left.
+    this._pageMemo = new Map();
+    this._paginatorSig = null; // signature the paginator is CURRENTLY laid out for (see _initPaginator)
+  }
+
+  // String key identifying "this spine item, laid out at this exact viewport size with these
+  // exact column/gap/continuous settings" — pagination is a deterministic function of exactly
+  // these inputs (same content + same CSS + same geometry always breaks pages the same way), so
+  // two visits with an identical signature are guaranteed to have an identical pageCount/page
+  // layout. Read at call time from the CURRENT iframe/flags — see setLayout for why the OLD
+  // signature must instead come from the previously-stored this._paginatorSig, not a fresh call
+  // to this method (by the time a resize handler runs, the iframe already has the NEW size).
+  _computeSig() {
+    // Rounded to the nearest 2px: absorbs sub-pixel jitter some browsers introduce on an
+    // orientation round trip (e.g. a URL bar show/hide shaving a pixel off) without any real
+    // risk of collision — a genuinely different orientation/size differs by hundreds of px.
+    const w = Math.round((this._renderer?.iframe?.clientWidth  || 0) / 2) * 2;
+    const h = Math.round((this._renderer?.iframe?.clientHeight || 0) / 2) * 2;
+    return `${this._spineIdx}|${w}x${h}|${this._twoColumn ? 2 : 1}|${this._columnGap || 0}|${this._continuous ? 1 : 0}`;
   }
 
   // The CSS-column engine drives both modes: 1 column (single) or 2 columns (spread). It is used
@@ -151,6 +173,10 @@ export class CXReader {
     }
     const res = this._paginator.init(iframe, this._paginatorOpts());
     this._scheduleFontReflow();
+    // Record which geometry the paginator now reflects — read AFTER init so the iframe's size
+    // and this._twoColumn/columnGap/continuous are whatever they actually just got laid out
+    // with (setLayout may have just changed any of them). See setLayout for how this is used.
+    this._paginatorSig = this._computeSig();
     return res;
   }
 
@@ -310,9 +336,60 @@ export class CXReader {
     this._continuousChapterPageCount = pageCount;
   }
 
+  // The actual DOM element currently sitting at the top-left of the viewport, found by hit-
+  // testing the LIVE rendered page (whatever transform/scroll the current paginator has applied)
+  // rather than reading any paginator-internal geometry — works identically across every
+  // paginator type (translateY, translateX/columns, native scroll) with no special-casing.
+  // Used by setLayout to re-find the reading position by real content instead of by page
+  // fraction — see its own comment for why that distinction matters.
+  _visibleAnchorEl() {
+    const doc = this._renderer?.iframe?.contentDocument;
+    if (!doc) return null;
+    const w = this._renderer.iframe.clientWidth  || 0;
+    const h = this._renderer.iframe.clientHeight || 0;
+    // A few probe points near the top-left, in case the exact pixel lands on whitespace/margin
+    // rather than a real node (elementFromPoint returns null/html/body there).
+    const probes = [
+      [Math.max(1, Math.round(w * 0.1)), Math.max(1, Math.round(h * 0.1))],
+      [Math.max(1, Math.round(w * 0.5)), Math.max(1, Math.round(h * 0.1))],
+      [Math.max(1, Math.round(w * 0.1)), Math.max(1, Math.round(h * 0.3))],
+    ];
+    for (const [x, y] of probes) {
+      const el = doc.elementFromPoint(x, y);
+      if (el && el !== doc.body && el !== doc.documentElement) return el;
+    }
+    return null;
+  }
+
   // Switch column mode / gap / continuous-vs-paginated. Stores the setting and, if a chapter
-  // is live, re-paginates at the current reading position (preserved by fraction so it
-  // survives the engine swap either direction).
+  // is live, re-paginates at the current reading position.
+  //
+  // Three-tier fallback for WHERE that position lands in the new layout, from most to least
+  // precise:
+  //   1. Exact page-number memo (this._pageMemo/this._paginatorSig/_computeSig): if this EXACT
+  //      geometry (spine item + viewport size + column/gap/continuous settings) has been
+  //      paginated before, pagination is deterministic — the same page number is guaranteed
+  //      correct again. This is what makes a portrait → landscape → portrait round trip land
+  //      back on the exact original page: the portrait signature was recorded on the way OUT,
+  //      and matches exactly on the way back in, however many hops happened in between.
+  //   2. Anchor element (_visibleAnchorEl + the new paginator's own goToElement): geometry never
+  //      seen before (e.g. the very first time at this size) — re-find the actual DOM element
+  //      that was visible before the change and navigate to wherever IT lands now. Best-effort,
+  //      but keyed to real content rather than a page number.
+  //   3. Page-fraction (currentPage/pageCount rescaled to the new pageCount): last resort, only
+  //      when no anchor element could be found at all (e.g. an empty/near-empty chapter). NOT
+  //      good enough as the ONLY mechanism — it rounds (Math.floor) on every call, and a resize
+  //      fires setLayout multiple times in a row (a rotation round trip fires it twice), each
+  //      conversion compounding the last one's rounding error. Confirmed live: page 3 of 10
+  //      landed on page 2 of 10 after just one rotation round trip using this method alone.
+  //
+  // The memo (tier 1) is deliberately wiped by next()/prev()/goToSpineItem() — ANY real page
+  // turn, not just a chapter change — because a memo entry only means "this page, at this exact
+  // geometry, as of whenever it was recorded." Without clearing it, reading forward in portrait
+  // past a landscape visit from earlier in the session, then rotating to landscape again, would
+  // resurrect that stale old landscape page instead of the new current position — confirmed
+  // live ("it opened a page in the middle of the chapter, where I was last time in landscape").
+  // setLayout itself must never clear it — it's the one place that WRITES to it.
   async setLayout({ twoColumn, columnGap, continuous } = {}) {
     if (typeof twoColumn === 'boolean') this._twoColumn = twoColumn;
     if (typeof columnGap === 'number')  this._columnGap = columnGap;
@@ -339,15 +416,35 @@ export class CXReader {
     }
     const iframe = this._renderer?.iframe;
     if (!iframe || !this._paginator) return;
+    // Remember the page we're LEAVING, keyed by the exact geometry it was laid out for (see
+    // _computeSig) — this._paginatorSig is that geometry's signature, set by the _initPaginator
+    // call that produced the CURRENT layout (whether that was the initial render or a previous
+    // setLayout). A later return to this exact signature (e.g. rotating back to the original
+    // orientation) can then restore this page NUMBER exactly, with zero rounding — see below.
+    if (this._paginatorSig) this._pageMemo.set(this._paginatorSig, this._paginator.currentPage);
+    // Captured BEFORE anything below touches the transform/scroll or re-measures — this is the
+    // real element the reader is currently looking at, independent of page numbers entirely.
+    // Used only as a fallback for geometries the memo above has never seen (see below).
+    const anchorEl = this._visibleAnchorEl();
     const prevCount = this._paginator.pageCount || 1;
     const frac = prevCount > 1 ? (this._paginator.currentPage - 1) / prevCount : 0;
     // Swapping paginator CLASS (ColumnPaginator <-> ScrollPaginator) needs a fresh instance —
     // a plain twoColumn/columnGap change reuses the existing one via _initPaginator below.
     if (continuousChanged) this._replacePaginator();
     this.onBeforePaginate?.(iframe);
-    this._initPaginator(iframe);
-    const target = Math.max(1, Math.floor(frac * this._paginator.pageCount) + 1);
-    this._paginator.goToPage(target);
+    this._initPaginator(iframe); // sets this._paginatorSig to the NEW geometry's signature
+    if (this._pageMemo.has(this._paginatorSig)) {
+      // Exact: we've been at this precise geometry before and know precisely which page it was.
+      this._paginator.goToPage(this._pageMemo.get(this._paginatorSig));
+    } else if (anchorEl && this._paginator.goToElement) {
+      // Best-effort: brand new geometry (e.g. first-ever landscape at this size) — land on
+      // whatever real content was visible before, rather than a page-fraction guess.
+      this._paginator.goToElement(anchorEl);
+    } else {
+      // Last resort only — see this method's own comment for why this alone isn't good enough.
+      const target = Math.max(1, Math.floor(frac * this._paginator.pageCount) + 1);
+      this._paginator.goToPage(target);
+    }
     this._fireRelocated();
   }
 
@@ -445,6 +542,11 @@ export class CXReader {
   // rendered frame at all when an anchor is given — it goes straight to the real page.
   async goToSpineItem(spineIdx, page = 1, anchor = null) {
     if (!this._book || !this._containerEl) return;
+    // A genuine navigation, not a resize/rotate — see setLayout's _pageMemo comment for why this
+    // must invalidate it: a memo entry only means "this page, at this exact geometry" from
+    // WHATEVER moment it was recorded, and once real reading has moved the position on, that old
+    // entry is stale and must not be resurrected by a later rotation back to that same geometry.
+    this._pageMemo.clear();
     const idx = Math.max(0, Math.min(spineIdx, this._book.spine.length - 1));
     this._spineIdx = idx;
     log(`[CXReader] goToSpineItem ${idx}`);
@@ -608,6 +710,9 @@ export class CXReader {
 
   async next() {
     if (!this._paginator || !this._book) return;
+    // See goToSpineItem's identical call for why: a real page turn invalidates every memoized
+    // cross-geometry position — it's no longer where the user currently is.
+    this._pageMemo.clear();
     if (this._isCbz) {
       if (this._continuous) {
         // No "next chapter" concept — the whole book is already one continuous scroll, so
@@ -659,6 +764,8 @@ export class CXReader {
 
   async prev() {
     if (!this._paginator || !this._book) return;
+    // See goToSpineItem's identical call for why.
+    this._pageMemo.clear();
     if (this._isCbz) {
       if (this._continuous) {
         if (this._paginator.prev()) this._fireRelocated();
@@ -716,6 +823,12 @@ export class CXReader {
     if (this._isFixedLayout) return;
     const iframe = this._renderer?.iframe;
     if (!iframe?.contentDocument) return;
+    // A font/theme/margin change repaginates at a DIFFERENT content-per-page ratio at the same
+    // pixel viewport size — _computeSig() only tracks viewport size and column settings, so any
+    // memo entries recorded under the OLD typography would otherwise look like a match for the
+    // same geometry under the NEW one and restore the wrong page (see setLayout's own comment on
+    // why the memo must never survive a change that invalidates its own signature's assumptions).
+    this._pageMemo.clear();
     const doc = iframe.contentDocument;
 
     const CX_FONTS_MARKER = '/* cx-fonts-end */';
@@ -862,6 +975,8 @@ export class CXReader {
     this._pdfScrollToken++;
     this._pdfWindowToken++;
     this._continuousRenderToken++; // stop any in-flight _maybeAppendNextChapter loop too
+    this._pageMemo.clear();
+    this._paginatorSig = null;
     log('[CXReader] destroy()');
   }
 
