@@ -22,6 +22,44 @@ function isLightColor(color) {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5;
 }
 
+// "Check for update" — unregisters the service worker, then reloads with a cache-busting query
+// param so the browser's own HTTP cache can't hand back a stale document either. This is the
+// in-app equivalent of the only other known fix for a PWA stuck on an old build (removing and
+// re-adding the home screen icon). Shared by sidebar.js (Codexa title tap while logged in) and
+// login.js (same tap on the sign-in screen) — a stale-cached login page/script talking to an
+// already-updated server is exactly the shape of "PWA won't log in until reinstalled".
+//
+// Deliberately does NOT touch caches.delete() itself — BOOKS_CACHE (downloaded books for
+// offline reading) lives in the same Cache Storage as the app-shell cache, and wiping every
+// cache here would force a full re-download of every offline book just to pick up a JS/CSS
+// change. The freshly-registered service worker's own `activate` handler (sw.js) already does
+// the right, narrower thing on its own — it deletes only stale app-shell cache versions and
+// explicitly preserves BOOKS_CACHE — so unregister+reload is enough to reach it.
+// Reader preferences (fonts, layout, margins, theme, …) live in localStorage/IndexedDB, not
+// Cache Storage, so none of this ever touches them regardless.
+export async function hardRefreshApp() {
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+  } catch { /* best-effort — still fall through to the reload below */ }
+  const url = new URL(window.location.pathname, window.location.origin);
+  url.searchParams.set('_refresh', Date.now());
+  window.location.href = url.toString();
+}
+
+// Wires the "tap the Codexa title to check for an update" confirm dialog onto any element.
+// Shared between sidebar.js (rebuilt twice — initSidebar and the langchange re-render) and
+// login.js so all three call sites stay in sync with a single piece of dialog copy/behavior.
+export function attachUpdateCheckHandler(el, { skipSelector = null } = {}) {
+  el?.addEventListener('click', (e) => {
+    if (skipSelector && e.target.closest(skipSelector)) return;
+    e.preventDefault();
+    confirmDialog(t('sidebar.check_update_confirm'), hardRefreshApp, t('sidebar.check_update_reload'), false);
+  });
+}
+
 export function syncStatusBarAppearance(bgColor) {
   if (typeof window.AndroidCodexa?.setStatusBarAppearance !== 'function') return;
   const light = isLightColor(bgColor);

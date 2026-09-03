@@ -6,7 +6,7 @@
 import { apiFetch, requireAuth, clearToken } from './api.js';
 import { t, initIconLangPicker } from './i18n.js';
 import { showPanel, getCurrentPanel } from './router.js';
-import { confirmDialog, syncStatusBarAppearance } from './ui.js';
+import { confirmDialog, syncStatusBarAppearance, attachUpdateCheckHandler } from './ui.js';
 
 const LIB_THEME_KEY = 'br_library_theme';
 const LIB_THEMES = new Set(['system', 'day', 'night', 'eink']);
@@ -317,44 +317,16 @@ function initSidebarLangPicker(container) {
   initIconLangPicker(container);
 }
 
-// "Check for update" — unregisters the service worker, then reloads with a cache-busting query
-// param so the browser's own HTTP cache can't hand back a stale document either. This is the
-// in-app equivalent of the only other known fix for a PWA stuck on an old build (removing and
-// re-adding the home screen icon).
-//
-// Deliberately does NOT touch caches.delete() itself — BOOKS_CACHE (downloaded books for
-// offline reading) lives in the same Cache Storage as the app-shell cache, and wiping every
-// cache here would force a full re-download of every offline book just to pick up a JS/CSS
-// change. The freshly-registered service worker's own `activate` handler (sw.js) already does
-// the right, narrower thing on its own — it deletes only stale app-shell cache versions and
-// explicitly preserves BOOKS_CACHE — so unregister+reload is enough to reach it.
-// Reader preferences (fonts, layout, margins, theme, …) live in localStorage/IndexedDB, not
-// Cache Storage, so none of this ever touches them regardless.
-async function hardRefreshApp() {
-  try {
-    if ('serviceWorker' in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map(r => r.unregister()));
-    }
-  } catch { /* best-effort — still fall through to the reload below */ }
-  const url = new URL('/', window.location.origin);
-  url.searchParams.set('_refresh', Date.now());
-  window.location.href = url.toString();
-}
-
-// Tapping the Codexa title/logo asks before doing a full unregister+reload (see hardRefreshApp
-// above) instead of just letting the <a href="/"> navigate normally — a plain navigation would
-// still be answered by the cache-first service worker with whatever's already cached, which is
-// exactly the "stuck on an old version" case this exists to get out of. Shared between
-// initSidebar and the langchange rebuild below since both rebuild this DOM node from scratch.
+// Tapping the Codexa title/logo asks before doing a full unregister+reload (see ui.js's
+// hardRefreshApp) instead of just letting the <a href="/"> navigate normally — a plain
+// navigation would still be answered by the cache-first service worker with whatever's already
+// cached, which is exactly the "stuck on an old version" case this exists to get out of.
+// Shared between initSidebar and the langchange rebuild below since both rebuild this DOM node
+// from scratch. login.js wires the same ui.js helper onto the sign-in screen's own logo.
 function _attachLogoUpdateHandler(sidebar) {
-  sidebar.querySelector('.logo')?.addEventListener('click', (e) => {
-    // Let the "new version available" badge (app.js's checkForUpdate) keep linking out to the
-    // GitHub releases page normally — only the logo itself triggers the reload dialog.
-    if (e.target.closest('.update-badge')) return;
-    e.preventDefault();
-    confirmDialog(t('sidebar.check_update_confirm'), hardRefreshApp, t('sidebar.check_update_reload'), false);
-  });
+  // Let the "new version available" badge (app.js's checkForUpdate) keep linking out to the
+  // GitHub releases page normally — only the logo itself triggers the reload dialog.
+  attachUpdateCheckHandler(sidebar.querySelector('.logo'), { skipSelector: '.update-badge' });
 }
 
 function buildSidebarHtml() {

@@ -54,6 +54,7 @@
       font-size: 2rem;
       color: var(--color-accent);
       letter-spacing: 1px;
+      cursor: pointer; /* tap to check for an update — see login.js */
     }
     .login-logo p {
       color: var(--color-text-muted);
@@ -119,7 +120,7 @@
 <body>
   <div class="login-wrap">
     <div class="login-logo">
-      <h1><img src="/images/codexa.svg" class="nav-icon nav-icon-codexa" alt="Codexa" style="width:2rem;height:2rem;vertical-align:middle"> Codexa</h1>
+      <h1 id="login-logo"><img src="/images/codexa.svg" class="nav-icon nav-icon-codexa" alt="Codexa" style="width:2rem;height:2rem;vertical-align:middle"> Codexa</h1>
       <p data-i18n="login.subtitle">Vaša digitalna knjižnica</p>
     </div>
 

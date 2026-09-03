@@ -1,6 +1,12 @@
 import { apiFetch, setToken } from '/js/api.js';
-import { setButtonLoading, syncStatusBarAppearance }  from '/js/ui.js';
+import { setButtonLoading, syncStatusBarAppearance, attachUpdateCheckHandler }  from '/js/ui.js';
 import { initI18n, t, initIconLangPicker } from '/js/i18n.js';
+
+// Tapping the Codexa title checks for an update here too, not just once logged in — a stale
+// service worker serving an old login page/script against an already-updated server is exactly
+// the shape of "the PWA won't log in until I delete and reinstall it" (see ui.js's
+// attachUpdateCheckHandler/hardRefreshApp for what this actually does).
+attachUpdateCheckHandler(document.getElementById('login-logo'));
 
 function syncStatusBar() {
   syncStatusBarAppearance(getComputedStyle(document.documentElement).getPropertyValue('--color-bg'));
