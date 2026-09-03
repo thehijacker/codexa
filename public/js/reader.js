@@ -8,7 +8,7 @@ import { stripImageWhiteBackgrounds } from './img-bg-fix.js';
 import { createComicViewer } from './comic-viewer.js';
 import { renderPdfCoverBlob, uploadPdfCover } from './pdf-cover.js';
 
-const READER_BUILD = 'br-v93-bookfinished-twocol-fix';
+const READER_BUILD = 'br-v94-toc-split-chapter-fix';
 const _i18nReady = initI18n();
 log('[codexa] reader build', READER_BUILD);
 
@@ -3474,6 +3474,13 @@ function _tocNormBase(h) {
   return (h || '').split('#')[0].replace(/_split_\d+(\.\w+)$/, '$1').toLowerCase().split('/').pop();
 }
 
+// Same as _tocNormBase but keeps the _split_NNN suffix intact — see resolveActiveTocEntry for
+// why an exact match here must always be tried and preferred first, before ever falling back to
+// the suffix-stripped fuzzy version above.
+function _tocExactBase(h) {
+  return (h || '').split('#')[0].toLowerCase().split('/').pop();
+}
+
 // Resolve which TOC entry is "active" for spine href at page curPage, AND the page range (in
 // the current paginator's own page units) it actually spans within the file — the anchor's own
 // page through just before the next entry's anchor, or the end of the file if it's the last
@@ -3487,6 +3494,19 @@ function _tocNormBase(h) {
 // null only when NOTHING matches this href by filename at all (falls back to _cxRangeActiveToc).
 function resolveActiveTocEntry(href, curPage, fileTotalPages) {
   if (!href || !tocFlatItems.length) return null;
+  // Try an EXACT filename match (suffix included) first. Some Calibre-split books name every
+  // individual chapter file "Book_split_NNN.htm" with its OWN dedicated TOC entry — a 1:1
+  // mapping the suffix-stripped fuzzy match below actively breaks: stripping "_split_NNN" makes
+  // every chapter in the book collapse to the SAME normalized base, so every relocate matched
+  // every TOC entry at once, and — with none of them carrying page-distinguishing anchors — the
+  // tie-break below always settled on the last entry in the book, regardless of which chapter was
+  // actually open (confirmed live on two such books: TOC always highlighted the final chapter).
+  // An exact match means this href IS one specific TOC entry's own file, so it's unambiguously
+  // correct and needs no further disambiguation at all.
+  const exactBase = _tocExactBase(href);
+  const exactMatches = tocFlatItems.filter(item => _tocExactBase(item.href) === exactBase);
+  if (exactMatches.length === 1) return { winner: exactMatches[0], startPage: 1, endPage: fileTotalPages };
+
   const base = _tocNormBase(href);
   // CBZ/PDF spine hrefs ("page-N") need an EXACT match — the substring fuzzy-match below exists
   // to tolerate EPUB filename variants (e.g. a resolved path vs. a raw href), but on page-N it's
@@ -3494,7 +3514,12 @@ function resolveActiveTocEntry(href, curPage, fileTotalPages) {
   // real multi-page PDF it lit up every TOC entry whose page number shared a numeric prefix with
   // the current page — confirmed live.
   const isPageHref = /^page-\d+$/.test(base);
-  const matches = tocFlatItems.filter(item => {
+  // Falls back to the suffix-stripped fuzzy match only when the exact pass found nothing (the
+  // ORIGINAL case this function was built for: one logical chapter runtime-split into several
+  // physical files, with only the first one's filename actually listed in the TOC) or found
+  // several (several real anchors legitimately sharing one physical file) — exactMatches.length
+  // === 1 already returned above, so this only runs for 0 or 2+.
+  const matches = exactMatches.length ? exactMatches : tocFlatItems.filter(item => {
     const ib = _tocNormBase(item.href);
     return isPageHref ? base === ib : !!(base && ib && (base === ib || base.includes(ib) || ib.includes(base)));
   });
