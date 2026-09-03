@@ -624,6 +624,7 @@
   "error.bookorbit_not_enabled": "La synchronisation BookOrbit n'est pas activée dans les paramètres.",
   "error.bookorbit_unreachable": "Impossible de joindre votre serveur BookOrbit.",
   "error.bookorbit_invalid_file": "BookOrbit n'a pas renvoyé de fichier de livre valide pour ce titre.",
+  "error.bookorbit_download_incomplete": "Le téléchargement s'est interrompu en cours de route. Veuillez réessayer.",
   "error.invalid_goal": "Objectif de lecture invalide.",
   "error.id_required": "Un ID est requis.",
   "error.q_required": "Un terme de recherche est requis.",

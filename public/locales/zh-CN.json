@@ -624,6 +624,7 @@
   "error.bookorbit_not_enabled": "设置中未启用 BookOrbit 同步。",
   "error.bookorbit_unreachable": "无法连接到您的 BookOrbit 服务器。",
   "error.bookorbit_invalid_file": "BookOrbit 未返回此书目的有效图书文件。",
+  "error.bookorbit_download_incomplete": "下载中途中断。请重试。",
   "error.invalid_goal": "阅读目标无效。",
   "error.id_required": "需要 ID。",
   "error.q_required": "需要搜索词。",

@@ -345,7 +345,15 @@ async function importBookOrbitFile(userId, ctx, { boBookId, fileId, format, titl
   }
 
   const asset = await bookorbit.fetchAssetStream(userId, ctx, `/books/files/${fileId}/download`, onProgress, abandonSignal);
-  if (!asset.ok) return { ok: false, status: 502, error: 'error.bookorbit_unreachable' };
+  if (!asset.ok) {
+    // Surfaced as its own error rather than the generic "unreachable" one — a truncated download
+    // is a distinct, actionable case for the user (retry) from a server that's simply down, and
+    // conflating them made this failure mode invisible: nothing before this ever logged it, so a
+    // silently-truncated file sailed straight through to disk/parsing (see fetchAssetStream's own
+    // comment for the full story of why that matters beyond just a missing cover).
+    if (asset.incomplete) return { ok: false, status: 502, error: 'error.bookorbit_download_incomplete' };
+    return { ok: false, status: 502, error: 'error.bookorbit_unreachable' };
+  }
 
   const buf = asset.buffer;
   if (!buf || buf.length < 100) return { ok: false, status: 502, error: 'error.file_empty' };
@@ -374,6 +382,7 @@ async function importBookOrbitFile(userId, ctx, { boBookId, fileId, format, titl
   // through as "ok"). Failing clearly here beats writing that response to disk as a fake
   // ".epub"/".pdf" and only discovering it's not a real book once the reader tries to open it.
   if (outFormat === 'epub' && !isPdf && !(workBuf.length >= 2 && workBuf[0] === 0x50 && workBuf[1] === 0x4b)) {
+    console.warn(`[bookorbit] import: fileId=${fileId} rejected — not a valid book file (${workBuf.length} bytes)`);
     return { ok: false, status: 502, error: 'error.bookorbit_invalid_file' };
   }
 
@@ -424,8 +433,13 @@ async function importBookOrbitFile(userId, ctx, { boBookId, fileId, format, titl
     const newBookId = result.lastInsertRowid;
     bookorbit.mapLocalBook(userId, newBookId, boBookId, Number(fileId));
 
+    console.log(`[bookorbit] import: added book id=${newBookId} "${bookTitle}" (${outFormat}, ${fileSize} bytes, cover=${meta.cover_path ? 'yes' : 'no'})`);
     return { ok: true, id: newBookId, title: bookTitle, author: bookAuthor };
   } catch (err) {
+    // This used to fail completely silently server-side (the client got a JSON error, but
+    // nothing was ever logged here) — the one gap left where a bad import could go unnoticed
+    // entirely instead of at least showing up in the log for later correlation.
+    console.error(`[bookorbit] import failed for fileId=${fileId}:`, err);
     try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
     return { ok: false, status: 500, error: err.message };
   }
@@ -529,7 +543,11 @@ async function createBookOrbitPeek(userId, ctx, { boBookId, fileId, format, titl
   }
 
   const asset = await bookorbit.fetchAsset(userId, ctx, `/books/files/${fileId}/download`);
-  if (!asset.ok) return { ok: false, status: 502, error: 'error.bookorbit_unreachable' };
+  if (!asset.ok) {
+    // See importBookOrbitFile's identical branch for why this is split out.
+    if (asset.incomplete) return { ok: false, status: 502, error: 'error.bookorbit_download_incomplete' };
+    return { ok: false, status: 502, error: 'error.bookorbit_unreachable' };
+  }
 
   const buf = asset.buffer;
   if (!buf || buf.length < 100) return { ok: false, status: 502, error: 'error.file_empty' };

@@ -624,6 +624,7 @@
   "error.bookorbit_not_enabled": "Sinhronizacija BookOrbit ni omogočena v nastavitvah.",
   "error.bookorbit_unreachable": "Strežnika BookOrbit ni bilo mogoče doseči.",
   "error.bookorbit_invalid_file": "BookOrbit za ta naslov ni vrnil veljavne datoteke knjige.",
+  "error.bookorbit_download_incomplete": "Prenos se je na pol prekinil. Poskusite znova.",
   "error.invalid_goal": "Neveljaven bralni cilj.",
   "error.id_required": "ID je obvezen.",
   "error.q_required": "Iskalni niz je obvezen.",

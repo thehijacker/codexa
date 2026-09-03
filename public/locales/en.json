@@ -624,6 +624,7 @@
   "error.bookorbit_not_enabled": "BookOrbit sync isn't enabled in Settings.",
   "error.bookorbit_unreachable": "Couldn't reach your BookOrbit server.",
   "error.bookorbit_invalid_file": "BookOrbit didn't return a valid book file for this title.",
+  "error.bookorbit_download_incomplete": "The download was cut off partway through. Please try again.",
   "error.invalid_goal": "Invalid reading goal.",
   "error.id_required": "ID is required.",
   "error.q_required": "A search query is required.",

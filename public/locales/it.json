@@ -624,6 +624,7 @@
   "error.bookorbit_not_enabled": "La sincronizzazione BookOrbit non è attiva nelle Impostazioni.",
   "error.bookorbit_unreachable": "Impossibile raggiungere il tuo server BookOrbit.",
   "error.bookorbit_invalid_file": "BookOrbit non ha restituito un file libro valido per questo titolo.",
+  "error.bookorbit_download_incomplete": "Il download si è interrotto a metà. Riprova.",
   "error.invalid_goal": "Obiettivo di lettura non valido.",
   "error.id_required": "È richiesto un ID.",
   "error.q_required": "È richiesto un termine di ricerca.",

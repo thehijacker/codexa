@@ -641,7 +641,14 @@ async function fetchAsset(userId, ctx, path) {
     try { res = await doFetch(); } catch { return { ok: false }; }
   }
   if (!res.ok) return { ok: false, status: res.status };
-  return { ok: true, contentType: res.headers.get('content-type') || 'image/jpeg', buffer: Buffer.from(await res.arrayBuffer()) };
+  const buffer = Buffer.from(await res.arrayBuffer());
+  // See fetchAssetStream's identical check below for why this matters even here.
+  const total = Number(res.headers.get('content-length')) || 0;
+  if (total > 0 && buffer.length < total) {
+    console.warn(`[bookorbit] download incomplete: got ${buffer.length} of ${total} bytes for ${path}`);
+    return { ok: false, incomplete: true, loaded: buffer.length, total };
+  }
+  return { ok: true, contentType: res.headers.get('content-type') || 'image/jpeg', buffer };
 }
 
 // Same as fetchAsset, but reads the response body incrementally and reports {loaded, total}
@@ -695,6 +702,11 @@ async function fetchAssetStream(userId, ctx, path, onProgress, abandonSignal) {
     const buffer = Buffer.from(await res.arrayBuffer());
     clearTimeout(idleTimer);
     onProgress?.(buffer.length, total || buffer.length);
+    // See the streaming path's identical check below for why this matters.
+    if (total > 0 && buffer.length < total) {
+      console.warn(`[bookorbit] download incomplete: got ${buffer.length} of ${total} bytes for ${path}`);
+      return { ok: false, incomplete: true, loaded: buffer.length, total };
+    }
     return { ok: true, contentType, buffer };
   }
 
@@ -714,6 +726,22 @@ async function fetchAssetStream(userId, ctx, path, onProgress, abandonSignal) {
     return { ok: false }; // stalled connection (idle timeout) or other stream error
   } finally {
     clearTimeout(idleTimer);
+  }
+
+  // A response body can end "cleanly" (reader.read() reporting done:true, no error thrown) while
+  // still being short of what the server itself declared via Content-Length — confirmed live as
+  // the real shape of the "book with no cover" reports: BookOrbit's connection got torn down
+  // partway (by an intermediate proxy/CDN hop enforcing its own timeout, not necessarily
+  // BookOrbit itself) in a way Node's fetch didn't surface as a stream error, so the truncated
+  // buffer sailed straight through as a "successful" download, got written to disk, and handed
+  // to the ZIP/EPUB parser as if it were the whole file — a truncated ZIP's central directory is
+  // exactly the kind of thing that can produce a book with metadata but no cover (the cover
+  // entry, wherever it lived in the archive, never arrived), and re-parsing that same malformed
+  // file on every retry is the leading suspect for the crash it also causes. This length check
+  // is the only reliable place left to catch it before those bytes are ever written or parsed.
+  if (total > 0 && loaded < total) {
+    console.warn(`[bookorbit] download incomplete: got ${loaded} of ${total} bytes for ${path}`);
+    return { ok: false, incomplete: true, loaded, total };
   }
   return { ok: true, contentType, buffer: Buffer.concat(chunks.map(c => Buffer.from(c))) };
 }

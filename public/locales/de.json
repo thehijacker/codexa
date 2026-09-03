@@ -624,6 +624,7 @@
   "error.bookorbit_not_enabled": "Die BookOrbit-Synchronisierung ist in den Einstellungen nicht aktiviert.",
   "error.bookorbit_unreachable": "Dein BookOrbit-Server konnte nicht erreicht werden.",
   "error.bookorbit_invalid_file": "BookOrbit hat für diesen Titel keine gültige Buchdatei geliefert.",
+  "error.bookorbit_download_incomplete": "Der Download wurde mittendrin abgebrochen. Bitte versuchen Sie es erneut.",
   "error.invalid_goal": "Ungültiges Leseziel.",
   "error.id_required": "ID ist erforderlich.",
   "error.q_required": "Ein Suchbegriff ist erforderlich.",
