@@ -239,7 +239,7 @@ router.get('/admin/users', authenticateToken, (req, res) => {
   // panel's per-user activity dots (modeled visually on bookorbitDash.js's streak dots).
   const weekAgo = Math.floor(Date.now() / 1000) - ADMIN_ACTIVITY_DAYS * 86400;
   const recentSessions = db.prepare(
-    `SELECT user_id, start_ts, end_ts FROM reading_sessions WHERE start_ts >= ? AND ${ADMIN_REAL_SESSION}`
+    'SELECT user_id, start_ts, end_ts FROM reading_sessions WHERE start_ts >= ? AND ' + ADMIN_REAL_SESSION
   ).all(weekAgo);
   const todayBucket = Math.floor(Date.now() / 1000 / 86400);
   const dailySecsByUser = {}; // user_id → [oldest ... today] seconds array, length ADMIN_ACTIVITY_DAYS
