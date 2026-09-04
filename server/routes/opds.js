@@ -198,6 +198,9 @@ router.get('/sync-sse', async (req, res) => {
                   : isCbzExisting
                   ? extractCbzMetadata(destPath, COVERS_DIR, existingBook.file_hash)
                   : extractEpubMetadata(destPath, COVERS_DIR, existingBook.file_hash);
+                if (!meta.cover_path && entry.cover) {
+                  meta.cover_path = await fetchCoverToFile(resolveUrl(entry.cover, targetUrl), headers, COVERS_DIR, existingBook.file_hash);
+                }
                 db.prepare(`UPDATE books SET
                   file_hash_md5 = ?, kosync_hash = '',
                   cover_path  = ?,
@@ -237,6 +240,9 @@ router.get('/sync-sse', async (req, res) => {
               : format === 'cbz'
               ? extractCbzMetadata(destPath, COVERS_DIR, fileHash)
               : extractEpubMetadata(destPath, COVERS_DIR, fileHash);
+            if (!meta.cover_path && entry.cover) {
+              meta.cover_path = await fetchCoverToFile(resolveUrl(entry.cover, targetUrl), headers, COVERS_DIR, fileHash);
+            }
             const bookTitle  = meta.title  || entry.title  || 'Unknown';
             const bookAuthor = meta.author || entry.author || '';
             const fileSize   = fs.statSync(destPath).size;
@@ -323,6 +329,34 @@ function buildAuthHeaders(username, password) {
     headers['Authorization'] = `Basic ${creds}`;
   }
   return headers;
+}
+
+// Fallback cover source for a freshly-downloaded book: used only when our own extraction
+// (extractEpubMetadata/extractCbzMetadata — and PDF, which never even attempts extraction, see
+// server/utils/pdf.js) came back with no cover_path. The OPDS server already serves a cover for
+// every catalog entry (that's what renders the browse-grid thumbnails via the /cover proxy
+// above), so this is strictly additive, not a replacement for extraction — an embedded cover is
+// still preferred when we can get one, since it's guaranteed to match the actual downloaded file.
+// Same content-type/size/timeout guards as the /cover proxy route, just persisted to disk
+// instead of streamed to the browser. Failure is always silent (return '') — a missing cover
+// here just falls back to the placeholder, same as any book with no cover_path.
+async function fetchCoverToFile(coverUrl, headers, coversDir, fileHash) {
+  if (!coverUrl) return '';
+  try {
+    const r = await fetch(coverUrl, { headers, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return '';
+    const ct = r.headers.get('content-type') || '';
+    if (!ct.startsWith('image/') && !ct.startsWith('application/octet-stream') && ct !== '') return '';
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length < 100) return ''; // too small to be a real cover — likely an error page/pixel
+    const ext = ct.includes('png') ? '.png' : ct.includes('webp') ? '.webp' : '.jpg';
+    const filename = `${fileHash}${ext}`;
+    require('fs').writeFileSync(require('path').join(coversDir, filename), buf);
+    return filename;
+  } catch (err) {
+    console.warn('[opds] cover fallback fetch failed:', err.message);
+    return '';
+  }
 }
 
 function getServerById(servers, id) {
@@ -854,6 +888,9 @@ router.post('/sync', async (req, res) => {
               : format === 'cbz'
               ? extractCbzMetadata(destPath, COVERS_DIR, fileHash)
               : extractEpubMetadata(destPath, COVERS_DIR, fileHash);
+            if (!meta.cover_path && entry.cover) {
+              meta.cover_path = await fetchCoverToFile(resolveUrl(entry.cover, targetUrl), headers, COVERS_DIR, fileHash);
+            }
             const bookTitle  = meta.title  || entry.title  || 'Unknown';
             const bookAuthor = meta.author || entry.author || '';
             const fileSize   = fs.statSync(destPath).size;
@@ -897,13 +934,13 @@ router.post('/sync', async (req, res) => {
 });
 
 // ── POST /api/opds/download/:id — download epub to user library ───────────────
-// body: { href, title, author }
+// body: { href, title, author, cover }
 router.post('/download/:id', async (req, res) => {
   const servers = getServers(req.user.id);
   const server  = getServerById(servers, req.params.id);
   if (!server) return res.status(404).json({ error: 'error.server_not_found' });
 
-  const { href, title, author } = req.body || {};
+  const { href, title, author, cover } = req.body || {};
   if (!href) return res.status(400).json({ error: 'error.href_required' });
 
   const resolvedHref = resolveUrl(href, server.url);
@@ -979,6 +1016,9 @@ router.post('/download/:id', async (req, res) => {
         : format === 'cbz'
         ? extractCbzMetadata(destPath, COVERS_DIR, fileHash)
         : extractEpubMetadata(destPath, COVERS_DIR, fileHash);
+      if (!meta.cover_path && cover) {
+        meta.cover_path = await fetchCoverToFile(resolveUrl(cover, server.url), headers, COVERS_DIR, fileHash);
+      }
       const bookTitle  = meta.title  || title  || 'Unknown';
       const bookAuthor = meta.author || author || '';
       const fileSize   = fs.statSync(destPath).size;

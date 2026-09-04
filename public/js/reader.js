@@ -8,7 +8,7 @@ import { stripImageWhiteBackgrounds } from './img-bg-fix.js';
 import { createComicViewer } from './comic-viewer.js';
 import { renderPdfCoverBlob, uploadPdfCover } from './pdf-cover.js';
 
-const READER_BUILD = 'br-v94-toc-split-chapter-fix';
+const READER_BUILD = 'br-v95-pdf-peek-cover-fix';
 const _i18nReady = initI18n();
 log('[codexa] reader build', READER_BUILD);
 
@@ -6327,7 +6327,18 @@ async function startCXRendition(displayCfi = null) {
     // right after upload (see library.js), but a PDF added via OPDS or BookOrbit import happens
     // server-side with no browser in the loop to render one at import time. Fire-and-forget:
     // purely cosmetic, must never delay or fail the actual open.
-    if (_cxReader._isPdf && !isPeekMode && currentBook?.id && !currentBook.cover_path) {
+    //
+    // Gated on peek_expires_at (a genuinely ephemeral, soon-to-be-deleted row), NOT on isPeekMode
+    // — isPeekMode is just the read-only "?peek=1" URL flag, used for two very different things:
+    // an actual ephemeral BookOrbit/OPDS preview row (peek_expires_at set), and a normal
+    // permanently-owned book opened read-only for a quick look (e.g. jumping to a bookmark from
+    // library.js — see its own "peek=1" links, no ephemeral row involved at all). Excluding the
+    // latter meant a real book's PDF cover could never backfill at all if the user always happens
+    // to open it via one of those peek-flagged links — confirmed live: BookOrbit's "already
+    // downloaded" peek icon (bookorbit.js renderPeekButton) always adds peek=1 regardless of
+    // ownership. Generating a cover is a harmless, idempotent side effect either way; only a
+    // truly ephemeral row (about to be deleted) makes it pointless to bother.
+    if (_cxReader._isPdf && !currentBook?.peek_expires_at && currentBook?.id && !currentBook.cover_path) {
       void _backfillPdfCover(_cxReader, currentBook);
     }
     // Comics always start with chrome hidden, regardless of the user's own autoHideHeader

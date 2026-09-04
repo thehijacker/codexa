@@ -412,6 +412,26 @@ async function importBookOrbitFile(userId, ctx, { boBookId, fileId, format, titl
       : outFormat === 'cbz'
       ? extractCbzMetadata(destPath, COVERS_DIR, fileHash)
       : extractEpubMetadata(destPath, COVERS_DIR, fileHash);
+    // PDFs never get a cover from extraction at all (metadata-only — see server/utils/pdf.js),
+    // and EPUB/CBZ extraction can occasionally come up empty too (a non-compliant manifest, no
+    // image in the archive, ...). BookOrbit already serves a cover for every book in its own
+    // library — that's what renders the BookOrbit browsing-grid thumbnails and the "more like
+    // this" cards (GET /api/books/bookorbit-cover, both via this same bookorbit.getCover()) —
+    // so fall back to fetching that instead of leaving the book with just a placeholder.
+    if (!meta.cover_path) {
+      try {
+        const coverAsset = await bookorbit.getCover(userId, boBookId);
+        if (coverAsset.ok && coverAsset.buffer?.length > 100) {
+          const ct    = (coverAsset.contentType || '').toLowerCase();
+          const cext  = ct.includes('png') ? '.png' : ct.includes('webp') ? '.webp' : '.jpg';
+          const coverFilename = `${fileHash}${cext}`;
+          fs.writeFileSync(path.join(COVERS_DIR, coverFilename), coverAsset.buffer);
+          meta.cover_path = coverFilename;
+        }
+      } catch (err) {
+        console.warn('[bookorbit] cover fallback fetch failed:', err.message);
+      }
+    }
     const bookTitle  = meta.title  || title  || 'Unknown';
     const bookAuthor = meta.author || author || '';
     // The file's own metadata wins when present, but a comic/PDF often has none at all (e.g.

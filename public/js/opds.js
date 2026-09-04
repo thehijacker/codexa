@@ -541,7 +541,7 @@ function renderCardActions(actionsEl, entry) {
       try {
         const data = await apiFetch(`/opds/download/${currentServer.id}`, {
           method: 'POST',
-          body: JSON.stringify({ href: entry.acqHref, title: entry.title, author: entry.author }),
+          body: JSON.stringify({ href: entry.acqHref, title: entry.title, author: entry.author, cover: entry.cover }),
         });
         toast.success(t('opds.toast_book_added', { title: entry.title }));
         entry.localBookId = data.id;
