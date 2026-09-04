@@ -12,7 +12,8 @@
     "esbuild": true
   },
   "overrides": {
-    "@napi-rs/canvas": "file:./vendor-stubs/napi-canvas-stub"
+    "@napi-rs/canvas": "file:./vendor-stubs/napi-canvas-stub",
+    "qs": "^6.16.0"
   },
   "scripts": {
     "start": "node server/index.js",
