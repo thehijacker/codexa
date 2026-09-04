@@ -19,6 +19,13 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++
 
 COPY package*.json ./
+# vendor-stubs/ must land before `npm ci` — package.json's "overrides" points a dependency at
+# a local file: path in here (see vendor-stubs/napi-canvas-stub), and npm ci resolving that
+# against a not-yet-existing directory doesn't fail fast, it stalls for minutes (confirmed:
+# ~5x slower build) before eventually falling back. Copying just this small folder up front
+# keeps the layer-caching win (this layer still only invalidates when deps actually change)
+# without needing the full `COPY . .` this early.
+COPY vendor-stubs ./vendor-stubs
 RUN npm ci
 
 COPY . .
