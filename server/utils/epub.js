@@ -220,6 +220,15 @@ function extractEpubMetadata(epubPath, coversDir, fileHash) {
       if (byId && isImageItem(byId)) coverItem = byId;
     }
 
+    // 2b. Some non-compliant EPUB2 files put the image's href directly in <meta name="cover">
+    // content= instead of an item id (spec violation, but seen from real-world converters —
+    // confirmed on a book whose cover was otherwise undetectable: content="Images/xyz.jpg"
+    // with no item id or filename containing "cover" at all). Match content against href too.
+    if (!coverItem && coverId) {
+      const byHref = items.find(i => (i['@_href'] || '').toLowerCase() === coverId.toLowerCase());
+      if (byHref && isImageItem(byHref)) coverItem = byHref;
+    }
+
     // 3. Item with id="cover" or id="cover-image" that is an image
     if (!coverItem) {
       coverItem = items.find(i =>

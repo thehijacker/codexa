@@ -1,0 +1,6 @@
+{
+  "name": "napi-canvas-stub",
+  "version": "1.0.0",
+  "description": "Empty stand-in for @napi-rs/canvas — see index.js for why this exists.",
+  "main": "index.js"
+}

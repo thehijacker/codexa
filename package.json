@@ -11,6 +11,9 @@
     "better-sqlite3": true,
     "esbuild": true
   },
+  "overrides": {
+    "@napi-rs/canvas": "file:./vendor-stubs/napi-canvas-stub"
+  },
   "scripts": {
     "start": "node server/index.js",
     "dev": "nodemon server/index.js",
