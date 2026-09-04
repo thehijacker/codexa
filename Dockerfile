@@ -26,11 +26,22 @@ COPY package*.json ./
 # keeps the layer-caching win (this layer still only invalidates when deps actually change)
 # without needing the full `COPY . .` this early.
 COPY vendor-stubs ./vendor-stubs
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 
 COPY . .
 RUN npm run build
-RUN npm prune --omit=dev
+# A plain `npm prune --omit=dev` was the next bottleneck once the npm ci fix above landed:
+# confirmed on real builds going from ~55s (fresh npm ci, both archs) to 100-234s for prune
+# alone — a huge jump for removing the same ~29 devDep packages that used to take ~10s before
+# this project's dependency tree grew the vendor-stubs override. `npm prune` diffs against the
+# existing installed tree (walking/reconciling every node it finds, including the override's
+# local `file:` link) rather than just installing fresh from the lockfile — and also calls out
+# to the npm registry for an audit/funding check by default, network round-trips a Docker build
+# has no business depending on the timing of. A clean `rm -rf node_modules && npm ci --omit=dev`
+# sidesteps both: it's a deterministic fresh install of only the ~125 production packages
+# straight from the (already-verified, already-cached-by-Docker-layer) lockfile, no tree-diffing
+# and no registry calls — confirmed locally at ~1.5s for the equivalent step.
+RUN rm -rf node_modules && npm ci --omit=dev --no-audit --no-fund
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM node:24-alpine
