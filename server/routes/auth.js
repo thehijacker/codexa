@@ -204,6 +204,24 @@ router.post('/admin/invitations', authenticateToken, (req, res) => {
   res.status(201).json({ email, token, expiresAt });
 });
 
+router.get('/admin/invitations', authenticateToken, (req, res) => {
+  if (!isAdmin(req.user.id)) return res.status(403).json({ error: 'error.admin_only' });
+  const db = getDb();
+  const invitations = db.prepare(
+    'SELECT id, email, created_at, expires_at FROM invitations WHERE accepted_at IS NULL ORDER BY created_at DESC, id DESC'
+  ).all();
+  res.json(invitations);
+});
+
+router.delete('/admin/invitations/:id', authenticateToken, (req, res) => {
+  if (!isAdmin(req.user.id)) return res.status(403).json({ error: 'error.admin_only' });
+  const db     = getDb();
+  const id     = parseInt(req.params.id, 10);
+  const result = db.prepare('DELETE FROM invitations WHERE id = ? AND accepted_at IS NULL').run(id);
+  if (result.changes === 0) return res.status(404).json({ error: 'error.invitation_not_found' });
+  res.status(204).end();
+});
+
 // ── Change own password ───────────────────────────────────────────────────────
 router.put('/password', authenticateToken, async (req, res) => {
   try {

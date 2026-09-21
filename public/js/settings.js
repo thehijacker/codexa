@@ -618,6 +618,7 @@ async function loadAdminSection() {
     const { enabled } = await apiFetch('/auth/registration-status');
     adminRegTgl.checked = enabled;
     await loadAdminUsers();
+    await loadAdminInvitations();
     await loadAdminFonts();
     await loadAdminDicts();
     bindAdminUploads();
@@ -694,6 +695,56 @@ function deleteAdminUser(id, username) {
   );
 }
 
+async function loadAdminInvitations() {
+  const list = document.getElementById('admin-invitations-list');
+  if (!list) return;
+  try {
+    const invitations = await apiFetch('/auth/admin/invitations');
+    if (!invitations.length) {
+      list.innerHTML = `<p style="color:var(--color-text-muted);font-size:.85rem;margin:0" data-i18n="settings.admin_invite_pending_empty">${t('settings.admin_invite_pending_empty')}</p>`;
+      return;
+    }
+    const now = Date.now() / 1000;
+    list.innerHTML = invitations.map(inv => {
+      const expired = inv.expires_at <= now;
+      const expiryLabel = expired
+        ? t('settings.admin_invite_expired')
+        : t('settings.admin_invite_expires', { date: new Date(inv.expires_at * 1000).toLocaleDateString() });
+      return `
+      <div class="admin-user-row" data-id="${inv.id}">
+        <div class="admin-user-info">
+          <span class="admin-user-name">${escHtml(inv.email)}</span>
+          <span class="admin-user-meta">${expiryLabel}</span>
+        </div>
+        <button class="btn btn-danger btn-sm admin-invite-delete-btn" data-id="${inv.id}" data-email="${escHtml(inv.email)}">${t('common.delete')}</button>
+      </div>
+    `;
+    }).join('');
+    list.querySelectorAll('.admin-invite-delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => deleteAdminInvitation(Number(btn.dataset.id), btn.dataset.email));
+    });
+  } catch (err) {
+    toast.error(t('settings.admin_err_load_invitations', { msg: err.message }));
+  }
+}
+
+function deleteAdminInvitation(id, email) {
+  confirmDialog(
+    t('settings.admin_invite_delete_confirm', { email }),
+    async () => {
+      try {
+        await apiFetch(`/auth/admin/invitations/${id}`, { method: 'DELETE' });
+        toast.success(t('settings.admin_invite_deleted'));
+        await loadAdminInvitations();
+      } catch (err) {
+        toast.error(t('settings.admin_err_delete_invitation', { msg: err.message }));
+      }
+    },
+    t('common.delete'),
+    true
+  );
+}
+
 document.getElementById('btn-reextract-all')?.addEventListener('click', async () => {
   const btn = document.getElementById('btn-reextract-all');
   setButtonLoading(btn, true);
@@ -742,6 +793,7 @@ btnCreateInvite?.addEventListener('click', async () => {
     result.hidden = false;
     input.select();
     toast.success(t('settings.admin_invite_created'));
+    await loadAdminInvitations();
   } catch (err) {
     toast.error(t('common.error_msg', { msg: err.message }));
   } finally {

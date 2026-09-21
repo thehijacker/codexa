@@ -80,12 +80,6 @@ function syncStatusBar() {
     }
   } catch (_) { /* silently ignore */ }
 
-  if (invitationToken) {
-    document.querySelector('[data-tab="register"]')?.click();
-    document.getElementById('reg-invitation-row').hidden = false;
-    document.getElementById('reg-invitation').value = invitationToken;
-  }
-
   // ── OIDC sign-in buttons (Google/Apple/self-hosted IdP) ───────────────────
   // No buttons render at all if OIDC_PROVIDERS isn't configured server-side —
   // this endpoint just returns an empty list, so the plain login form is
@@ -127,6 +121,14 @@ function syncStatusBar() {
       document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
     });
   });
+
+  // Jump straight to the register tab for an invite link — must run after the tab
+  // listeners above are attached, or the .click() below fires with nothing to catch it.
+  if (invitationToken) {
+    document.querySelector('[data-tab="register"]')?.click();
+    document.getElementById('reg-invitation-row').hidden = false;
+    document.getElementById('reg-invitation').value = invitationToken;
+  }
 
   function showAlert(id, message, type = 'error') {
     const el = document.getElementById(id);
