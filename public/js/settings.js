@@ -309,6 +309,8 @@ btnTestBookorbit.addEventListener('click', async () => {
 const adminCard    = document.getElementById('admin-card');
 const adminRegTgl  = document.getElementById('admin-reg-toggle');
 const btnSaveReg   = document.getElementById('btn-save-reg');
+const adminInviteEmail = document.getElementById('admin-invite-email');
+const btnCreateInvite  = document.getElementById('btn-create-invite');
 
 async function loadAdminFonts() {
   const list = document.getElementById('admin-fonts-list');
@@ -718,6 +720,32 @@ btnSaveReg?.addEventListener('click', async () => {
     toast.error(t('common.error_msg', { msg: err.message }));
   } finally {
     setButtonLoading(btnSaveReg, false, t('settings.btn_save'));
+  }
+});
+
+btnCreateInvite?.addEventListener('click', async () => {
+  const email = adminInviteEmail.value.trim();
+  if (!email) {
+    toast.error(t('error.email_invalid'));
+    return;
+  }
+  setButtonLoading(btnCreateInvite, true, t('settings.btn_saving'));
+  try {
+    const { token } = await apiFetch('/auth/admin/invitations', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+    const link = `${window.location.origin}/login.html?invite=${encodeURIComponent(token)}`;
+    const result = document.getElementById('admin-invite-result');
+    const input = document.getElementById('admin-invite-link');
+    input.value = link;
+    result.hidden = false;
+    input.select();
+    toast.success(t('settings.admin_invite_created'));
+  } catch (err) {
+    toast.error(t('common.error_msg', { msg: err.message }));
+  } finally {
+    setButtonLoading(btnCreateInvite, false, t('settings.admin_invite_create'));
   }
 });
 // ── Account email ─────────────────────────────────────────────────────────────

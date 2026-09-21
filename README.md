@@ -147,6 +147,7 @@ All configuration is via environment variables:
 |---|---|---|---|
 | `JWT_SECRET` | **yes** | — | Long random string (≥ 64 chars). Changing it invalidates all sessions. |
 | `PORT` | no | `3000` | TCP port the server listens on |
+| `HOST` | no | `0.0.0.0` | Network address the server listens on; use `127.0.0.1` behind a local reverse proxy |
 | `DATA_DIR` | no | `./data` | Path to persistent data (books, covers, fonts, DB) |
 | `CORS_ORIGIN` | no | _(same-origin)_ | Allowed CORS origin, e.g. `https://books.example.com` |
 | `DEBUG` | no | `false` | Set to `true` to enable verbose browser console logging (all `[reader]`, `[api]`, `[kosync]`, etc. messages). Off by default — only warnings and errors are shown. |

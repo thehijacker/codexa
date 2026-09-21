@@ -46,6 +46,7 @@ process.on('unhandledRejection', (reason) => {
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
 const { version } = require('../package.json');
 
 const DIST_DIR   = path.join(__dirname, '../dist');
@@ -255,8 +256,8 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`[server] Codexa running on http://localhost:${PORT}`);
+const server = app.listen(PORT, HOST, () => {
+  console.log(`[server] Codexa running on http://${HOST}:${PORT}`);
 });
 
 // ── Graceful shutdown ──────────────────────────────────────────────────────────

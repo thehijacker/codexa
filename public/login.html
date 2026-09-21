@@ -168,6 +168,11 @@
             <input type="email" id="reg-email" autocomplete="email"
                    data-i18n-placeholder="login.reg_email_placeholder" placeholder="ime@primer.com" />
           </div>
+          <div class="form-group" id="reg-invitation-row" hidden>
+            <label for="reg-invitation" data-i18n="login.invitation_label">Invitation</label>
+            <input type="text" id="reg-invitation" readonly />
+            <div class="settings-hint" data-i18n="login.invitation_hint">This invitation is valid only for the invited email address.</div>
+          </div>
           <div class="form-group">
             <label for="reg-password" data-i18n="login.label_password">Geslo</label>
             <input type="password" id="reg-password" autocomplete="new-password" required

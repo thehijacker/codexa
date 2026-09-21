@@ -50,6 +50,17 @@ function initDb() {
       value TEXT NOT NULL DEFAULT ''
     );
 
+    CREATE TABLE IF NOT EXISTS invitations (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      email       TEXT    NOT NULL,
+      token_hash  TEXT    UNIQUE NOT NULL,
+      created_by  INTEGER NOT NULL,
+      created_at  INTEGER DEFAULT (strftime('%s', 'now')),
+      expires_at  INTEGER NOT NULL,
+      accepted_at INTEGER DEFAULT NULL,
+      FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS user_settings (
       user_id                  INTEGER PRIMARY KEY,
       opds_servers             TEXT    DEFAULT '[]',
@@ -303,6 +314,15 @@ function initDb() {
     `);
   } catch (e) {
     console.warn('[db] idx_users_email creation:', e.message);
+  }
+
+  try {
+    database.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_invitations_pending_email
+        ON invitations(email) WHERE accepted_at IS NULL
+    `);
+  } catch (e) {
+    console.warn('[db] idx_invitations_pending_email creation:', e.message);
   }
 
   // Backfill last_opened_at from last progress save, else added_at (counts as "opened when added").

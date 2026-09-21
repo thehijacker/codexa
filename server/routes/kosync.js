@@ -19,6 +19,7 @@ const express = require('express');
 const bcrypt  = require('bcrypt');
 const crypto  = require('crypto');
 const { getDb }             = require('../db');
+const { isRegistrationEnabled } = require('./auth');
 const { authenticateToken } = require('../middleware/auth');
 const { maybeMarkBookFinished } = require('../utils/bookCompletion');
 const bookorbit             = require('../services/bookorbitSync');
@@ -72,6 +73,10 @@ kosyncRouter.post('/users/create', async (req, res) => {
   }
 
   const db = getDb();
+  const hasUsers = !!db.prepare('SELECT 1 FROM users LIMIT 1').get();
+  if (hasUsers && !isRegistrationEnabled(db)) {
+    return res.status(403).json({ error: 'REGISTRATION_DISABLED' });
+  }
   const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
   if (existing) {
     return res.status(409).json({ error: 'USERNAME_REGISTERED' });

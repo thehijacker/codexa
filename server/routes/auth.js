@@ -1,6 +1,7 @@
 ﻿const express    = require('express');
 const bcrypt     = require('bcrypt');
 const jwt        = require('jsonwebtoken');
+const crypto     = require('crypto');
 const path       = require('path');
 const fs         = require('fs');
 const rateLimit  = require('express-rate-limit');
@@ -36,6 +37,18 @@ function normalizeEmail(e) {
   return typeof e === 'string' ? e.trim().toLowerCase() : '';
 }
 
+function hashInvitationToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function findActiveInvitation(db, token, email) {
+  if (!token || !email) return null;
+  return db.prepare(`
+    SELECT id FROM invitations
+     WHERE token_hash = ? AND email = ? AND accepted_at IS NULL AND expires_at > strftime('%s', 'now')
+  `).get(hashInvitationToken(token), email);
+}
+
 function signToken(user) {
   return jwt.sign(
     { id: user.id, username: user.username },
@@ -68,7 +81,7 @@ router.get('/registration-status', (req, res) => {
 
 router.post('/register', authLimiter, async (req, res) => {
   try {
-    const { name, username, password, email } = req.body;
+    const { name, username, password, email, invitationToken } = req.body;
     if (!username || !password) {
       return res.status(400).json({ error: 'error.credentials_required' });
     }
@@ -88,8 +101,10 @@ router.post('/register', authLimiter, async (req, res) => {
     }
     const db = getDb();
     const hasUsers = !!db.prepare('SELECT 1 FROM users LIMIT 1').get();
-    if (hasUsers && !isRegistrationEnabled(db)) {
-      return res.status(403).json({ error: 'error.registration_disabled' });
+    const invitationRequired = hasUsers && !isRegistrationEnabled(db);
+    const invitation = invitationRequired && findActiveInvitation(db, invitationToken, cleanEmail);
+    if (invitationRequired && !invitation) {
+      return res.status(403).json({ error: 'error.invitation_invalid' });
     }
     if (db.prepare('SELECT id FROM users WHERE username = ?').get(username)) {
       return res.status(409).json({ error: 'error.username_taken' });
@@ -98,13 +113,31 @@ router.post('/register', authLimiter, async (req, res) => {
       return res.status(409).json({ error: 'error.email_taken' });
     }
     const password_hash = await bcrypt.hash(password, SALT_ROUNDS);
-    const result = db.prepare(
-      'INSERT INTO users (username, name, password_hash, email) VALUES (?, ?, ?, ?)'
-    ).run(username, cleanName, password_hash, cleanEmail);
-    db.prepare('INSERT INTO user_settings (user_id) VALUES (?)').run(result.lastInsertRowid);
+    const createUser = db.transaction(() => {
+      if (invitation) {
+        const consumed = db.prepare(`
+          UPDATE invitations SET accepted_at = strftime('%s', 'now')
+           WHERE id = ? AND accepted_at IS NULL AND expires_at > strftime('%s', 'now')
+        `).run(invitation.id);
+        if (consumed.changes !== 1) {
+          const error = new Error('Invitation is no longer valid');
+          error.code = 'INVITATION_INVALID';
+          throw error;
+        }
+      }
+      const result = db.prepare(
+        'INSERT INTO users (username, name, password_hash, email) VALUES (?, ?, ?, ?)'
+      ).run(username, cleanName, password_hash, cleanEmail);
+      db.prepare('INSERT INTO user_settings (user_id) VALUES (?)').run(result.lastInsertRowid);
+      return result;
+    });
+    const result = createUser();
     const newUser = { id: result.lastInsertRowid, username, name: cleanName, email: cleanEmail };
     res.status(201).json({ token: signToken(newUser), user: safeUser(newUser) });
   } catch (err) {
+    if (err.code === 'INVITATION_INVALID') {
+      return res.status(403).json({ error: 'error.invitation_invalid' });
+    }
     console.error('[auth] register error:', err.message);
     res.status(500).json({ error: 'error.register_failed' });
   }
@@ -148,6 +181,25 @@ router.put('/admin/registration', authenticateToken, (req, res) => {
   const db = getDb();
   db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('registration_enabled', ?)").run(enabled ? '1' : '0');
   res.json({ enabled });
+});
+
+router.post('/admin/invitations', authenticateToken, (req, res) => {
+  if (!isAdmin(req.user.id)) return res.status(403).json({ error: 'error.admin_only' });
+  const email = normalizeEmail(req.body?.email);
+  if (!isValidEmail(email)) return res.status(400).json({ error: 'error.email_invalid' });
+
+  const db = getDb();
+  const token = crypto.randomBytes(32).toString('base64url');
+  const expiresAt = Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60;
+  const createInvitation = db.transaction(() => {
+    db.prepare('DELETE FROM invitations WHERE email = ? AND accepted_at IS NULL').run(email);
+    db.prepare(`
+      INSERT INTO invitations (email, token_hash, created_by, expires_at)
+      VALUES (?, ?, ?, ?)
+    `).run(email, hashInvitationToken(token), req.user.id, expiresAt);
+  });
+  createInvitation();
+  res.status(201).json({ email, token, expiresAt });
 });
 
 // ── Change own password ───────────────────────────────────────────────────────

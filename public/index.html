@@ -429,6 +429,20 @@
           <button id="btn-save-reg" class="btn btn-primary btn-sm" data-i18n="common.save">Shrani</button>
         </div>
         <hr class="section-divider">
+        <div style="font-size:.875rem;font-weight:600;margin-bottom:.25rem" data-i18n="settings.admin_invite_title">Invite a user</div>
+        <div class="settings-hint" style="margin-bottom:.6rem" data-i18n="settings.admin_invite_hint">Create a single-use link for an email address. It expires after seven days.</div>
+        <div class="form-group" style="margin-bottom:.5rem">
+          <label for="admin-invite-email" data-i18n="settings.admin_invite_email">Email address</label>
+          <input type="email" id="admin-invite-email" autocomplete="email" />
+        </div>
+        <div class="card-actions">
+          <button id="btn-create-invite" class="btn btn-secondary btn-sm" data-i18n="settings.admin_invite_create">Create invitation link</button>
+        </div>
+        <div id="admin-invite-result" hidden style="margin-top:.75rem">
+          <label for="admin-invite-link" data-i18n="settings.admin_invite_link">Send this link</label>
+          <input type="text" id="admin-invite-link" readonly />
+        </div>
+        <hr class="section-divider">
         <div style="font-size:.875rem;font-weight:600;margin-bottom:.75rem" data-i18n="settings.admin_users_title">Upravljanje uporabnikov</div>
         <div id="admin-users-list"></div>
 
