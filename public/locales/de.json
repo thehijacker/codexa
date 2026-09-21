@@ -316,6 +316,8 @@
   "reader.sb_screen_on": "Bildschirm anlassen",
   "reader.sb_screen_on_hint": "Verhindert, dass der Bildschirm beim Lesen ausgeht",
   "reader.sb_eink": "E-Ink-Modus",
+  "reader.sb_pdf_paper_inversion": "PDF-Papier invertieren",
+  "reader.sb_pdf_paper_inversion_hint": "Nur PDF. Ändert reines Schwarz und Weiß, behält andere Bildfarben bei.",
   "reader.sb_eink_hint": "Nur Schwarz-Weiß für E-Ink-Geräte (färbt Design und Inhalt um)",
   "reader.sb_para_indent": "Absatzeinzug",
   "reader.sb_para_indent_hint": "Die erste Zeile jedes Absatzes einrücken",

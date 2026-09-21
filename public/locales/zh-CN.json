@@ -316,6 +316,8 @@
   "reader.sb_screen_on": "保持屏幕常亮",
   "reader.sb_screen_on_hint": "阅读时防止屏幕关闭",
   "reader.sb_eink": "水墨屏模式",
+  "reader.sb_pdf_paper_inversion": "反转 PDF 纸张",
+  "reader.sb_pdf_paper_inversion_hint": "仅限 PDF。仅更改纯黑和纯白，同时保留其他图像颜色。",
   "reader.sb_eink_hint": "仅限黑白显示，适用于水墨屏设备（重新着色主题和内容）",
   "reader.sb_para_indent": "段落缩进",
   "reader.sb_para_indent_hint": "缩进每个段落的首行",

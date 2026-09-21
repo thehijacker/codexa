@@ -316,6 +316,8 @@
   "reader.sb_screen_on": "Zaslon vedno vklopljen",
   "reader.sb_screen_on_hint": "Prepreči ugasnitev zaslona med branjem",
   "reader.sb_eink": "E-ink način",
+  "reader.sb_pdf_paper_inversion": "Obrni papir PDF",
+  "reader.sb_pdf_paper_inversion_hint": "Samo PDF. Spremeni čisto črno in belo, druge barve slik pa ohrani.",
   "reader.sb_eink_hint": "Samo črno-belo za e-ink naprave (obarva temo in vsebino)",
   "reader.sb_para_indent": "Zamik prvega odstavka",
   "reader.sb_para_indent_hint": "Zamakne prvo vrstico vsakega odstavka",

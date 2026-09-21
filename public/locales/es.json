@@ -316,6 +316,8 @@
   "reader.sb_screen_on": "Mantener pantalla encendida",
   "reader.sb_screen_on_hint": "Evitar que la pantalla se apague al leer",
   "reader.sb_eink": "Modo E-ink",
+  "reader.sb_pdf_paper_inversion": "Invertir papel de PDF",
+  "reader.sb_pdf_paper_inversion_hint": "Solo PDF. Cambia negro y blanco puros, pero conserva otros colores de imagen.",
   "reader.sb_eink_hint": "Solo blanco y negro para dispositivos e-ink (cambia colores de tema y contenido)",
   "reader.sb_para_indent": "Sangría de párrafo",
   "reader.sb_para_indent_hint": "Sangrar la primera línea de cada párrafo",

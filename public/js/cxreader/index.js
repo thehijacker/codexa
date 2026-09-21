@@ -73,6 +73,7 @@ export class CXReader {
     this._pdfContinuousWrap = null; // .cx-pdf-continuous-wrap, only set while continuous PDF is active
     this._pdfContinuousPages = []; // per-page { el, canvas|null, rendered, viewport1 } placeholders
     this._pdfWindowToken = 0;   // staleness guard for _updatePdfWindow's async render-into-placeholder
+    this._pdfPaperInversion = false;
     // Fraction scrolled through the current (topmost-visible) spine item — CBZ continuous
     // (_updateCbzContinuousPosition) and EPUB continuous (_syncContinuousSpineIdx) both keep
     // this live as the user scrolls; makePct() uses it in place of the paginator-page-based
@@ -850,6 +851,23 @@ export class CXReader {
     this._fireRelocated();
   }
 
+  setPdfPaperInversion(enabled) {
+    const next = !!enabled;
+    if (this._pdfPaperInversion === next) return;
+    this._pdfPaperInversion = next;
+    if (!this._isPdf) return;
+    if (!this._continuous) {
+      void this._renderPdfItem(this._spineIdx);
+      return;
+    }
+    this._pdfWindowToken++;
+    this._pdfContinuousPages.forEach(page => {
+      page.el.innerHTML = '';
+      page.rendered = false;
+    });
+    void this._updatePdfWindow();
+  }
+
   // Cancel any settle-timers still pending from _scheduleFontReflow() (see there). Those
   // timers compare the current layout size against a snapshot taken right after the chapter's
   // initial pagination — but scrollToRange/scrollToAnnotation/seekToPercent/seekToPage all
@@ -1166,8 +1184,28 @@ export class CXReader {
     canvas.width  = Math.round(viewport.width);
     canvas.height = Math.round(viewport.height);
     canvas.draggable = false; // matches _renderCbzItem's img.draggable=false — see its own comment
-    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    const context = canvas.getContext('2d', { willReadFrequently: this._pdfPaperInversion });
+    await page.render({ canvasContext: context, viewport }).promise;
+    if (this._pdfPaperInversion) this._invertPdfPaper(context, canvas.width, canvas.height);
     return canvas;
+  }
+
+  _invertPdfPaper(context, width, height) {
+    try {
+      const image = context.getImageData(0, 0, width, height);
+      const pixels = image.data;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i + 3] !== 255 || pixels[i] !== pixels[i + 1] || pixels[i] !== pixels[i + 2]) continue;
+        if (pixels[i] === 255) {
+          pixels[i] = 18; pixels[i + 1] = 18; pixels[i + 2] = 18;
+        } else if (pixels[i] === 0) {
+          pixels[i] = 238; pixels[i + 1] = 238; pixels[i + 2] = 232;
+        }
+      }
+      context.putImageData(image, 0, 0);
+    } catch (error) {
+      console.warn('[CXReader] PDF paper inversion failed:', error);
+    }
   }
 
   // Paginated PDF — mirrors _renderCbzItem exactly: build the new page(s) off-DOM, only swap

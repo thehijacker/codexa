@@ -316,6 +316,8 @@
   "reader.sb_screen_on": "Schermo sempre attivo",
   "reader.sb_screen_on_hint": "Impedisce lo spegnimento dello schermo durante la lettura",
   "reader.sb_eink": "Modalità E-ink",
+  "reader.sb_pdf_paper_inversion": "Inverti carta PDF",
+  "reader.sb_pdf_paper_inversion_hint": "Solo PDF. Modifica il bianco e il nero puri, mantenendo gli altri colori dell’immagine.",
   "reader.sb_eink_hint": "Solo bianco e nero per dispositivi e-ink (cambia i colori del tema e del contenuto)",
   "reader.sb_para_indent": "Rientro paragrafo",
   "reader.sb_para_indent_hint": "Rientro della prima riga di ogni paragrafo",

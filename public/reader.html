@@ -509,6 +509,22 @@
           </div>
         </div>
 
+        <!-- PDF paper inversion -->
+        <div class="setting-row">
+          <div class="setting-row-inline">
+            <div>
+              <div class="setting-label" id="pdf-paper-inversion-label" data-i18n="reader.sb_pdf_paper_inversion">Invert PDF paper</div>
+              <div id="pdf-paper-inversion-hint" style="font-size:.75rem;color:var(--color-text-muted);margin-top:.15rem" data-i18n="reader.sb_pdf_paper_inversion_hint">
+                PDF only. Changes pure black and white while keeping other image colours.
+              </div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="pdf-paper-inversion-toggle" aria-labelledby="pdf-paper-inversion-label" aria-describedby="pdf-paper-inversion-hint" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
         <!-- Page gap shadow -->
         <div class="setting-row">
           <div class="setting-row-inline">
@@ -1333,7 +1349,7 @@
        cross-origin requests are deliberately left uncached by sw.js, and third-party CDN
        resources aren't reliably available offline in iOS home-screen PWAs. -->
   <script src="/js/vendor/jszip.min.js"></script>
-  <script type="module" src="/js/reader.js?v=br-v134"></script>
+  <script type="module" src="/js/reader.js?v=br-v135"></script>
   <script src="/js/sw-register.js"></script>
 </body>
 </html>

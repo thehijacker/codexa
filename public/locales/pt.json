@@ -316,6 +316,8 @@
   "reader.sb_screen_on": "Manter ecrã ligado",
   "reader.sb_screen_on_hint": "Evita que o ecrã se desligue durante a leitura",
   "reader.sb_eink": "Modo E-ink",
+  "reader.sb_pdf_paper_inversion": "Inverter papel do PDF",
+  "reader.sb_pdf_paper_inversion_hint": "Apenas PDF. Altera preto e branco puros, mantendo as outras cores da imagem.",
   "reader.sb_eink_hint": "Apenas preto e branco para dispositivos e-ink",
   "reader.sb_para_indent": "Recuo de parágrafo",
   "reader.sb_para_indent_hint": "Recuar a primeira linha de cada parágrafo",

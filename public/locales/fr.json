@@ -316,6 +316,8 @@
   "reader.sb_screen_on": "Garder l'écran allumé",
   "reader.sb_screen_on_hint": "Empêche l'écran de s'éteindre pendant la lecture",
   "reader.sb_eink": "Mode E-ink",
+  "reader.sb_pdf_paper_inversion": "Inverser le papier PDF",
+  "reader.sb_pdf_paper_inversion_hint": "PDF uniquement. Modifie le noir et le blanc purs, tout en conservant les autres couleurs d’image.",
   "reader.sb_eink_hint": "Noir et blanc uniquement pour les liseuses (modifie les thèmes et le contenu)",
   "reader.sb_para_indent": "Retrait de paragraphe",
   "reader.sb_para_indent_hint": "Indenter la première ligne de chaque paragraphe",
