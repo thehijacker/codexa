@@ -25,7 +25,7 @@
   "login.reg_user_placeholder": "3–32 characters, no spaces",
   "login.reg_email": "Email (optional)",
   "login.invitation_label": "Invitation",
-  "login.invitation_hint": "This invitation is valid only for the invited email address.",
+  "login.invitation_hint": "Anyone with this link can create an account.",
   "login.reg_email_placeholder": "name@example.com",
   "login.reg_pass_placeholder": "At least 8 characters",
   "login.reg_password2": "Repeat password",

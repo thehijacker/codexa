@@ -25,7 +25,7 @@
   "login.reg_user_placeholder": "3–32 znakov, brez presledkov",
   "login.reg_email": "E-pošta (neobvezno)",
   "login.invitation_label": "Povabilo",
-  "login.invitation_hint": "To povabilo velja samo za povabljeni e-poštni naslov.",
+  "login.invitation_hint": "Kdor koli s to povezavo lahko ustvari račun.",
   "login.reg_email_placeholder": "ime@primer.com",
   "login.reg_pass_placeholder": "Vsaj 8 znakov",
   "login.reg_password2": "Ponovite geslo",

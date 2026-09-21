@@ -41,12 +41,12 @@ function hashInvitationToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-function findActiveInvitation(db, token, email) {
-  if (!token || !email) return null;
+function findActiveInvitation(db, token) {
+  if (!token) return null;
   return db.prepare(`
     SELECT id FROM invitations
-     WHERE token_hash = ? AND email = ? AND accepted_at IS NULL AND expires_at > strftime('%s', 'now')
-  `).get(hashInvitationToken(token), email);
+     WHERE token_hash = ? AND accepted_at IS NULL AND expires_at > strftime('%s', 'now')
+  `).get(hashInvitationToken(token));
 }
 
 function signToken(user) {
@@ -102,7 +102,9 @@ router.post('/register', authLimiter, async (req, res) => {
     const db = getDb();
     const hasUsers = !!db.prepare('SELECT 1 FROM users LIMIT 1').get();
     const invitationRequired = hasUsers && !isRegistrationEnabled(db);
-    const invitation = invitationRequired && findActiveInvitation(db, invitationToken, cleanEmail);
+    // Looked up (and consumed below) even when registration is open, so an invite link
+    // doesn't stay pending forever just because it wasn't strictly needed to register.
+    const invitation = findActiveInvitation(db, invitationToken);
     if (invitationRequired && !invitation) {
       return res.status(403).json({ error: 'error.invitation_invalid' });
     }

@@ -25,7 +25,7 @@
   "login.reg_user_placeholder": "3–32个字符，不含空格",
   "login.reg_email": "邮箱（可选）",
   "login.invitation_label": "邀请",
-  "login.invitation_hint": "此邀请仅对受邀邮箱地址有效。",
+  "login.invitation_hint": "拥有此链接的任何人都可以创建账户。",
   "login.reg_email_placeholder": "name@example.com",
   "login.reg_pass_placeholder": "至少8个字符",
   "login.reg_password2": "确认密码",
