@@ -110,6 +110,24 @@ function initDb() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    -- Permanent log of finished-book events, written once per genuine 'read' crossing (see
+    -- maybeMarkBookFinished in server/utils/bookCompletion.js). Unlike reading_progress (keyed
+    -- by content hash, never cleaned up, effectively invisible once its book is gone) or
+    -- books.read_status (lives on the books row, deleted along with it), this table snapshots
+    -- title/author and lets book_id go NULL on deletion instead of cascading — so "books
+    -- finished" stays a true lifetime count even after the book itself is removed or re-hashed.
+    CREATE TABLE IF NOT EXISTS book_completions (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id        INTEGER NOT NULL,
+      book_id        INTEGER DEFAULT NULL,
+      document_hash  TEXT    NOT NULL,
+      title          TEXT    NOT NULL,
+      author         TEXT    DEFAULT '',
+      completed_at   INTEGER DEFAULT (strftime('%s', 'now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE SET NULL
+    );
+
     CREATE TABLE IF NOT EXISTS shelves (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id    INTEGER NOT NULL,
@@ -325,6 +343,15 @@ function initDb() {
     console.warn('[db] idx_invitations_pending_email creation:', e.message);
   }
 
+  try {
+    database.exec(`
+      CREATE INDEX IF NOT EXISTS idx_book_completions_user
+        ON book_completions(user_id, completed_at)
+    `);
+  } catch (e) {
+    console.warn('[db] idx_book_completions_user creation:', e.message);
+  }
+
   // Backfill last_opened_at from last progress save, else added_at (counts as "opened when added").
   try {
     database.exec(`
@@ -359,6 +386,30 @@ function initDb() {
     `);
   } catch (e) {
     console.warn('[db] bookorbit_url backfill:', e.message);
+  }
+
+  // One-time: book_completions didn't exist before this release, so every finish that already
+  // happened (reading_progress at or past the finished threshold) needs to be logged retroactively
+  // or "books finished" stays 0 until someone finishes something new. Left/joined against books
+  // by any of the three hash flavors (see maybeMarkBookFinished's own comment on why) — when none
+  // match (the book was since deleted or re-hashed), the title/author is unrecoverable and falls
+  // back to a placeholder; the count is still correct even though the label isn't pretty.
+  try {
+    database.exec(`
+      INSERT INTO book_completions (user_id, book_id, document_hash, title, author, completed_at)
+      SELECT rp.user_id, b.id, rp.document_hash,
+             COALESCE(b.title, 'Unknown'), COALESCE(b.author, ''),
+             rp.updated_at
+        FROM reading_progress rp
+        LEFT JOIN books b ON b.user_id = rp.user_id
+          AND (b.file_hash = rp.document_hash OR b.file_hash_md5 = rp.document_hash OR b.kosync_hash = rp.document_hash)
+       WHERE rp.percentage >= 0.95
+         AND NOT EXISTS (
+           SELECT 1 FROM book_completions bc WHERE bc.user_id = rp.user_id AND bc.document_hash = rp.document_hash
+         )
+    `);
+  } catch (e) {
+    console.warn('[db] book_completions backfill:', e.message);
   }
 }
 

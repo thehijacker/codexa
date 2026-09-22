@@ -332,6 +332,7 @@
 <ul>
 <li><strong>7 built-in themes</strong> — Light, Sepia, Dark, Sepia Dark, Midnight, Nord, plus Custom with free color picking</li>
 <li><strong>E-ink mode</strong> — high-contrast black-and-white for e-ink displays</li>
+<li><strong>PDF paper inversion</strong> — dark-mode toggle for rendered PDF pages that only remaps pure black/white pixels, leaving embedded photos and colour images untouched</li>
 <li><strong>Custom fonts</strong> (TTF/OTF/WOFF/WOFF2) uploaded by admin</li>
 <li><strong>Extensive text settings</strong> — font, size, line height, letter spacing, indentation, hyphenation</li>
 <li><strong>Configurable status bar</strong> — with up to 6 overlay slots</li>
@@ -384,6 +385,7 @@
 <li><strong>Font management</strong> — upload (with progress indicator) and delete custom fonts for all users</li>
 <li><strong>Dictionary management</strong> — upload StarDict ZIP archives (with progress indicator)</li>
 <li><strong>Registration control</strong> — enable or disable new-user sign-up</li>
+<li><strong>Invitation links</strong> — issue single-use sign-up links (valid 7 days) so specific people can register even while open registration is off; a pending-invitations list lets you revoke a link before it's used</li>
 <li><strong>Refresh book metadata</strong> — re-extract genres, descriptions, and covers from all EPUB files</li>
 </ul>
 </div>
@@ -833,7 +835,9 @@ data/<br/>
 <h2>Disabling Registration</h2>
 <p>
         After creating all the accounts you need, an admin can disable new-user registration to
-        prevent unauthorised sign-ups. See <a data-section="settings" href="#settings">Settings → Admin</a>.
+        prevent unauthorised sign-ups. See <a data-scroll="settings-admin" data-section="settings" href="#settings-admin">Settings → Admin</a>.
+        To let a specific person sign up anyway, issue them an
+        <a data-scroll="settings-admin" data-section="settings" href="#settings-admin">invitation link</a> instead of re-enabling open registration.
       </p>
 <h2 id="login-oidc">OIDC / Single Sign-On</h2>
 <p>
@@ -1172,6 +1176,24 @@ staticPasswords:
         with registration disabled, an OIDC identity that doesn't already match an existing
         account (by prior login or verified email) is rejected instead of auto-creating a new one.
       </p>
+<h3>Invitations</h3>
+<p>
+        With registration disabled, an admin can still let specific people sign up by issuing an
+        invitation link: enter an email address under <strong>Invite a user</strong> and click
+        <strong>Create invitation link</strong>. Codexa generates the link but does not send it —
+        copy it and share it yourself (email, chat, whatever you'd normally use).
+      </p>
+<ul>
+<li>Each link is single-use and expires after <strong>7 days</strong>.</li>
+<li>Opening the link jumps straight to the Register tab with the invitation pre-filled.</li>
+<li>A <strong>Pending invitations</strong> list shows every unused link (email and expiry) with a delete button to revoke one before it's used.</li>
+</ul>
+<div class="callout">
+<strong>ℹ️ The email is just a label</strong>
+        The email you enter when creating an invitation is for your own reference only — it isn't
+        sent anywhere, and it isn't checked against what the invited person actually registers
+        with. Anyone holding the link can create an account with any email (or none).
+      </div>
 <h3>User Management</h3>
 <p>
         Lists all registered users. Click the delete (×) button next to a user to permanently
@@ -2427,6 +2449,7 @@ staticPasswords:
 <li><strong>Theme:</strong> Light, Sepia, Dark, Sepia Dark, Midnight, Nord, Custom. Selecting <em>Custom</em> reveals a background colour picker and a text colour picker — a saturation/brightness square, a hue slider, and hex/RGB fields you can type into directly, identical on desktop and mobile (including Android, where the old native picker offered no numeric input at all).</li>
 <li><strong>Override book styles:</strong> forces the reader's fonts and colours on books with their own CSS.</li>
 <li><strong>E-ink mode:</strong> high-contrast black-and-white for e-ink displays.</li>
+<li><strong>Invert PDF paper:</strong> PDF only. Remaps pure black and white pixels on rendered pages for a dark-mode-style paper/text swap, while leaving other image colours (photos, diagrams) unchanged.</li>
 <li><strong>Page border (book spine):</strong> shows a thin shadow along the centre spine in two-page spread mode.</li>
 <li><strong>Remove book blur when settings are open:</strong> keeps the book text sharp and un-dimmed behind the settings panel (and the color picker) instead of the usual blurred backdrop, so you can watch font, margin, and colour changes apply live. Always on under e-ink mode, where dimming/blurring the page isn't useful anyway.</li>
 <li><strong>Presets:</strong> save and switch between named settings profiles — see <a data-scroll="themes-presets" data-section="themes" href="#themes-presets">Presets</a>.</li>

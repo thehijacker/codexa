@@ -22,6 +22,7 @@
 const crypto = require('crypto');
 const { getDb } = require('../db');
 const { runWithUser } = require('../utils/logger');
+const { logCompletion } = require('../utils/completions');
 
 const TIMEOUT_MS = 15000;
 // Idle timeout for fetchAssetStream's book-file download only — a large comic/PDF can
@@ -539,7 +540,7 @@ async function uploadSessions(userId, ctx, m, state) {
 // ── read status + rating (push on local change; adopt remote when local empty) ─
 async function syncBookState(userId, ctx, m, state) {
   const db = getDb();
-  const b = db.prepare('SELECT read_status, rating, status_modified FROM books WHERE id = ?').get(m.bookId);
+  const b = db.prepare('SELECT id, title, author, file_hash, read_status, rating, status_modified FROM books WHERE id = ?').get(m.bookId);
   if (!b) return;
   const wm = state.state_watermark || 0;
 
@@ -564,6 +565,7 @@ async function syncBookState(userId, ctx, m, state) {
       const rs = typeof rsRaw === 'string' ? rsRaw : rsRaw?.status;
       const rt = res.data.rating;
       if ((rs && VALID_STATUS.includes(rs)) || rt != null) {
+        if (rs === 'read') logCompletion(db, userId, b, b.file_hash);
         db.prepare('UPDATE books SET read_status = ?, rating = ?, status_modified = strftime(\'%s\',\'now\') WHERE id = ?')
           .run(VALID_STATUS.includes(rs) ? rs : '', rt != null ? rt : null, m.bookId);
       }

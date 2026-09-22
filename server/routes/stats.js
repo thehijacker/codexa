@@ -62,13 +62,14 @@ router.get('/', (req, res) => {
   ).get(uid);
 
   const booksStarted = db.prepare(
-    'SELECT COUNT(DISTINCT book_id) as n FROM reading_sessions WHERE user_id = ?'
+    `SELECT COUNT(DISTINCT book_id) as n FROM reading_sessions WHERE user_id = ? AND ${REAL_SESSION}`
   ).get(uid);
 
+  // Reads from the book_completions log (see server/utils/bookCompletion.js), not a live join
+  // against reading_progress/books — a finished book keeps counting even after it's deleted or
+  // re-hashed, since that join has no way to find it once it's gone.
   const booksCompleted = db.prepare(
-    `SELECT COUNT(*) as n FROM reading_progress rp
-     JOIN books b ON b.file_hash = rp.document_hash AND b.user_id = rp.user_id
-     WHERE rp.user_id = ? AND rp.percentage >= 0.95`
+    'SELECT COUNT(DISTINCT document_hash) as n FROM book_completions WHERE user_id = ?'
   ).get(uid);
 
   const topBooks = db.prepare(

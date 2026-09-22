@@ -432,6 +432,23 @@ let _annotToolbarTimer = null; // guards against mouseup firing before dblclick 
 let statsSessionId = null;            // active reading_sessions.id
 let sessionPageCount = 0;             // page navigation events in current session
 let sessionStartPct = null;           // currentPct snapshot when the session started
+// Continuous-scroll mode never calls goNext/goPrev (see _cxRelocatedHandler below), so without
+// this, sessionPageCount would stay 0 all session long for a continuous-scroll reader — wrongly
+// flagging genuinely active reading as idle once session rotation starts filtering by pages_nav.
+// Throttled by CONTINUOUS_ACTIVITY_MIN_GAP_MS rather than counted on every cx-relocated firing,
+// since a continuous scroll fires that event on every rAF-throttled scroll tick (up to ~60/sec)
+// — uncapped, a single momentary/involuntary scroll blip could trivially satisfy the >=2 bar the
+// same idle-filtering this is meant to feed relies on elsewhere.
+let lastContinuousActivityTs = 0;
+const CONTINUOUS_ACTIVITY_MIN_GAP_MS = 5000;
+// sessionPageCount snapshotted at the last periodic-sync tick (see startPeriodicSync) — lets that
+// heartbeat tell "nothing happened this interval" (idle: rotate, isolating the idle stretch into
+// its own low-activity chunk the REAL_SESSION filter excludes) apart from "still reading" (leave
+// the session alone). Rotating unconditionally on every tick was tried first and confirmed live
+// to fragment one real continuous reading sitting into several small sessions instead — e.g. a
+// single ~10-minute, 8-page sitting came out as "3 sessions" purely from blind timer rotation
+// with real activity spanning right across each rotation boundary.
+let sessionPageCountAtLastCheck = 0;
 
 // ── Fork sync policy (juliefuller fork; extends upstream thehijacker/codexa) ──
 // Upstream syncs KOReader progress only on chapter boundaries and book close.
@@ -5870,6 +5887,23 @@ function startPeriodicSync() {
     if (!isReady || !currentBook) return;
     log('[kosync] periodic local save (4 min)');
     void saveProgress({ allowRemote: false });
+    // Only rotate the stats session if NOTHING happened since the last tick — isolates a genuinely
+    // idle stretch (book left open and foregrounded, nobody actually reading) into its own
+    // low-activity chunk that the REAL_SESSION filter (server/routes/stats.js) then excludes,
+    // without fragmenting a real continuous reading sitting into several small sessions. A session
+    // previously only closed on tab-hide/close/manual-sync, so idle time sitting inside an
+    // otherwise-open session racked up wall-clock "reading" time uncapped — confirmed live: a
+    // single 56-minute, 10-page-turn session inflated a "most read" stat for a book that was
+    // mostly just sitting open. Rotating unconditionally on every tick was tried first and also
+    // confirmed live to overcorrect: it fragmented one real ~10-minute, 8-page sitting into "3
+    // sessions" purely from blind timer rotation, since real activity happened to straddle two
+    // rotation boundaries.
+    if (sessionPageCount === sessionPageCountAtLastCheck) {
+      rotateStatsSession();
+      sessionPageCountAtLastCheck = 0; // fresh session just (re)started
+    } else {
+      sessionPageCountAtLastCheck = sessionPageCount;
+    }
   }, SYNC_INTERVAL_MS);
 }
 
@@ -6247,6 +6281,18 @@ function _cxSyncLayout() {
 }
 
 function _cxRelocatedHandler(e) {
+  // Continuous-scroll mode's position updates fire this same event on every scroll tick instead
+  // of going through goNext/goPrev (see those functions' own sessionPageCount++) — count it as
+  // reading activity too, throttled so a rapid burst of scroll ticks doesn't inflate the count
+  // far beyond paginated mode's one-tick-per-turn, and so a single momentary/involuntary scroll
+  // can't alone satisfy the >=2 "real session" bar this feeds (server/routes/stats.js).
+  if (isContinuousMode() && statsSessionId) {
+    const now = Date.now();
+    if (now - lastContinuousActivityTs >= CONTINUOUS_ACTIVITY_MIN_GAP_MS) {
+      lastContinuousActivityTs = now;
+      sessionPageCount++;
+    }
+  }
   if (pendingNavDirection) _pageEnter(pendingNavDirection);
   pendingNavDirection = null;
   // Comic pages always render at full-bleed fit-to-screen zoom on arrival — reset any
@@ -7636,6 +7682,8 @@ async function startStatsSession(bookId) {
     });
     statsSessionId = res?.id || null;
     sessionPageCount = 0;
+    lastContinuousActivityTs = 0;
+    sessionPageCountAtLastCheck = 0;
     sessionStartPct = currentPct > 0 ? currentPct : null;
     log('[stats] session started id:', statsSessionId);
   } catch (e) {
@@ -7651,6 +7699,8 @@ function endStatsSessionBackground() {
   const pct = currentPct > 0 ? currentPct : null;
   statsSessionId   = null;
   sessionPageCount = 0;
+  lastContinuousActivityTs = 0;
+  sessionPageCountAtLastCheck = 0;
   sessionStartPct  = null;
   const token = getToken();
   const headers = {
@@ -7674,6 +7724,8 @@ async function endStatsSession() {
   const pct = currentPct > 0 ? currentPct : null;
   statsSessionId   = null;
   sessionPageCount = 0;
+  lastContinuousActivityTs = 0;
+  sessionPageCountAtLastCheck = 0;
   sessionStartPct  = null;
   const body = { end_ts: Math.floor(Date.now() / 1000), pages_nav: pgs, end_pct: pct, start_pct: startPct };
   try {

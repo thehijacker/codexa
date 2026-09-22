@@ -25,6 +25,7 @@
 // matches against all three rather than assuming one.
 const { getDb } = require('../db');
 const bookorbit = require('../services/bookorbitSync');
+const { logCompletion } = require('./completions');
 
 const FINISHED_THRESHOLD = 0.95;
 const RESUME_THRESHOLD   = 0.85;
@@ -38,13 +39,14 @@ function maybeMarkBookFinished(userId, documentHash) {
   if (!progress) return;
 
   const book = db.prepare(
-    'SELECT id, read_status FROM books WHERE user_id = ? AND (file_hash = ? OR file_hash_md5 = ? OR kosync_hash = ?) LIMIT 1'
+    'SELECT id, title, author, read_status FROM books WHERE user_id = ? AND (file_hash = ? OR file_hash_md5 = ? OR kosync_hash = ?) LIMIT 1'
   ).get(userId, documentHash, documentHash, documentHash);
   if (!book) return;
 
   if (progress.percentage >= FINISHED_THRESHOLD) {
     // Never override a status the user already set deliberately.
     if (book.read_status === 'read' || book.read_status === 'abandoned') return;
+    logCompletion(db, userId, book, documentHash);
     db.prepare(`UPDATE books SET read_status = 'read', status_modified = strftime('%s','now') WHERE id = ?`).run(book.id);
     bookorbit.triggerSync(userId, book.id);
     return;
@@ -58,4 +60,4 @@ function maybeMarkBookFinished(userId, documentHash) {
   }
 }
 
-module.exports = { maybeMarkBookFinished, FINISHED_THRESHOLD, RESUME_THRESHOLD };
+module.exports = { maybeMarkBookFinished, logCompletion, FINISHED_THRESHOLD, RESUME_THRESHOLD };

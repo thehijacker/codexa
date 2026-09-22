@@ -9,6 +9,7 @@ const { isCbrBuffer, convertCbrToCbz } = require('../utils/cbr');
 const { extractPdfMetadata, isPdfBuffer } = require('../utils/pdf');
 const { PEEK_TTL_SECONDS, peekFilePath, deletePeekRow } = require('../utils/peekCleanup');
 const bookorbit = require('../services/bookorbitSync');
+const { logCompletion } = require('../utils/completions');
 
 // Aligned with BookOrbit's ReadStatus vocabulary so values sync 1:1.
 const VALID_READ_STATUS = ['', 'want_to_read', 'reading', 'read', 'abandoned'];
@@ -86,8 +87,9 @@ router.put('/:id/read-status', (req, res) => {
   const { status } = req.body || {};
   if (!VALID_READ_STATUS.includes(status)) return res.status(400).json({ error: 'error.invalid_status' });
   const db   = getDb();
-  const book = db.prepare('SELECT id FROM books WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+  const book = db.prepare('SELECT id, title, author, file_hash, read_status FROM books WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
   if (!book) return res.status(404).json({ error: 'error.book_not_found' });
+  if (status === 'read') logCompletion(db, req.user.id, book, book.file_hash);
   db.prepare(`UPDATE books SET read_status = ?, status_modified = strftime('%s','now') WHERE id = ?`)
     .run(status, book.id);
   bookorbit.triggerSync(req.user.id, book.id);

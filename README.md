@@ -63,6 +63,7 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 ### Themes & Display
 - **7 reading themes** — Light, Sepia, Dark, Sepia Dark, Midnight, Nord, plus a fully **Custom** theme with free colour picking
 - **E-ink mode** — high-contrast black-and-white optimised for e-ink displays
+- **PDF paper inversion** — dark-mode toggle for rendered PDF pages that only remaps pure black/white pixels, leaving embedded photos and colour images untouched
 - **Display size** — one-tap UI scaling (Auto / Large / Larger / Largest) that works on phones, tablets, e-ink readers, **and desktop browsers**
 - **Custom fonts** — upload `.ttf/.otf/.woff/.woff2` fonts (admin); apply per-book
 - **Extensive text settings** — font, size, line height, letter spacing, paragraph indent, paragraph spacing, justification, hyphenation with per-language support
@@ -102,6 +103,7 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 - **Font management** — upload (with progress indicator) and delete custom fonts available to all users
 - **Dictionary management** — upload StarDict ZIP archives (with progress indicator), delete dictionaries
 - **Registration control** — enable or disable new-user sign-up
+- **Invitation links** — issue single-use sign-up links (valid 7 days) so specific people can register even while open registration is off; a pending-invitations list lets you revoke a link before it's used
 - **OIDC login** — optional single sign-on via Google, Apple, or a self-hosted provider (Dex, Authelia, Keycloak, ...), alongside local accounts — see [OIDC Login](#oidc-login-google-apple-self-hosted) below
 
 ### Internationalisation
