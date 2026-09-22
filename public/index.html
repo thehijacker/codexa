@@ -248,6 +248,29 @@
 
         <hr class="section-divider" style="margin-top:1.25rem">
 
+        <div style="font-size:.875rem;font-weight:600;margin-bottom:.25rem" data-i18n="settings.progress_thresholds_title">Auto-status thresholds</div>
+        <div class="settings-hint" style="margin-bottom:.75rem" data-i18n="settings.progress_thresholds_hint">Controls when a book's status automatically switches, based on your reading progress in it.</div>
+        <div class="form-group">
+          <label for="reading-start-pct" data-i18n="settings.progress_start_label">Mark as "Reading" at</label>
+          <div class="settings-pct-input">
+            <input type="number" id="reading-start-pct" min="0" max="100" step="1" />
+            <span>%</span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="reading-finish-pct" data-i18n="settings.progress_finish_label">Mark as "Read" at</label>
+          <div class="settings-pct-input">
+            <input type="number" id="reading-finish-pct" min="0" max="100" step="1" />
+            <span>%</span>
+          </div>
+        </div>
+        <div class="setting-toggle-hint" style="margin-bottom:.75rem" data-i18n="settings.progress_thresholds_footnote">Progress is weighted by content, not raw page count, so books with a lot of back matter (acknowledgments, author's notes, previews) may reach a high percentage before the story itself ends — lower the finish threshold if a book gets marked "Read" too early.</div>
+        <div class="card-actions">
+          <button id="btn-save-progress-thresholds" class="btn btn-primary btn-sm" data-i18n="settings.progress_thresholds_save_btn">Save thresholds</button>
+        </div>
+
+        <hr class="section-divider" style="margin-top:1.25rem">
+
         <div style="font-size:.875rem;font-weight:600;margin-bottom:.75rem" data-i18n="settings.email_title">E-pošta</div>
         <div class="form-group">
           <label for="account-email" data-i18n="settings.email_label">E-poštni naslov</label>

@@ -545,16 +545,31 @@ async function syncBookState(userId, ctx, m, state) {
   const wm = state.state_watermark || 0;
 
   if ((b.status_modified || 0) > wm) {
+    // Both pushes' results are checked before advancing the watermark — previously this ran
+    // fire-and-forget (api() never throws, it resolves {ok:false,...} on failure) and advanced
+    // the watermark unconditionally right after, so a rejected/ignored push (BookOrbit down for
+    // that request, a validation error, a transient 5xx) would look locally identical to a
+    // successful one: Codexa believed it synced, never retried, and the two sides stayed silently
+    // out of sync forever. Confirmed as the likely explanation for a report of a book Codexa
+    // marked 'read' staying 'Reading' in BookOrbit indefinitely.
+    let pushOk = true;
     if (b.read_status && VALID_STATUS.includes(b.read_status)) {
-      await api(userId, ctx, 'PATCH', `/books/${m.boBookId}/status`, { status: b.read_status });
+      const res = await api(userId, ctx, 'PATCH', `/books/${m.boBookId}/status`, { status: b.read_status });
+      if (!res.ok) pushOk = false;
     } else if (!b.read_status) {
-      await api(userId, ctx, 'PATCH', `/books/${m.boBookId}/status`, { status: 'unread' });
+      const res = await api(userId, ctx, 'PATCH', `/books/${m.boBookId}/status`, { status: 'unread' });
+      if (!res.ok) pushOk = false;
     }
     if (b.rating != null) {
-      await api(userId, ctx, 'POST', '/books/bulk-set-rating', { bookIds: [m.boBookId], rating: b.rating });
+      const res = await api(userId, ctx, 'POST', '/books/bulk-set-rating', { bookIds: [m.boBookId], rating: b.rating });
+      if (!res.ok) pushOk = false;
     }
-    db.prepare('UPDATE bookorbit_sync_state SET state_watermark = ? WHERE user_id = ? AND book_id = ?')
-      .run(b.status_modified, userId, m.bookId);
+    if (pushOk) {
+      db.prepare('UPDATE bookorbit_sync_state SET state_watermark = ? WHERE user_id = ? AND book_id = ?')
+        .run(b.status_modified, userId, m.bookId);
+    }
+    // else: leave the watermark alone — status_modified will still be > wm next run, so this
+    // retries automatically instead of silently drifting.
   } else if (!b.read_status && b.rating == null) {
     // Local never set — adopt BookOrbit's value once.
     const res = await api(userId, ctx, 'GET', `/books/${m.boBookId}`);

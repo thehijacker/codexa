@@ -95,6 +95,7 @@ Codexa is a self-hosted EPUB and comic book reader with multi-user support, full
 - **BookOrbit collection/smart scope sync** — link a shelf to a BookOrbit collection or smart scope for one-click resync, same as OPDS shelf sync
 - **Related books** — "Similar books," "More by author," and "More in series" recommendations powered by a connected BookOrbit server, shown in both the local book info modal and the BookOrbit library's own book detail modal
 - **Reading statistics** — time read, pages turned, sessions, books started/finished, per-book history
+- **Configurable auto-status thresholds** — per-account percentages for when a book's status auto-switches to "Reading" and to "Read" (Settings → General), since reading progress is weighted by content rather than raw page count and a fixed 95% can land early on books with a lot of back matter
 - **Series support** — series name, number, and one-click series filter
 - **Sort & search** — sort by date, title, author, progress, or series; real-time library search
 

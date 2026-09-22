@@ -304,6 +304,15 @@ function initDb() {
     // configured keep working unchanged after this migration; kosync_url itself being empty
     // already gates the feature off regardless of this flag.
     [`ALTER TABLE user_settings   ADD COLUMN kosync_external_enabled INTEGER DEFAULT 1`,        'user_settings.kosync_external_enabled'],
+    // User-configurable replacements for the hardcoded thresholds maybeMarkBookFinished() used
+    // to apply to everyone alike (see server/utils/bookCompletion.js). Both are 0-1 fractions,
+    // same convention as reading_progress.percentage. Defaults preserve prior behavior exactly:
+    // reading_finish_pct=0.95 matches the old FINISHED_THRESHOLD constant; reading_start_pct=0
+    // means "any progress at all" marks a book 'reading', which is what the UI already implied
+    // (library.js's isCurrentlyReading() has always treated percentage>0 as "reading" for shelf
+    // membership) even though read_status itself was never actually set until now.
+    [`ALTER TABLE user_settings   ADD COLUMN reading_start_pct       REAL    DEFAULT 0`,        'user_settings.reading_start_pct'],
+    [`ALTER TABLE user_settings   ADD COLUMN reading_finish_pct      REAL    DEFAULT 0.95`,      'user_settings.reading_finish_pct'],
   ];
   for (const [sql, label] of migrations) {
     try {

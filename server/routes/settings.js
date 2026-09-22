@@ -44,6 +44,8 @@ router.get('/', (req, res) => {
     bookorbit_account_username: row.bookorbit_account_username || '',
     has_bookorbit_account_password: (row.bookorbit_account_password_enc || '') !== '',
     reader_prefs:            JSON.parse(row.reader_prefs || '{}'),
+    reading_start_pct:       row.reading_start_pct  ?? 0,
+    reading_finish_pct:      row.reading_finish_pct ?? 0.95,
   });
 });
 
@@ -57,7 +59,23 @@ router.put('/', (req, res) => {
   const { opds_servers, kosync_url, kosync_username, kosync_password, kosync_internal_enabled,
           kosync_external_enabled,
           bookorbit_sync_enabled, bookorbit_url, bookorbit_account_username, bookorbit_account_password,
-          reader_prefs } = req.body;
+          reader_prefs, reading_start_pct, reading_finish_pct } = req.body;
+
+  // Both 0-1 fractions (same convention as reading_progress.percentage), consumed by
+  // maybeMarkBookFinished (server/utils/bookCompletion.js). Reject out-of-range or inverted
+  // values here rather than silently clamping — a wrong-order pair would otherwise (harmlessly,
+  // per that function's branch logic, but still surprisingly) just never mark anything "reading"
+  // before "read".
+  for (const [name, val] of [['reading_start_pct', reading_start_pct], ['reading_finish_pct', reading_finish_pct]]) {
+    if (val !== undefined && (typeof val !== 'number' || Number.isNaN(val) || val < 0 || val > 1)) {
+      return res.status(400).json({ error: 'error.invalid_threshold' });
+    }
+  }
+  const nextStartPct  = reading_start_pct  !== undefined ? reading_start_pct  : row.reading_start_pct;
+  const nextFinishPct = reading_finish_pct !== undefined ? reading_finish_pct : row.reading_finish_pct;
+  if (nextStartPct >= nextFinishPct) {
+    return res.status(400).json({ error: 'error.threshold_order' });
+  }
 
   // Only update fields that were explicitly provided
   const next = {
@@ -73,6 +91,8 @@ router.put('/', (req, res) => {
     bookorbit_account_username:     bookorbit_account_username !== undefined ? String(bookorbit_account_username) : row.bookorbit_account_username,
     bookorbit_account_password_enc: bookorbit_account_password !== undefined ? String(bookorbit_account_password) : row.bookorbit_account_password_enc,
     reader_prefs:            reader_prefs    !== undefined ? JSON.stringify(reader_prefs)    : row.reader_prefs,
+    reading_start_pct:       nextStartPct,
+    reading_finish_pct:      nextFinishPct,
   };
 
   db.prepare(`
@@ -87,7 +107,9 @@ router.put('/', (req, res) => {
            bookorbit_url                  = ?,
            bookorbit_account_username     = ?,
            bookorbit_account_password_enc = ?,
-           reader_prefs            = ?
+           reader_prefs            = ?,
+           reading_start_pct       = ?,
+           reading_finish_pct      = ?
      WHERE user_id = ?
   `).run(
     next.opds_servers,
@@ -101,6 +123,8 @@ router.put('/', (req, res) => {
     next.bookorbit_account_username,
     next.bookorbit_account_password_enc,
     next.reader_prefs,
+    next.reading_start_pct,
+    next.reading_finish_pct,
     req.user.id
   );
 

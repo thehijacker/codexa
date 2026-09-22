@@ -1,6 +1,6 @@
 {
   "name": "codexa",
-  "version": "20260922001-dev",
+  "version": "20260922002-dev",
   "description": "EPUB web reader with OPDS browsing and KOReader sync support",
   "main": "server/index.js",
   "engines": {

@@ -588,16 +588,18 @@ class MainActivity : AppCompatActivity() {
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        // Navigation bar stays hidden everywhere in the app, not just the reader — on
-        // library/BookOrbit/etc. pages it would otherwise sit on top of bottom-anchored UI
-        // (e.g. pagination controls), blocking taps underneath it. A swipe up from the
-        // bottom edge reveals it transiently on demand (BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE,
-        // set above, applies to both bars).
-        controller.hide(WindowInsetsCompat.Type.navigationBars())
+        // Both bars now follow the same reader/non-reader split (confirmed live regression:
+        // hiding the nav bar unconditionally on every screen, library included, meant reaching
+        // Home required a swipe-up first — reported friction for users with 3-button nav who
+        // don't use it as an immersive-reading gesture the way reader-mode swipe-reveal is meant
+        // to). Only the reader itself needs both bars hidden; library/BookOrbit/etc. keep the nav
+        // bar visible like status bar already did.
         if (enable) {
             controller.hide(WindowInsetsCompat.Type.statusBars())
+            controller.hide(WindowInsetsCompat.Type.navigationBars())
         } else {
             controller.show(WindowInsetsCompat.Type.statusBars())
+            controller.show(WindowInsetsCompat.Type.navigationBars())
         }
     }
 

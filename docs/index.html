@@ -1070,6 +1070,16 @@ staticPasswords:
           local storage.
         </li>
 <li>
+<strong>Auto-status thresholds:</strong> two percentages that control when a book's status
+          automatically switches — "Mark as Reading at" and "Mark as Read at" — defaulting to
+          0% and 95%. Reading progress is weighted by content rather than raw page count, so a
+          book with a lot of back matter (acknowledgments, author's notes, a preview of the next
+          book) can reach a high percentage before the story itself actually ends. If a book gets
+          marked "Read" too early, raise the finish threshold (e.g. to 98–99%); the two values
+          are per-account, apply to every book you read, and the finish threshold must always be
+          higher than the start threshold.
+        </li>
+<li>
 <strong>Email:</strong> optional. Lets you log in with your email as well as your
           username, and lets a matching verified OIDC login link to this account automatically.
           See <a data-scroll="login-email" data-section="first-login" href="#login-email">Setting Your Email</a>.

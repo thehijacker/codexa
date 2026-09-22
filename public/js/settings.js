@@ -51,6 +51,9 @@ const bookorbitAcctUsername  = document.getElementById('bookorbit-account-userna
 const bookorbitAcctPassword  = document.getElementById('bookorbit-account-password');
 const bookorbitStatus        = document.getElementById('bookorbit-status');
 const btnTestBookorbit       = document.getElementById('btn-test-bookorbit');
+const readingStartPct        = document.getElementById('reading-start-pct');
+const readingFinishPct       = document.getElementById('reading-finish-pct');
+const btnSaveProgressThresholds = document.getElementById('btn-save-progress-thresholds');
 
 // ── Load current settings ─────────────────────────────────────────────────────
 async function loadSettings() {
@@ -71,6 +74,10 @@ async function loadSettings() {
     bookorbitAcctPassword.placeholder = s.has_bookorbit_account_password
       ? t('settings.kosync_pass_saved') : t('settings.kosync_pass_ph');
     updateBookorbitGate(!!s.bookorbit_url && !!s.has_bookorbit_account_password);
+    // Stored server-side as a 0-1 fraction (same convention as reading_progress.percentage);
+    // shown here as a whole-number percentage, the more natural unit for this input.
+    if (readingStartPct)  readingStartPct.value  = Math.round((s.reading_start_pct  ?? 0)    * 100);
+    if (readingFinishPct) readingFinishPct.value = Math.round((s.reading_finish_pct ?? 0.95) * 100);
   } catch (err) {
     toast.error(t('settings.err_load', { msg: err.message }));
   }
@@ -825,6 +832,31 @@ btnSaveEmail?.addEventListener('click', async () => {
     toast.error(t('common.error_msg', { msg: err.message }));
   } finally {
     setButtonLoading(btnSaveEmail, false, t('settings.email_save_btn'));
+  }
+});
+
+btnSaveProgressThresholds?.addEventListener('click', async () => {
+  const startVal  = Number(readingStartPct.value);
+  const finishVal = Number(readingFinishPct.value);
+  if (!Number.isFinite(startVal) || !Number.isFinite(finishVal) || startVal < 0 || startVal > 100 || finishVal < 0 || finishVal > 100) {
+    toast.error(t('settings.progress_thresholds_invalid'));
+    return;
+  }
+  if (startVal >= finishVal) {
+    toast.error(t('settings.progress_thresholds_order'));
+    return;
+  }
+  setButtonLoading(btnSaveProgressThresholds, true, t('settings.btn_saving'));
+  try {
+    await apiFetch('/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ reading_start_pct: startVal / 100, reading_finish_pct: finishVal / 100 }),
+    });
+    toast.success(t('settings.progress_thresholds_saved'));
+  } catch (err) {
+    toast.error(t('common.error_msg', { msg: err.message }));
+  } finally {
+    setButtonLoading(btnSaveProgressThresholds, false, t('settings.progress_thresholds_save_btn'));
   }
 });
 
