@@ -2675,9 +2675,11 @@ html[data-lib-theme="eink"] .book-series-badge,
      in landscape, under the notch cutout on the left edge). Matches .app-sidebar's own
      unconditional top/left padding (~line 968-969): harmless on desktop/non-notched screens since
      --sat/--sal are 0px there. Shared by both OPDS and BookOrbit (BookOrbit reuses this exact
-     class), so this one rule fixes both panels' drawers. */
+     class), so this one rule fixes both panels' drawers. The bottom padding is for Android's nav
+     bar (shown outside the reader), which overlays the last server/sublist rows otherwise. */
   padding-top: var(--sat, env(safe-area-inset-top, 0px));
   padding-left: var(--sal, env(safe-area-inset-left, 0px));
+  padding-bottom: var(--sab, env(safe-area-inset-bottom, 0px));
 }
 .opds-sidebar-header {
   padding: .75rem 1rem; border-bottom: 1px solid var(--color-border);
@@ -2782,6 +2784,9 @@ html[data-lib-theme="eink"] .nav-tile-count,
   justify-content: center;
   gap: .75rem;
   padding: .5rem 1rem;
+  /* Android's system nav bar (now shown outside the reader) overlays the bottom of the WebView
+     edge-to-edge — --sab (injected by MainActivity.kt) keeps prev/next clear of it. */
+  padding-bottom: calc(.5rem + var(--sab, env(safe-area-inset-bottom, 0px)));
   border-top: 1px solid var(--color-border);
   flex-shrink: 0;
 }
@@ -2940,7 +2945,7 @@ html[data-lib-theme="eink"] .opds-card-series-badge,
   #catalog-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
   .nav-tile-grid { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
   .opds-toolbar { flex-wrap: wrap; gap: .35rem; }
-  #opds-pagination { flex-wrap: wrap; gap: .4rem; padding: .4rem .75rem; }
+  #opds-pagination { flex-wrap: wrap; gap: .4rem; padding: .4rem .75rem calc(.4rem + var(--sab, env(safe-area-inset-bottom, 0px))); }
 
   /* Off-canvas drawer for the server list + folder tree, replacing the old "always stacked
      above the catalog" layout — mirrors BookOrbit's panel (~line 2900). */
@@ -3138,6 +3143,7 @@ html[data-lib-theme="eink"] .bookorbit-card-series-badge,
 #bookorbit-pagination {
   display: flex; align-items: center; justify-content: center; gap: .75rem;
   padding: .5rem 1rem; border-top: 1px solid var(--color-border); flex-shrink: 0;
+  padding-bottom: calc(.5rem + var(--sab, env(safe-area-inset-bottom, 0px))); /* see #opds-pagination */
 }
 /* This is the actual bug: selectSection() sets paginationEl.hidden = true when switching
    sections, but this rule's own `display` (higher-specificity author rule) overrode the UA
@@ -3172,7 +3178,7 @@ html[data-lib-theme="eink"] .bookorbit-card-series-badge,
      a flex child defaults to min-width:auto and the compact 3-column layout overflows
      instead of shrinking, clipping the last card (mirrors #catalog-grid's fix above). */
   #bookorbit-grid { overflow: visible; min-width: 0; } /* column sizing comes from .book-grid/.density-* — see ~2647 */
-  #bookorbit-pagination { flex-wrap: wrap; gap: .4rem; padding: .4rem .75rem; }
+  #bookorbit-pagination { flex-wrap: wrap; gap: .4rem; padding: .4rem .75rem calc(.4rem + var(--sab, env(safe-area-inset-bottom, 0px))); }
 
   /* The sidebar (section nav + sublist) used to permanently stack above the grid, leaving only
      a sliver of screen for actual books. It's now an off-canvas drawer instead: hidden by

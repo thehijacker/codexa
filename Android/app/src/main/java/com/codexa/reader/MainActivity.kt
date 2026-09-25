@@ -554,7 +554,14 @@ class MainActivity : AppCompatActivity() {
                                     null
                                 )
                             }
-                            val nav = rootInsets.getInsets(WindowInsetsCompat.Type.navigationBars())
+                            // getInsetsIgnoringVisibility, not getInsets: setImmersiveMode(false) above
+                            // only *requests* the nav bar be shown, and that's asynchronous — read
+                            // via getInsets() right here it still reports 0 (the bar was hidden a
+                            // moment ago, on the reader page or the previous load), so --sab never
+                            // got set and bottom-anchored library UI (OPDS/BookOrbit prev/next
+                            // pagination) ended up underneath the bar. This reports the bar's size
+                            // regardless of its current visibility.
+                            val nav = rootInsets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.navigationBars())
                             if (nav.bottom > 0) {
                                 val v = String.format(java.util.Locale.ROOT, "%.2f", nav.bottom / density)
                                 view.evaluateJavascript(
