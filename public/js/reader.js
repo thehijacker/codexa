@@ -440,6 +440,16 @@ let _annotToolbarTimer = null; // guards against mouseup firing before dblclick 
 // continuous offline reading session produced zero recorded time — not queued, just gone.
 let sessionChunkStartTs = null;
 let sessionPageCount = 0;             // page navigation events in current session
+// Wall-clock time of the last sign of reading in the current chunk (a page turn / continuous-scroll
+// tick, or the chunk's start). A chunk's end is capped at this + SESSION_IDLE_SECS, and a page
+// turn after a longer gap first closes the old chunk there and starts a new one. Without it, a
+// device that sleeps with a book open (an e-reader at night: JS timers frozen, no visibilitychange
+// fired) kept the chunk open until the next morning or evening and closed it at "now" — confirmed
+// live: three ~24h "sessions" on one book, one per night it was left open, and the same shape for
+// other family members. The idle heartbeat (startPeriodicSync) can't catch this on its own, since
+// it doesn't run while the device is asleep.
+let sessionLastActivityTs = null;
+const SESSION_IDLE_SECS = 300; // longest plausible time on one page that still counts as reading
 let sessionStartPct = null;           // currentPct snapshot when the session started
 // Continuous-scroll mode never calls goNext/goPrev (see _cxRelocatedHandler below), so without
 // this, sessionPageCount would stay 0 all session long for a continuous-scroll reader — wrongly
@@ -6288,7 +6298,7 @@ function _cxSyncLayout() {
 
 function _cxRelocatedHandler(e) {
   // Continuous-scroll mode's position updates fire this same event on every scroll tick instead
-  // of going through goNext/goPrev (see those functions' own sessionPageCount++) — count it as
+  // of going through goNext/goPrev (see those functions' own noteReadingActivity()) — count it as
   // reading activity too, throttled so a rapid burst of scroll ticks doesn't inflate the count
   // far beyond paginated mode's one-tick-per-turn, and so a single momentary/involuntary scroll
   // can't alone satisfy the >=2 "real session" bar this feeds (server/routes/stats.js).
@@ -6296,7 +6306,7 @@ function _cxRelocatedHandler(e) {
     const now = Date.now();
     if (now - lastContinuousActivityTs >= CONTINUOUS_ACTIVITY_MIN_GAP_MS) {
       lastContinuousActivityTs = now;
-      sessionPageCount++;
+      noteReadingActivity();
     }
   }
   if (pendingNavDirection) _pageEnter(pendingNavDirection);
@@ -6892,7 +6902,7 @@ function _showTurnShadow(dir, dur) {
 function _cxSlideTurn(dir) {
   const pag  = _cxReader?._paginator;
   const body = _cxReader?.iframe?.contentDocument?.body;
-  sessionPageCount++;
+  noteReadingActivity();
   if (!pag || !body) { pendingNavDirection = dir; void _cxReader?.[dir]?.(); return; }
   // At a chapter edge the turn re-renders the iframe, so there's nothing to slide
   // in place — just advance and let the new chapter appear.
@@ -6999,7 +7009,7 @@ function _momEnd(x) {
   const ease = prefs.pageTurnAnim === 'momentum' ? 'cubic-bezier(.16,1,.3,1)' : 'cubic-bezier(.33,0,.25,1)';
   m.body.style.transition = `transform ${dur}ms ${ease}`;
   if (commit) {
-    sessionPageCount++;
+    noteReadingActivity();
     pendingNavDirection = null;                    // engine slide is the visual; no host _pageEnter
     void _cxReader[m.dir]();                        // animate from the dragged position to the target
   } else {
@@ -7049,7 +7059,7 @@ function goNext() {
   if (atBookEnd) { showBookFinishedOverlay(); return; }
   _pageExit('next');
   pendingNavDirection = 'next';
-  sessionPageCount++;
+  noteReadingActivity();
   void _cxReader.next();
 }
 function goPrev() {
@@ -7059,7 +7069,7 @@ function goPrev() {
   if (_useEngineSlide()) { _cxSlideTurn('prev'); return; }
   _pageExit('prev');
   pendingNavDirection = 'prev';
-  sessionPageCount++;
+  noteReadingActivity();
   void _cxReader.prev();
 }
 
@@ -7686,6 +7696,19 @@ async function flushSessionCheckpoints() {
   try { localStorage.setItem(SESSION_Q_KEY, JSON.stringify(remaining)); } catch { /* ignore */ }
 }
 
+// Counts one unit of reading (a page turn, or a throttled continuous-scroll tick) in the current
+// chunk. After a gap longer than SESSION_IDLE_SECS (device slept, book left open) it first closes
+// the old chunk — capped at its last activity by buildAndResetSessionRecord — and starts a new one,
+// so the reading after the gap is dated from when it actually resumed.
+function noteReadingActivity() {
+  const now = Math.floor(Date.now() / 1000);
+  if (sessionChunkStartTs && sessionLastActivityTs && now - sessionLastActivityTs > SESSION_IDLE_SECS) {
+    rotateStatsSession();
+  }
+  sessionPageCount++;
+  sessionLastActivityTs = now;
+}
+
 // Purely local — no network call, so unlike the old server-assigned session id this can never
 // fail to be set. The chunk it starts tracking only gets sent to the server once it's finished
 // (see buildSessionRecord + endStatsSession/endStatsSessionBackground below), which is what makes
@@ -7695,6 +7718,7 @@ async function flushSessionCheckpoints() {
 // continuous offline reading session recorded zero time — not queued anywhere, just gone.
 function startStatsSession(bookId) {
   sessionChunkStartTs = Math.floor(Date.now() / 1000);
+  sessionLastActivityTs = sessionChunkStartTs;
   sessionPageCount = 0;
   lastContinuousActivityTs = 0;
   sessionPageCountAtLastCheck = 0;
@@ -7707,16 +7731,20 @@ function startStatsSession(bookId) {
 // resulting record ever gets delivered.
 function buildAndResetSessionRecord() {
   if (!sessionChunkStartTs || !currentBook) return null;
+  const now = Math.floor(Date.now() / 1000);
+  // Time after the last sign of reading beyond SESSION_IDLE_SECS isn't reading (see sessionLastActivityTs).
+  const endTs = Math.min(now, (sessionLastActivityTs || sessionChunkStartTs) + SESSION_IDLE_SECS);
   const rec = {
     client_id:  `${currentBook.id}:${sessionChunkStartTs}:${Math.random().toString(36).slice(2, 10)}`,
     book_id:    currentBook.id,
     start_ts:   sessionChunkStartTs,
-    end_ts:     Math.floor(Date.now() / 1000),
+    end_ts:     endTs,
     pages_nav:  sessionPageCount,
     start_pct:  sessionStartPct,
     end_pct:    currentPct > 0 ? currentPct : null,
   };
   sessionChunkStartTs = null;
+  sessionLastActivityTs = null;
   sessionPageCount = 0;
   lastContinuousActivityTs = 0;
   sessionPageCountAtLastCheck = 0;
