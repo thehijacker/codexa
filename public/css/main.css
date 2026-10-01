@@ -1734,6 +1734,10 @@ html[data-lib-theme="eink"] .book-card-actions .cover-preview-btn .nav-icon,
 .imt-bo-sessions .imt-session-header,
 .imt-bo-sessions .imt-session-row { grid-template-columns: 1fr auto auto auto; }
 .imt-session-src { color: var(--color-text-muted); font-size: .78rem; white-space: nowrap; }
+/* Day subtotal closing each calendar day's sessions in the Reading tab tables */
+.imt-session-daytotal { background: var(--color-surface2); font-weight: 600; }
+.imt-session-daytotal .imt-session-date { color: var(--color-text-muted); font-size: .76rem; }
+.imt-session-daytotal .imt-session-pages { color: var(--color-text); }
 .imt-bo-sessions .imt-session-pages { min-width: 4rem; }
 .imt-bo-more { margin: .15rem 0 .5rem; }
 .imt-attempts .imt-session-row { grid-template-columns: 1fr auto; }

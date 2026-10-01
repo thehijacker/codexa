@@ -49,6 +49,46 @@ function progressCell(r) {
   return `${end} <span class="imt-session-time">${d > 0 ? '+' : '−'}${Math.round(Math.abs(d))}%</span>`;
 }
 
+// Splits a newest-first session list into calendar days (the reader's local day of each session's
+// start; a session running past midnight stays on the day it began), keeping the order. Shared with
+// the Codexa session table in library.js.
+export function groupByDay(rows, tsOf) {
+  const days = [];
+  for (const r of rows) {
+    const d = new Date(tsOf(r) * 1000);
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    const last = days[days.length - 1];
+    if (last && last.key === key) last.rows.push(r);
+    else days.push({ key, rows: [r] });
+  }
+  return days;
+}
+
+// "+12%" / "−3%" for a progress change in percentage points; '' when it rounds to nothing.
+export function fmtDeltaPct(d) {
+  if (d == null || Math.abs(d) < 0.5) return '';
+  return `${d > 0 ? '+' : '−'}${Math.round(Math.abs(d))}%`;
+}
+
+// The closing row of one day: session count, summed time, devices, the day's end position and gain.
+function dayTotalHtml(rows) {
+  const secs = rows.reduce((a, r) => a + (r.durationSeconds || 0), 0);
+  const srcs = [...new Set(rows.map(r => sourceLabel(r.source)))].join(', ');
+  const withEnd = rows.find(r => r.endProgress != null); // rows are newest first
+  const hasDelta = rows.some(r => r.progressDelta != null);
+  const delta = rows.reduce((a, r) => a + (r.progressDelta || 0), 0);
+  const end = withEnd ? `${Math.round(withEnd.endProgress)}%` : '';
+  const gain = hasDelta ? fmtDeltaPct(delta) : '';
+  const prog = end || gain ? `${end}${gain ? ` <span class="imt-session-time">${gain}</span>` : ''}` : '—';
+  return `
+    <div class="imt-session-row imt-session-daytotal">
+      <span class="imt-session-date">${t('library.session_day_total')}<span class="imt-session-time">${t('library.session_day_count', { n: rows.length })}</span></span>
+      <span class="imt-session-dur">${fmtDur(secs)}</span>
+      <span class="imt-session-src">${escHtml(srcs)}</span>
+      <span class="imt-session-pages">${prog}</span>
+    </div>`;
+}
+
 function rowHtml(r) {
   const range = r.endedAt ? `${fmtClock(r.startedAt)} – ${fmtClock(r.endedAt)}` : fmtClock(r.startedAt);
   return `
@@ -205,7 +245,10 @@ export async function mountBoSessions(el, load, { summary = true, insights = tru
           <span>${t('bookorbit.session_col_source')}</span>
           <span>${t('bookorbit.session_col_progress')}</span>
         </div>
-        ${items.map(rowHtml).join('')}
+        ${groupByDay(items, r => r.startedAt).map((day, i, days) =>
+          // The oldest loaded day may continue on the next page — no total until it's all here.
+          day.rows.map(rowHtml).join('') + (i === days.length - 1 && items.length < total ? '' : dayTotalHtml(day.rows))
+        ).join('')}
       </div>
       ${items.length < total ? `<button class="btn btn-secondary btn-sm imt-bo-more">${t('bookorbit.sessions_load_more')}</button>` : ''}`;
 

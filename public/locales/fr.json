@@ -234,6 +234,8 @@
   "library.session_col_date": "Date",
   "library.session_col_dur": "Durée",
   "library.session_col_pages": "Pages",
+  "library.session_day_total": "Total du jour",
+  "library.session_day_count": "Sessions : {n}",
   "library.session_pages_abbr": "p.",
   "library.kosync_computed_md5": "MD5 calculé",
   "library.kosync_override": "Remplacer",

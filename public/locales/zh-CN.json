@@ -234,6 +234,8 @@
   "library.session_col_date": "日期",
   "library.session_col_dur": "时长",
   "library.session_col_pages": "页数",
+  "library.session_day_total": "当日合计",
+  "library.session_day_count": "阅读次数：{n}",
   "library.session_pages_abbr": "页",
   "library.kosync_computed_md5": "计算的 MD5",
   "library.kosync_override": "覆盖",

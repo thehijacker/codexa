@@ -234,6 +234,8 @@
   "library.session_col_date": "Datum",
   "library.session_col_dur": "Dauer",
   "library.session_col_pages": "Seiten",
+  "library.session_day_total": "Tagessumme",
+  "library.session_day_count": "Sitzungen: {n}",
   "library.session_pages_abbr": "S.",
   "library.kosync_computed_md5": "Berechneter MD5",
   "library.kosync_override": "Überschreiben",

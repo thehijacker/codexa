@@ -208,14 +208,16 @@ router.get('/completions', (req, res) => {
   }));
 });
 
-// GET /api/stats/sessions/:bookId — per-book reading sessions (newest first, max 50)
+// GET /api/stats/sessions/:bookId — per-book reading sessions (newest first). The cap is generous on
+// purpose: the Reading tab sums these into its total and per-day totals, so a low cap (it was 50)
+// silently under-counted long books and could cut the oldest day in half.
 router.get('/sessions/:bookId', (req, res) => {
   const db   = getDb();
   const rows = db.prepare(`
-    SELECT start_ts, end_ts, pages_nav
+    SELECT start_ts, end_ts, pages_nav, start_pct, end_pct
     FROM reading_sessions
     WHERE user_id = ? AND book_id = ? AND ${REAL_SESSION}
-    ORDER BY start_ts DESC LIMIT 50
+    ORDER BY start_ts DESC LIMIT 1000
   `).all(req.user.id, req.params.bookId);
   res.json(rows);
 });

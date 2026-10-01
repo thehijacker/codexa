@@ -234,6 +234,8 @@
   "library.session_col_date": "Datum",
   "library.session_col_dur": "Trajanje",
   "library.session_col_pages": "Strani",
+  "library.session_day_total": "Skupaj za dan",
+  "library.session_day_count": "Sej: {n}",
   "library.session_pages_abbr": "str.",
   "library.kosync_computed_md5": "Izračunani MD5",
   "library.kosync_override": "Prepiši",

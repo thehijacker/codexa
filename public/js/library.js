@@ -2,7 +2,7 @@ import { apiFetch } from './api.js';
 import { toast, confirmDialog, setButtonLoading, showProgressToast, initSortMenuFor, resyncSortMenu } from './ui.js';
 import { reloadShelves, getShelves, setActive, updateDownloadedCount, updateNavCounts, setShelfBadge, setBookorbitNavVisible } from './sidebar.js';
 import { t } from './i18n.js';
-import { mountBoSessions, fmtOn } from './bookorbitSessions.js';
+import { mountBoSessions, fmtOn, groupByDay, fmtDeltaPct } from './bookorbitSessions.js';
 import { showPanel } from './router.js';
 import { openSyncModal, openOpdsBrowserAtFolder } from './opds.js';
 import { renderPdfCoverBlobFromBytes, uploadPdfCover } from './pdf-cover.js';
@@ -1255,6 +1255,23 @@ export async function openInfoModal(book, startTab = '') {
 
       const totalSecs = sessions.reduce((s, r) => s + ((r.end_ts || 0) - (r.start_ts || 0)), 0);
 
+      // Closing row of one day in Codexa's session table: count, summed time and pages, and how far
+      // the book moved that day (newest session's end minus oldest session's start — rows are newest
+      // first; a jump via the TOC between sessions counts, same as BookOrbit's per-day view).
+      const localDayTotalHtml = rows => {
+        const secs  = rows.reduce((a, r) => a + ((r.end_ts || r.start_ts) - r.start_ts), 0);
+        const pages = rows.reduce((a, r) => a + (r.pages_nav || 0), 0);
+        const last = rows.find(r => r.end_pct != null);
+        const first = rows.slice().reverse().find(r => r.start_pct != null);
+        const gain = last && first ? fmtDeltaPct((last.end_pct - first.start_pct) * 100) : '';
+        return `
+              <div class="imt-session-row imt-session-daytotal">
+                <span class="imt-session-date">${t('library.session_day_total')}<span class="imt-session-time">${t('library.session_day_count', { n: rows.length })}</span></span>
+                <span class="imt-session-dur">${fmtTime(secs)}</span>
+                <span class="imt-session-pages">${pages ? `${pages} ${t('library.session_pages_abbr')}` : '—'}${gain ? `<span class="imt-session-time">${gain}</span>` : ''}</span>
+              </div>`;
+      };
+
       // BookOrbit's totals cover every device/reader on the account (KOReader, Kobo, its own web
       // reader, ...) and already include the sessions Codexa pushed — shown as its own block, not
       // merged into Codexa's list below.
@@ -1309,12 +1326,12 @@ export async function openInfoModal(book, startTab = '') {
               <span>${t('library.session_col_dur')}</span>
               <span>${t('library.session_col_pages')}</span>
             </div>
-            ${sessions.map(r => `
+            ${groupByDay(sessions, r => r.start_ts).map(day => day.rows.map(r => `
               <div class="imt-session-row">
                 <span class="imt-session-date">${fmtDate(r.start_ts)}<span class="imt-session-time">${fmtClock(r.start_ts)} – ${fmtClock(r.end_ts)}</span></span>
                 <span class="imt-session-dur">${fmtTime((r.end_ts || r.start_ts) - r.start_ts)}</span>
                 <span class="imt-session-pages">${r.pages_nav ? `${r.pages_nav} ${t('library.session_pages_abbr')}` : '—'}</span>
-              </div>`).join('')}
+              </div>`).join('') + localDayTotalHtml(day.rows)).join('')}
           </div>`
           : `<div class="imt-empty">${t('library.reading_no_sessions')}</div>`}`;
 
