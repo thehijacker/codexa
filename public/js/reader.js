@@ -5820,7 +5820,8 @@ async function pushRemoteProgress(docKey, xpointer, pct) {
     if (r?.pushed)           _kosyncPushFailures = 0;
     else if (r?.status !== 404) _trackKosyncFailure(r?.status || 0);
     // 404 = book not in external server's library — expected, not a config error
-  } catch { _kosyncPushFailures = 0; }
+    return true; // reached Codexa's server (the manual sync button's toast only needs that)
+  } catch { _kosyncPushFailures = 0; return false; }
 }
 
 function _trackKosyncFailure(status) {
@@ -5840,7 +5841,7 @@ function pushInternalProgress(docKey, xpointer, pct, force = false) {
     method: 'PUT',
     keepalive: true, // see pushRemoteProgress's comment — same mid-session-suspend risk
     body: JSON.stringify({ progress: xpointer, percentage: pct, device: 'Codexa', device_id: 'codexa-web' }),
-  }).catch(() => {});
+  }).then(() => true, () => false);
 }
 
 // The BookOrbit progress push triggered server-side by the kosync-internal PUT above is
@@ -5936,7 +5937,10 @@ function scheduleDebouncedSync() {
   }, SYNC_DEBOUNCE_MS);
 }
 
-async function saveProgress({ forceRemote = false, allowRemote = true, inSession = false, forced = false, forceLocal = false } = {}) {
+// Resolves to { ok } when it actually sent something — ok is true if at least one of the saves (Codexa,
+// remote KOSync, internal KOSync) reached its server — or undefined when there was nothing to save.
+// `manual` = the user pressed the sync button: always surface the BookOrbit reachability check.
+async function saveProgress({ forceRemote = false, allowRemote = true, inSession = false, forced = false, forceLocal = false, manual = false } = {}) {
   if (!currentBook || !isReady) return;
   if (isPeekMode) return;
   const cfi = currentCfi || '';
@@ -5977,22 +5981,25 @@ async function saveProgress({ forceRemote = false, allowRemote = true, inSession
       }
       // Online save reached the server — drop any queued offline position for this book.
       clearProgress(currentBook.id);
+      return true;
     }).catch(() => {
       // Offline / unreachable — queue this position so it syncs (incl. KOSync) on reconnect.
       if (pct > 0) queueProgress({ bookId: currentBook.id, fileHash: currentBook.file_hash, cfi, pct, xpointer: koReaderXPointer() });
+      return false;
     }),
   ];
   if (shouldPushKosync) {
     saves.push(pushRemoteProgress(docKey, koReaderXPointer(), pct));
     saves.push(pushInternalProgress(docKey, koReaderXPointer(), pct, forced));
   }
-  await Promise.allSettled(saves);
+  const results = await Promise.allSettled(saves);
   if (shouldPushKosync) {
     lastSyncedCfi = cfi; // record what we just synced
     bestKnownRemotePct = pct; // update high-water mark (may go down if user confirmed backwards)
     bestKnownRemoteSpineIdx = currentSpineIndex; // this push is our own live position — always exact
-    checkBookorbitStatus();
+    checkBookorbitStatus({ always: manual });
   }
+  return { ok: results.some(r => r.status === 'fulfilled' && r.value === true) };
 }
 
 // Fire-and-forget version used when navigating away — uses keepalive:true so
@@ -8404,8 +8411,11 @@ document.getElementById('btn-sync')?.addEventListener('click', async () => {
   btn.classList.add('btn-sync-busy');
   btn.disabled = true;
   try {
-    await saveProgress({ forceRemote: true, inSession: true, forced: true });
+    const res = await saveProgress({ forceRemote: true, inSession: true, forced: true, manual: true });
     cancelDebouncedSync();
+    // Same feedback as the corner-tap push (#kosync-zone-br).
+    if (res && !res.ok) toast.error(t('reader.kosync_push_error'));
+    else if (res) toast.success(t('reader.kosync_push_done', { pct: Math.round(pct * 100) }));
     // Checkpoint the reading session here too — same rationale as the corner-tap push and the
     // automatic rotation on visibilitychange→hidden (see rotateStatsSession).
     rotateStatsSession();
