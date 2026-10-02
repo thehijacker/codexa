@@ -182,7 +182,17 @@ function progressChart(points) {
     </svg></div>`;
 }
 
-// Minutes read on each day that had any reading (most recent 45), one bar per day.
+// Minutes read on each day that had any reading (most recent 45), one bar per day — days without
+// reading are left out, so bars are evenly spaced but not a continuous calendar. A scale on the left
+// (the top label used to be the raw maximum, e.g. "101.5m", and got clipped to "01.5m"), and tapping
+// a bar — the whole column is the touch target, bars alone are too thin on a phone — shows that
+// day's date and time in the line below; the most recent day is selected to start with.
+const fmtMinutes = (m) => fmtDur(Math.round(m * 60));
+const axisLabel = (m) => (m >= 60 ? (m % 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m / 60}h`) : `${m}m`);
+function dayInfo(d) {
+  const date = d.d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  return `<strong>${escHtml(date)}</strong> · ${escHtml(fmtMinutes(d.m))}`;
+}
 function dailyChart(days) {
   const ds = (days || [])
     .map(d => ({ d: localDate(d.day), m: Number(d.totalMinutes) || 0 }))
@@ -190,23 +200,57 @@ function dailyChart(days) {
     .sort((a, b) => a.d - b.d)
     .slice(-45);
   if (ds.length < 2) return '';
-  const W = 300, H = 90, L = 28, R = 8, T = 8, B = 18;
+  const W = 300, H = 100, L = 38, R = 8, T = 8, B = 18;
   const max = Math.max(1, ...ds.map(d => d.m));
+  // Round step so the scale ends just above the longest day with at most 4 gridlines.
+  const step = [5, 10, 15, 30, 60, 90, 120, 180, 240].find(st => max / st <= 4) || Math.ceil(max / 4 / 60) * 60;
+  const top = Math.ceil(max / step) * step;
+  const Y = m => H - B - (m / top) * (H - T - B);
+  const ticks = [];
+  for (let v = step; v <= top; v += step) ticks.push(v);
+  const grid = ticks.map(v =>
+    `<line class="gr gr-dash" x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/><text x="${L - 4}" y="${(Y(v) + 3).toFixed(1)}" text-anchor="end">${axisLabel(v)}</text>`).join('');
   const slot = (W - L - R) / ds.length;
   const bw = Math.max(2, slot * 0.7);
+  const last = ds.length - 1;
+  // Hit columns first (underneath, so a focus tint never hides a bar); bars ignore the pointer.
+  const hits = ds.map((d, i) =>
+    `<rect class="hit" data-i="${i}" tabindex="0" x="${(L + i * slot).toFixed(1)}" y="${T}" width="${slot.toFixed(1)}" height="${H - T - B}"><title>${escHtml(d.d.toLocaleDateString())} · ${escHtml(fmtMinutes(d.m))}</title></rect>`).join('');
   const bars = ds.map((d, i) => {
-    const h = (d.m / max) * (H - T - B);
-    return `<rect class="bar" x="${(L + i * slot + (slot - bw) / 2).toFixed(1)}" y="${(H - B - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}"><title>${escHtml(d.d.toLocaleDateString())} · ${d.m} min</title></rect>`;
+    const h = (d.m / top) * (H - T - B);
+    return `<rect class="bar${i === last ? ' sel' : ''}" data-i="${i}" x="${(L + i * slot + (slot - bw) / 2).toFixed(1)}" y="${(H - B - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}"/>`;
   }).join('');
   return `
     <div class="imt-reading-summary" style="margin-top:.6rem">${t('bookorbit.chart_daily')}</div>
-    <div class="imt-bo-chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${escHtml(t('bookorbit.chart_daily'))}">
+    <div class="imt-bo-chart imt-bo-daily" data-days="${escHtml(JSON.stringify(ds.map(d => [d.d.getTime(), d.m])))}"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${escHtml(t('bookorbit.chart_daily'))}">
+      ${hits}${grid}
       <line class="gr" x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}"/>
-      <text x="${L - 4}" y="${T + 3}" text-anchor="end">${max}m</text>
+      <text x="${L - 4}" y="${H - B + 3}" text-anchor="end">0</text>
       ${bars}
       <text x="${L}" y="${H - 4}">${escHtml(fmtShort(ds[0].d))}</text>
-      <text x="${W - R}" y="${H - 4}" text-anchor="end">${escHtml(fmtShort(ds[ds.length - 1].d))}</text>
-    </svg></div>`;
+      <text x="${W - R}" y="${H - 4}" text-anchor="end">${escHtml(fmtShort(ds[last].d))}</text>
+    </svg>
+    <div class="imt-bo-chart-info" aria-live="polite">${dayInfo(ds[last])}</div></div>`;
+}
+
+// Tap / click / Enter on a day column of the minutes-per-day chart → select it and show its details.
+function wireDailyChart(root) {
+  const box = root.querySelector('.imt-bo-daily');
+  if (!box) return;
+  let ds;
+  try { ds = JSON.parse(box.dataset.days).map(([ms, m]) => ({ d: new Date(ms), m })); } catch { return; }
+  const info = box.querySelector('.imt-bo-chart-info');
+  const select = (target) => {
+    const hit = target && target.closest ? target.closest('.hit') : null;
+    if (!hit) return;
+    const i = Number(hit.getAttribute('data-i'));
+    if (!ds[i]) return;
+    box.querySelectorAll('.bar.sel').forEach(b => b.classList.remove('sel'));
+    box.querySelector(`.bar[data-i="${i}"]`)?.classList.add('sel');
+    info.innerHTML = dayInfo(ds[i]);
+  };
+  box.addEventListener('click', e => select(e.target));
+  box.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(e.target); } });
 }
 
 function insightsHtml(stats) {
@@ -234,6 +278,7 @@ export async function mountBoSessions(el, load, { summary = true, insights = tru
     const head = `${summary ? summaryHtml(stats) : ''}${attemptsHtml(readThroughs)}${insights ? insightsHtml(stats) : ''}`;
     if (!items.length) {
       el.innerHTML = `${head}<div class="imt-empty">${t('bookorbit.sessions_empty')}</div>`;
+      wireDailyChart(el);
       return;
     }
     el.innerHTML = `
@@ -252,6 +297,7 @@ export async function mountBoSessions(el, load, { summary = true, insights = tru
       </div>
       ${items.length < total ? `<button class="btn btn-secondary btn-sm imt-bo-more">${t('bookorbit.sessions_load_more')}</button>` : ''}`;
 
+    wireDailyChart(el);
     el.querySelector('.imt-bo-more')?.addEventListener('click', async (e) => {
       const btn = e.currentTarget;
       setButtonLoading(btn, true, t('opds.loading'));

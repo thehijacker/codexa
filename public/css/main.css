@@ -1749,6 +1749,15 @@ html[data-lib-theme="eink"] .book-card-actions .cover-preview-btn .nav-icon,
 .imt-bo-chart .ln  { stroke: var(--color-accent); stroke-width: 2; fill: none; stroke-linejoin: round; }
 .imt-bo-chart .dt  { fill: var(--color-accent); }
 .imt-bo-chart .bar { fill: var(--color-accent); opacity: .85; }
+.imt-bo-chart .gr-dash { stroke-dasharray: 2 3; }
+/* Minutes-per-day chart: whole day column is the tap target; selected day full strength */
+.imt-bo-daily .bar { opacity: .55; pointer-events: none; }
+.imt-bo-daily .gr, .imt-bo-daily text { pointer-events: none; }
+.imt-bo-daily .bar.sel { opacity: 1; }
+.imt-bo-daily .hit { fill: transparent; pointer-events: all; cursor: pointer; outline: none; }
+.imt-bo-daily .hit:focus { fill: var(--color-surface2); }
+.imt-bo-chart-info { font-size: .8rem; color: var(--color-text-muted); text-align: center; min-height: 1.2em; margin-top: .15rem; }
+.imt-bo-chart-info strong { color: var(--color-text); }
 .bod-bars .bar { opacity: .5; }
 .bod-bars .bar.hl { opacity: 1; }
 .imt-bo-chart .ln.tgt { stroke: var(--color-text-muted); stroke-dasharray: 4 3; stroke-width: 1.5; }
