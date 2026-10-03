@@ -438,6 +438,14 @@ class MainActivity : AppCompatActivity() {
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                     return true
                 }
+                // This callback also fires for sub-frame navigations, including non-HTTP(S)
+                // schemes — notably the reader's chapter iframe, which is navigated to a blob:
+                // URL (cxreader/renderer.js). Everything below either reroutes the navigation
+                // to the system browser or re-issues it via view.loadUrl(), which always loads
+                // into the MAIN frame — so with custom headers configured, the chapter blob
+                // replaced reader.html itself (one long unpaginated page, no reader chrome).
+                // Sub-frames are never ours to redirect: let the WebView load them in place.
+                if (!request.isForMainFrame) return false
                 // Any navigation to a host other than the configured Codexa server
                 // (e.g. a "View on BookOrbit" link) should open in the system browser
                 // instead of loading inside this app's WebView — UNLESS it's part of an
@@ -479,8 +487,11 @@ class MainActivity : AppCompatActivity() {
                 // recursion: this callback only fires for renderer-initiated navigations,
                 // never for loadUrl() calls the app makes itself — the same asymmetry the
                 // mailto/tel and cross-host branches above already rely on.
+                // Only http(s): blob:/data:/about: URLs have no host (so they slip past the
+                // cross-host check above) and carry no HTTP request to attach headers to anyway.
                 val headers = getCustomHeaders()
-                if (headers.isNotEmpty()) {
+                val scheme = request.url.scheme?.lowercase()
+                if (headers.isNotEmpty() && (scheme == "http" || scheme == "https")) {
                     view.loadUrl(url, headers)
                     return true
                 }
