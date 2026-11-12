@@ -336,6 +336,8 @@ as you close the reader.
 
 Add your server URL in **Settings → BookOrbit** to enable the native library browser (libraries, smart scopes, collections, series, authors) and, optionally, two-way sync of highlights, reading sessions, reading progress, and status/rating. Requires BookOrbit **v2.1.0 or higher**.
 
+Smart-scope shelf sync uses BookOrbit's authenticated book-query API, rather than the App Attest-protected smart-scope GET endpoint. Other APIs protected by App Attest may still be unavailable to Codexa.
+
 Once extended sync is on, two more things become available:
 - **BookOrbit Dash** — a sidebar panel with account-wide reading stats: reading streak, an editable yearly reading goal, currently-reading shelf, library overview, and a daily highlight from your synced annotations. These use BookOrbit's own reading-session and dashboard APIs — since Codexa already reports reading sessions to BookOrbit as part of extended sync, the numbers reflect real activity from the moment sync is turned on.
 - **Related books** — a "Related" tab (Similar books / More by author / More in series) on book detail views, both for your own library and while browsing BookOrbit's catalogue. Powered by BookOrbit's recommendation engine — books with too little reading/rating history may show fewer or no results, and a very old BookOrbit server without these APIs will simply show an empty tab.

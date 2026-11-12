@@ -14,6 +14,7 @@ const { isCbrBuffer, convertCbrToCbz } = require('../utils/cbr');
 const { isPdfBuffer, extractPdfMetadata } = require('../utils/pdf');
 const { peekFilePath, PEEK_TTL_SECONDS } = require('../utils/peekCleanup');
 const bookorbit = require('../services/bookorbitSync');
+const { bookOrbitListPath, fetchAllBookOrbitBooks } = require('../services/bookorbitListing');
 
 const router     = express.Router();
 const BOOKS_DIR  = path.join(DATA_DIR, 'books');
@@ -738,30 +739,6 @@ router.post('/books/:boBookId/peek', async (req, res) => {
 // BookOrbit origin. No staleness detection (books removed from the collection upstream aren't
 // pruned from the shelf) — a reasonable first cut, same simplification called out in the plan.
 
-function bookOrbitListPath(source, id) {
-  if (source === 'collection') return `/collections/${id}/books`;
-  if (source === 'smartScope') return `/smart-scopes/${id}/books`;
-  return null;
-}
-
-// Fetch every book in a collection/smart-scope across all pages (BookOrbit paginates at 100/page).
-async function fetchAllBookOrbitBooks(userId, ctx, source, id) {
-  const boPath = bookOrbitListPath(source, id);
-  if (!boPath) return [];
-  const all = [];
-  let page = 0;
-  const size = 100;
-  for (;;) {
-    const r = await bookorbit.api(userId, ctx, 'GET', `${boPath}?${new URLSearchParams({ page: String(page), size: String(size) })}`);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const items = Array.isArray(r.data?.items) ? r.data.items : [];
-    all.push(...items);
-    if (items.length < size) break;
-    page++;
-  }
-  return all;
-}
-
 // GET /api/bookorbit/sync-count?source=collection|smartScope&id= — preflight counts for the
 // sync modal (total books vs. already owned), same purpose as GET /api/opds/sync-count.
 router.get('/sync-count', async (req, res) => {
@@ -771,7 +748,7 @@ router.get('/sync-count', async (req, res) => {
   if (!id || !bookOrbitListPath(source, id)) return res.status(400).json({ error: 'error.invalid_source' });
 
   try {
-    const books = await fetchAllBookOrbitBooks(req.user.id, ctx, source, id);
+    const books = await fetchAllBookOrbitBooks(bookorbit.api, req.user.id, ctx, source, id);
     const boIds = books.map(b => b.id).filter(Boolean);
     let alreadyHave = 0;
     if (boIds.length) {
@@ -815,7 +792,7 @@ router.get('/sync-sse', async (req, res) => {
   if (!req.query.shelfId && (!shelfName || !String(shelfName).trim())) return done({ type: 'error', message: 'error.shelf_name_required' });
 
   try {
-    const allBooks = await fetchAllBookOrbitBooks(req.user.id, ctx, source, id);
+    const allBooks = await fetchAllBookOrbitBooks(bookorbit.api, req.user.id, ctx, source, id);
     const books = (limitParam && limitParam > 0) ? allBooks.slice(0, limitParam) : allBooks;
     if (!books.length) return done({ type: 'done', added: 0, skipped: 0, errors: 0, shelfId: null });
 
