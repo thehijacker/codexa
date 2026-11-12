@@ -22,6 +22,7 @@ const { getDb }             = require('../db');
 const { isRegistrationEnabled } = require('./auth');
 const { authenticateToken } = require('../middleware/auth');
 const { maybeMarkBookFinished } = require('../utils/bookCompletion');
+const { describeKOSyncError } = require('../utils/kosyncError');
 const bookorbit             = require('../services/bookorbitSync');
 
 // ── Basic Auth helper ─────────────────────────────────────────────────────────
@@ -286,6 +287,11 @@ proxyRouter.put('/remote/:document', async (req, res) => {
       signal: AbortSignal.timeout(5000),
     });
     console.log('[kosync] remote PUT response:', r.status);
+    if (!r.ok) {
+      const key = crypto.createHash('md5').update(String(s.kosync_password_enc)).digest('hex');
+      const detail = await describeKOSyncError(r, [s.kosync_username, s.kosync_password_enc, key]);
+      console.warn(`[kosync] remote PUT failed: HTTP ${r.status} ${detail}`);
+    }
     res.json({ pushed: r.ok, status: r.status });
   } catch (err) {
     console.warn('[kosync] push to external failed:', err.message);
